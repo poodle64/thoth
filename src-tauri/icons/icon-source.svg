@@ -1,0 +1,22 @@
+<!--
+  Thoth App Icon — Source Reference
+
+  The production icons (icon.png, icon.icns, icon.ico, tray-*.png)
+  are generated from the Unicode Egyptian Hieroglyph 𓅝 (U+1315D)
+  using the Noto Sans Egyptian Hieroglyphs font via Pillow.
+
+  Regenerate with: generate_all_icons.py (see /tmp/ or project scripts)
+
+  Design:
+  - App icon: Scribe's Amber (#D08B3E) glyph on Papyrus Dark (#1C1B1A)
+  - Tray idle: black glyph on transparent (template icon, macOS tints)
+  - Tray recording: amber glyph on transparent
+  - Favicon: same as app icon, scaled to 32x32
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" rx="192" fill="#1C1B1A"/>
+  <rect x="32" y="32" width="960" height="960" rx="160" fill="none" stroke="#363330" stroke-width="2"/>
+  <!-- Rendered via Noto Sans Egyptian Hieroglyphs at runtime -->
+  <text x="512" y="560" text-anchor="middle" dominant-baseline="central"
+        font-family="Noto Sans Egyptian Hieroglyphs" font-size="680" fill="#D08B3E">&#x1315D;</text>
+</svg>
