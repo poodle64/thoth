@@ -1,0 +1,54 @@
+{
+  "version": 6,
+  "updated": "2026-02-14T04:30:00Z",
+  "models": [
+    {
+      "id": "ggml-large-v3-turbo",
+      "name": "Whisper Large V3 Turbo",
+      "description": "RECOMMENDED - OpenAI's fastest large model. 809M params, 8x faster than large-v3. Best speed/accuracy balance.",
+      "version": "3.0.0",
+      "download_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
+      "download_size": 1620000000,
+      "extracted_size": 1620000000,
+      "sha256": null,
+      "required_files": ["ggml-large-v3-turbo.bin"],
+      "archive_directory": null,
+      "languages": ["en", "multilingual"],
+      "model_type": "whisper_ggml",
+      "recommended": true,
+      "min_app_version": null
+    },
+    {
+      "id": "ggml-medium.en",
+      "name": "Whisper Medium (English)",
+      "description": "English-optimised medium model. 769M params. Good accuracy, faster than large.",
+      "version": "1.0.0",
+      "download_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin",
+      "download_size": 1533000000,
+      "extracted_size": 1533000000,
+      "sha256": null,
+      "required_files": ["ggml-medium.en.bin"],
+      "archive_directory": null,
+      "languages": ["en"],
+      "model_type": "whisper_ggml",
+      "recommended": false,
+      "min_app_version": null
+    },
+    {
+      "id": "ggml-small.en",
+      "name": "Whisper Small (English)",
+      "description": "Lightweight English model. 244M params. Fast with good accuracy.",
+      "version": "1.0.0",
+      "download_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin",
+      "download_size": 488000000,
+      "extracted_size": 488000000,
+      "sha256": null,
+      "required_files": ["ggml-small.en.bin"],
+      "archive_directory": null,
+      "languages": ["en"],
+      "model_type": "whisper_ggml",
+      "recommended": false,
+      "min_app_version": null
+    }
+  ]
+}

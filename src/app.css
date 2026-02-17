@@ -1,0 +1,589 @@
+@import "tailwindcss";
+
+/* Design tokens for Thoth - Scribe's Amber theme */
+@theme {
+  /* Colours - Scribe's Amber palette */
+  --color-bg-primary: #1C1B1A;
+  --color-bg-secondary: #272523;
+  --color-bg-tertiary: #363330;
+  --color-bg-hover: #403D3A;
+  --color-bg-active: #4D4A46;
+
+  --color-text-primary: #EDE8E0;
+  --color-text-secondary: #9C9488;
+  --color-text-tertiary: #6B645A;
+
+  --color-accent: #D08B3E;
+  --color-accent-hover: #DE9E56;
+  --color-accent-active: #B57530;
+
+  --color-success: #4ABA6A;
+  --color-warning: #E8C547;
+  --color-error: #E05545;
+
+  --color-border: #363330;
+  --color-border-subtle: #272523;
+
+  /* Spacing */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-lg: 1rem;
+  --text-xl: 1.125rem;
+
+  /* Layout */
+  --header-height: 54px;
+  --sidebar-width: 220px;
+
+  /* Border radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3);
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 300ms ease;
+}
+
+/* Base styles */
+html {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-bg-hover);
+}
+
+/* Selection */
+::selection {
+  background: var(--color-accent);
+  color: white;
+}
+
+/* Focus styles */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Button base */
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  border: none;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  transition: background var(--transition-fast);
+}
+
+button:hover {
+  background: var(--color-bg-hover);
+}
+
+button:active {
+  background: var(--color-bg-active);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Primary button variant */
+button.primary {
+  background: var(--color-accent);
+  color: white;
+}
+
+button.primary:hover {
+  background: var(--color-accent-hover);
+}
+
+button.primary:active {
+  background: var(--color-accent-active);
+}
+
+/* Input base */
+input,
+textarea,
+select {
+  font-family: inherit;
+  font-size: inherit;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+/* Toggle switch */
+.toggle {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.toggle.active {
+  background: var(--color-accent);
+}
+
+.toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background: white;
+  border-radius: var(--radius-full);
+  transition: transform var(--transition-fast);
+}
+
+.toggle.active::after {
+  transform: translateX(20px);
+}
+
+/* =============================================================================
+   Shared Component Styles
+   ============================================================================= */
+
+/* Toggle Switch - checkbox-based variant used in settings */
+.toggle-switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-bg-tertiary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.toggle-switch .toggle-slider {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.toggle-switch .toggle-slider::before {
+  position: absolute;
+  content: '';
+  height: 16px;
+  width: 16px;
+  top: 2px;
+  left: 2px;
+  background-color: white;
+  border-radius: 50%;
+  transition: transform var(--transition-fast);
+}
+
+.toggle-switch:hover:not(:has(input:disabled)) {
+  border-color: var(--color-text-tertiary);
+}
+
+.toggle-switch:has(input:checked) {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.toggle-switch:has(input:checked):hover:not(:has(input:disabled)) {
+  background-color: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.toggle-switch:has(input:checked) .toggle-slider::before {
+  transform: translateX(18px);
+}
+
+.toggle-switch:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Setting Row - standard layout for settings items */
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.setting-row:first-of-type {
+  border-top: 1px solid var(--color-border);
+}
+
+.setting-row.no-border {
+  border: none;
+}
+
+.setting-row.vertical {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+/* Setting row variant with background (card style) */
+.setting-row.card {
+  padding: 12px 16px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-subtle);
+}
+
+.setting-row.card:first-of-type {
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.setting-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.setting-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.setting-description {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* Section styling */
+.section-header {
+  margin-bottom: 16px;
+}
+
+.section-title {
+  margin: 0 0 16px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.section-description {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+/* Setting group with uppercase label */
+.setting-group {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.setting-group h3 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Button variants */
+.btn-small {
+  padding: 4px 12px;
+  font-size: var(--text-xs);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.btn-small:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.btn-icon {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  font-size: 14px;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+}
+
+.btn-icon:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.btn-outline {
+  padding: 4px 12px;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-accent);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.btn-outline:hover {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+/* Error and status messages */
+.error-message {
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--color-error);
+  font-size: var(--text-sm);
+}
+
+.setting-error {
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--color-error);
+  font-size: var(--text-xs);
+  margin-top: 8px;
+}
+
+/* Status badges */
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.status-badge.success {
+  color: var(--color-success);
+}
+
+.status-badge.warning {
+  color: var(--color-warning);
+}
+
+.status-badge.error {
+  color: var(--color-error);
+}
+
+/* Status indicator dot */
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-indicator.connected {
+  background: var(--color-success);
+}
+
+.status-indicator.disconnected {
+  background: var(--color-warning);
+}
+
+.status-indicator.checking {
+  background: var(--color-text-tertiary);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+/* Connection status panel */
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+
+.connection-status.connected {
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  color: var(--color-success);
+}
+
+.connection-status.disconnected {
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  color: var(--color-warning);
+}
+
+/* Form controls */
+.select-control {
+  padding: 6px 12px;
+  font-size: var(--text-xs);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  min-width: 120px;
+}
+
+.select-control:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.text-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.text-input.mono {
+  font-family: var(--font-mono);
+}
+
+/* Hint text */
+.hint {
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
+}
+
+.hint code {
+  background: var(--color-bg-tertiary);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* Animations */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Save status toast */
+.save-status {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  animation: fade-in 0.2s ease;
+}
+
+.save-status.saving {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+
+.save-status.saved {
+  background: color-mix(in srgb, var(--color-success) 15%, transparent);
+  color: var(--color-success);
+}
+
+.save-status.error {
+  background: color-mix(in srgb, var(--color-error) 15%, transparent);
+  color: var(--color-error);
+}
