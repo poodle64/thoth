@@ -17,14 +17,6 @@
 
 </div>
 
-## Download
-
-**[Download the latest release](https://github.com/poodle64/thoth/releases/latest)** for macOS (Apple Silicon).
-
-> After installing, Thoth checks for updates automatically and installs them in-app.
-
----
-
 ## The Problem
 
 Voice input on macOS is either cloud-dependent or requires complex setup. Apple
@@ -36,6 +28,14 @@ nothing handles technical jargon without mangling it.
 Thoth runs speech-to-text locally using whisper.cpp with Metal GPU acceleration.
 Nothing leaves the machine. Press a hotkey, speak, and text appears at your
 cursor. No windows. No configuration. No cloud.
+
+---
+
+## Download
+
+**[Download the latest release](https://github.com/poodle64/thoth/releases/latest)** for macOS (Apple Silicon).
+
+> After installing, Thoth checks for updates automatically and installs them in-app.
 
 ---
 
