@@ -1,15 +1,17 @@
 <div align="center">
 
-[![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8D8?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
-[![Rust](https://img.shields.io/badge/Rust-1.75+-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=flat-square&logo=svelte&logoColor=white)](https://svelte.dev/)
-[![Licence](https://img.shields.io/badge/Licence-MIT-blue?style=flat-square)](LICENCE)
+<img src="src-tauri/icons/icon.png" width="180" alt="Thoth app icon" />
 
-# 𓅝 Thoth
+# Thoth
 
 ### Scribe to the gods. Typist to you.
 
 **Press a key. Speak. Text appears.**
+
+[![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8D8?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
+[![Rust](https://img.shields.io/badge/Rust-1.75+-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=flat-square&logo=svelte&logoColor=white)](https://svelte.dev/)
+[![Licence](https://img.shields.io/badge/Licence-MIT-blue?style=flat-square)](LICENCE)
 
 [Download](#download) · [Features](#features) · [Build](#building-from-source) · [Architecture](docs/architecture/) · [Product Docs](docs/product/)
 
