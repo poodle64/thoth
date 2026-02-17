@@ -1,5 +1,10 @@
 <div align="center">
 
+[![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8D8?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
+[![Rust](https://img.shields.io/badge/Rust-1.75+-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=flat-square&logo=svelte&logoColor=white)](https://svelte.dev/)
+[![Licence](https://img.shields.io/badge/Licence-MIT-blue?style=flat-square)](LICENCE)
+
 <img src="src-tauri/icons/icon.png" width="180" alt="Thoth app icon" />
 
 # Thoth
@@ -7,11 +12,6 @@
 ### Scribe to the gods. Typist to you.
 
 **Press a key. Speak. Text appears.**
-
-[![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8D8?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
-[![Rust](https://img.shields.io/badge/Rust-1.75+-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=flat-square&logo=svelte&logoColor=white)](https://svelte.dev/)
-[![Licence](https://img.shields.io/badge/Licence-MIT-blue?style=flat-square)](LICENCE)
 
 [Download](#download) · [Features](#features) · [Build](#building-from-source) · [Architecture](docs/architecture/) · [Product Docs](docs/product/)
 
@@ -174,6 +174,15 @@ pnpm tauri build  # Production build
 - [cpal](https://github.com/RustAudio/cpal). Cross-platform audio
 - [rubato](https://github.com/HEnquist/rubato). Audio resampling
 - [enigo](https://github.com/enigo-rs/enigo). Cross-platform input simulation
+
+</details>
+
+<details>
+<summary><strong>Inspiration</strong></summary>
+
+- [MacWhisper](https://goodsnooze.gumroad.com/l/macwhisper). Proved that local Whisper transcription on macOS could be fast and practical
+- [VoiceInk](https://voiceink.app/). Demonstrated seamless hotkey-to-cursor voice input
+- [Spokenly](https://www.spokenly.app/). Showed how clean and minimal a dictation app could be
 
 </details>
 
