@@ -11,11 +11,19 @@
 
 **Press a key. Speak. Text appears.**
 
-[Features](#features) · [Build](#building-from-source) · [Architecture](docs/architecture/) · [Product Docs](docs/product/)
+[Download](#download) · [Features](#features) · [Build](#building-from-source) · [Architecture](docs/architecture/) · [Product Docs](docs/product/)
 
 ---
 
 </div>
+
+## Download
+
+**[Download the latest release](https://github.com/poodle64/thoth/releases/latest)** for macOS (Apple Silicon).
+
+> After installing, Thoth checks for updates automatically and installs them in-app.
+
+---
 
 ## The Problem
 
