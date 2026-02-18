@@ -13,7 +13,7 @@
 
 **Press a key. Speak. Text appears.**
 
-[Download](#download) · [Features](#features) · [Build](#building-from-source) · [Architecture](docs/architecture/) · [Product Docs](docs/product/)
+[Download](#download) · [Getting Started](#getting-started) · [Features](#features) · [Build](#building-from-source) · [Architecture](docs/architecture/) · [Product Docs](docs/product/)
 
 ---
 
@@ -58,6 +58,23 @@ xattr -dr com.apple.quarantine /Applications/Thoth.app
 ```
 
 </details>
+
+---
+
+## Getting Started
+
+Once Thoth is open, the app walks you through setup:
+
+1. **Download a speech model.** Click "Download Recommended Model" on the
+   Overview tab (~1.5 GB, runs locally).
+2. **Grant microphone access.** Click "Allow" when prompted so Thoth can hear
+   you.
+3. **Grant global shortcut access.** Click "Allow" so the recording hotkey works
+   from any app (System Settings › Privacy & Security › Accessibility).
+4. **Start dictating.** Press **F13** (the default shortcut), speak, and text
+   appears at your cursor.
+
+> **Tip:** F13 is the default. You can change it in Settings › Recording.
 
 ---
 
