@@ -179,6 +179,7 @@ pub fn register<R: Runtime>(
                     if (shortcut_id == shortcut_ids::TOGGLE_RECORDING
                         || shortcut_id == shortcut_ids::TOGGLE_RECORDING_ALT)
                         && !crate::pipeline::is_pipeline_running()
+                        && crate::transcription::is_transcription_ready()
                     {
                         if let Err(e) = recording_indicator::show_indicator_instant(&app_handle) {
                             tracing::warn!(
