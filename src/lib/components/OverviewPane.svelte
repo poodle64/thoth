@@ -234,6 +234,16 @@
   let downloadError = $state<string | null>(null);
   let downloadUnlisteners: UnlistenFn[] = [];
 
+  /** Setup step status tracking */
+  let modelStepDone = $derived(setupState === 'ready');
+  let micStepDone = $derived(microphonePermission === 'granted');
+  let shortcutStepDone = $derived(accessibilityPermission === 'granted');
+  let allRequiredDone = $derived(modelStepDone && micStepDone && shortcutStepDone);
+
+  /** Celebration animation trigger */
+  let showCelebration = $state(false);
+  let hasShownCelebration = $state(false);
+
   async function downloadRecommendedModel() {
     setupState = 'downloading';
     downloadProgress = 0;
@@ -289,6 +299,14 @@
     downloadRecommendedModel();
   }
 
+  $effect(() => {
+    if (allRequiredDone && !hasShownCelebration && !isLoading) {
+      showCelebration = true;
+      hasShownCelebration = true;
+      setTimeout(() => { showCelebration = false; }, 3000);
+    }
+  });
+
   onDestroy(() => {
     stopPermissionPolling();
     cleanupDownloadListeners();
@@ -343,8 +361,8 @@
   {#if isLoading}
     <div class="loading">Loading...</div>
   {:else if stats && stats.totalCount === 0}
-    <!-- Empty state for fresh install -->
-    <div class="empty-state">
+    <!-- First-run setup: stepped checklist -->
+    <div class="empty-state" class:celebrating={showCelebration}>
       <div class="empty-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path
@@ -359,153 +377,128 @@
           />
         </svg>
       </div>
-      {#if setupState === 'ready' && allPermissionsGranted}
+      {#if allRequiredDone}
         <p class="empty-title">Ready to go</p>
         <p class="empty-hint">Press your shortcut key to start recording.</p>
-      {:else if setupState === 'ready'}
-        <p class="empty-title">Almost there</p>
-        <p class="empty-hint">Grant the permissions below to start using Thoth.</p>
       {:else}
-        <p class="empty-title">Welcome to Thoth</p>
-        <p class="empty-hint">Download a transcription model to get started.</p>
+        <p class="empty-title">Set up Thoth</p>
+        <p class="empty-hint">Three quick steps and you're recording.</p>
       {/if}
     </div>
 
-    <!-- Setup card: model download -->
-    {#if setupState !== 'ready'}
-      <section class="setup-card" aria-label="Get started">
-        <div class="setup-header">
-          <svg class="setup-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" stroke-linecap="round" stroke-linejoin="round" />
-            <polyline points="7 10 12 15 17 10" stroke-linecap="round" stroke-linejoin="round" />
-            <line x1="12" y1="15" x2="12" y2="3" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-          <div class="setup-text">
-            <p class="setup-title">Get Started</p>
-            <p class="setup-description">
-              {#if setupState === 'needed'}
-                Download the recommended transcription model (~1.5 GB). This runs entirely on your machine.
-              {:else if setupState === 'downloading'}
-                Downloading model... {Math.round(downloadProgress)}%
+    <!-- Setup steps -->
+    <div class="setup-checklist">
+      <!-- Step 1: Download speech model -->
+      <div class="setup-step" class:completed={modelStepDone}>
+        <div class="step-indicator" class:pending={!modelStepDone} class:done={modelStepDone}>
+          {#if modelStepDone}
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 8.5l3.5 3.5 6.5-7" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          {:else}
+            1
+          {/if}
+        </div>
+        <div class="step-body">
+          <p class="step-title">Download speech model</p>
+          {#if modelStepDone}
+            <p class="step-description done">Model ready</p>
+          {:else}
+            <p class="step-description">
+              {#if setupState === 'downloading'}
+                Downloading... {Math.round(downloadProgress)}%
               {:else if setupState === 'initialising'}
                 Preparing transcription engine...
               {:else if setupState === 'error'}
                 {downloadError ?? 'Download failed.'}
+              {:else}
+                A ~1.5 GB model that runs entirely on your machine. Nothing is sent to the cloud.
               {/if}
             </p>
-          </div>
-        </div>
-
-        {#if setupState === 'downloading'}
-          <div class="progress-bar">
-            <div class="progress-fill" style="width: {Math.round(downloadProgress)}%"></div>
-          </div>
-        {:else if setupState === 'initialising'}
-          <div class="progress-bar">
-            <div class="progress-fill indeterminate"></div>
-          </div>
-        {/if}
-
-        <div class="setup-actions">
-          {#if setupState === 'needed'}
-            <button class="btn-setup" onclick={downloadRecommendedModel}>
-              Download Recommended Model
-            </button>
-            <button class="btn-setup-alt" onclick={() => onNavigate('models')}>
-              Choose a different model
-            </button>
-          {:else if setupState === 'error'}
-            <button class="btn-setup" onclick={retryDownload}>
-              Retry Download
-            </button>
+            {#if setupState === 'downloading'}
+              <div class="progress-bar">
+                <div class="progress-fill" style="width: {Math.round(downloadProgress)}%"></div>
+              </div>
+            {:else if setupState === 'initialising'}
+              <div class="progress-bar">
+                <div class="progress-fill indeterminate"></div>
+              </div>
+            {/if}
+            {#if setupState === 'needed'}
+              <div class="step-actions">
+                <button class="btn-setup" onclick={downloadRecommendedModel}>
+                  Download Recommended Model
+                </button>
+                <button class="btn-setup-alt" onclick={() => onNavigate('models')}>
+                  Choose a different model
+                </button>
+              </div>
+            {:else if setupState === 'error'}
+              <div class="step-actions">
+                <button class="btn-setup" onclick={retryDownload}>
+                  Retry Download
+                </button>
+              </div>
+            {/if}
           {/if}
         </div>
-      </section>
-    {/if}
+      </div>
 
-    <!-- System status even on fresh install -->
-    <section class="section" aria-labelledby="system-title-empty">
-      <h3 id="system-title-empty" class="section-title">System</h3>
-      <div class="status-list">
-        <div class="status-row">
-          <span
-            class="status-dot"
-            class:ready={transcriptionReady}
-            class:not-configured={!transcriptionReady}
-          ></span>
-          <span class="status-label">Transcription</span>
-          <span class="status-value">
-            {transcriptionReady ? 'Ready' : 'No model downloaded'}
-          </span>
+      <!-- Step 2: Allow microphone -->
+      <div class="setup-step" class:completed={micStepDone}>
+        <div class="step-indicator" class:pending={!micStepDone} class:done={micStepDone}>
+          {#if micStepDone}
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 8.5l3.5 3.5 6.5-7" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          {:else}
+            2
+          {/if}
         </div>
-        <div class="status-row">
-          <span
-            class="status-dot"
-            class:ready={ollamaStatus === 'connected'}
-            class:not-configured={ollamaStatus === 'not-configured'}
-            class:warning={ollamaStatus === 'unavailable'}
-            class:checking={ollamaStatus === 'checking'}
-          ></span>
-          <span class="status-label">Enhancement</span>
-          <span class="status-value">
-            {#if ollamaStatus === 'checking'}
-              Checking...
-            {:else if ollamaStatus === 'connected'}
-              Connected
-            {:else if ollamaStatus === 'not-configured'}
-              Not configured
-            {:else}
-              Unavailable
-            {/if}
-          </span>
+        <div class="step-body">
+          <p class="step-title">Allow microphone access</p>
+          {#if micStepDone}
+            <p class="step-description done">Microphone access granted</p>
+          {:else}
+            <p class="step-description">Thoth needs to hear you to transcribe your speech.</p>
+            <div class="step-actions">
+              <button class="btn-setup" onclick={() => requestPermission('request_microphone_permission')}>Allow</button>
+              <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
+            </div>
+          {/if}
         </div>
-        <div class="status-row">
-          <span class="status-dot ready"></span>
-          <span class="status-label">Microphone</span>
-          <span class="status-value truncate">{deviceName}</span>
+      </div>
+
+      <!-- Step 3: Allow global shortcut -->
+      <div class="setup-step" class:completed={shortcutStepDone}>
+        <div class="step-indicator" class:pending={!shortcutStepDone} class:done={shortcutStepDone}>
+          {#if shortcutStepDone}
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 8.5l3.5 3.5 6.5-7" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          {:else}
+            3
+          {/if}
         </div>
-        <div class="status-row">
-          <span
-            class="status-dot"
-            class:ready={microphonePermission === 'granted'}
-            class:warning={microphonePermission === 'denied'}
-          ></span>
-          <span class="status-label">Mic Permission</span>
-          <span class="status-value">
-            {#if microphonePermission === 'granted'}
-              Granted
-            {:else}
-              <span class="permission-actions">
-                <button class="btn-small" onclick={() => requestPermission('request_microphone_permission')}>Grant Access</button>
-                <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
-              </span>
-            {/if}
-          </span>
+        <div class="step-body">
+          <p class="step-title">Allow global shortcut</p>
+          {#if shortcutStepDone}
+            <p class="step-description done">Shortcut access granted</p>
+          {:else}
+            <p class="step-description">Lets you start recording from anywhere with a keyboard shortcut.</p>
+            <div class="step-actions">
+              <button class="btn-setup" onclick={() => requestPermission('request_accessibility')}>Allow</button>
+              <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
+            </div>
+          {/if}
         </div>
-        {#if microphonePermission !== 'granted'}
-          <p class="permission-hint">Required to capture your voice for transcription</p>
-        {/if}
-        <div class="status-row">
-          <span
-            class="status-dot"
-            class:ready={accessibilityPermission === 'granted'}
-            class:warning={accessibilityPermission === 'denied'}
-          ></span>
-          <span class="status-label">Accessibility</span>
-          <span class="status-value">
-            {#if accessibilityPermission === 'granted'}
-              Granted
-            {:else}
-              <span class="permission-actions">
-                <button class="btn-small" onclick={() => requestPermission('request_accessibility')}>Grant Access</button>
-                <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
-              </span>
-            {/if}
-          </span>
-        </div>
-        {#if accessibilityPermission !== 'granted'}
-          <p class="permission-hint">Required for the global recording shortcut to work</p>
-        {/if}
+      </div>
+    </div>
+
+    <!-- Optional settings -->
+    <details class="optional-section">
+      <summary class="optional-summary">Optional settings</summary>
+      <div class="optional-content">
         <div class="status-row">
           <span
             class="status-dot"
@@ -525,37 +518,58 @@
           </span>
         </div>
         {#if inputMonitoringPermission !== 'granted'}
-          <p class="permission-hint">Required for customising keyboard shortcuts</p>
+          <p class="permission-hint">Needed only if you want to customise the recording shortcut</p>
         {/if}
+        <div class="status-row">
+          <span
+            class="status-dot"
+            class:ready={ollamaStatus === 'connected'}
+            class:not-configured={ollamaStatus === 'not-configured'}
+            class:warning={ollamaStatus === 'unavailable'}
+            class:checking={ollamaStatus === 'checking'}
+          ></span>
+          <span class="status-label">AI Enhancement</span>
+          <span class="status-value">
+            {#if ollamaStatus === 'checking'}
+              Checking...
+            {:else if ollamaStatus === 'connected'}
+              Connected
+            {:else if ollamaStatus === 'not-configured'}
+              Not configured
+            {:else}
+              Unavailable
+            {/if}
+          </span>
+        </div>
+        <div class="autostart-row">
+          <span class="status-label">Launch at Login</span>
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              checked={autostartEnabled}
+              disabled={autostartLoading}
+              onchange={handleAutostartToggle}
+            />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        {#if autostartError}
+          <div class="setting-error">{autostartError}</div>
+        {/if}
+        <div class="autostart-row">
+          <span class="status-label">Show in Dock</span>
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              checked={showInDock}
+              disabled={dockLoading}
+              onchange={handleDockToggle}
+            />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
       </div>
-      <div class="autostart-row">
-        <span class="status-label">Launch at Login</span>
-        <label class="toggle-switch">
-          <input
-            type="checkbox"
-            checked={autostartEnabled}
-            disabled={autostartLoading}
-            onchange={handleAutostartToggle}
-          />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      {#if autostartError}
-        <div class="setting-error">{autostartError}</div>
-      {/if}
-      <div class="autostart-row">
-        <span class="status-label">Show in Dock</span>
-        <label class="toggle-switch">
-          <input
-            type="checkbox"
-            checked={showInDock}
-            disabled={dockLoading}
-            onchange={handleDockToggle}
-          />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-    </section>
+    </details>
   {:else if stats}
     <!-- Summary Cards -->
     <section class="section" aria-labelledby="summary-title">
@@ -851,50 +865,124 @@
     color: var(--color-text-tertiary);
   }
 
-  /* Setup card */
-  .setup-card {
+  /* Setup checklist */
+  .setup-checklist {
     display: flex;
     flex-direction: column;
+    gap: 12px;
+  }
+
+  .setup-step {
+    display: flex;
     gap: 14px;
-    padding: 18px;
-    background: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg-secondary));
-    border: 1px solid color-mix(in srgb, var(--color-accent) 25%, var(--color-border-subtle));
+    padding: 16px;
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-md);
+    transition: border-color var(--transition-normal);
   }
 
-  .setup-header {
+  .setup-step.completed {
+    border-color: color-mix(in srgb, var(--color-success) 30%, var(--color-border-subtle));
+  }
+
+  .step-indicator {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
     display: flex;
-    gap: 14px;
-    align-items: flex-start;
-  }
-
-  .setup-icon {
-    width: 24px;
-    height: 24px;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
-    color: var(--color-accent);
-    margin-top: 1px;
+    font-size: 13px;
+    font-weight: 600;
   }
 
-  .setup-text {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+  .step-indicator svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .step-indicator.pending {
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+  }
+
+  .step-indicator.done {
+    background: color-mix(in srgb, var(--color-success) 15%, var(--color-bg-secondary));
+    color: var(--color-success);
+  }
+
+  .step-body {
+    flex: 1;
     min-width: 0;
   }
 
-  .setup-title {
-    margin: 0;
+  .step-title {
     font-size: var(--text-sm);
     font-weight: 600;
     color: var(--color-text-primary);
+    margin: 0 0 4px 0;
   }
 
-  .setup-description {
-    margin: 0;
+  .step-description {
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
+    margin: 0 0 12px 0;
     line-height: 1.4;
+  }
+
+  .step-description.done {
+    color: var(--color-text-tertiary);
+    margin-bottom: 0;
+  }
+
+  /* Celebration */
+  .empty-state.celebrating .empty-title {
+    animation: celebrateText 0.6s ease-out;
+  }
+
+  @keyframes celebrateText {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); color: var(--color-success); }
+    100% { transform: scale(1); }
+  }
+
+  /* Optional settings */
+  .optional-section {
+    margin-top: 8px;
+  }
+
+  .optional-summary {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    padding: 8px 0;
+    list-style: none;
+  }
+
+  .optional-summary::before {
+    content: '>';
+    display: inline-block;
+    margin-right: 6px;
+    transition: transform var(--transition-fast);
+  }
+
+  details[open] > .optional-summary::before {
+    transform: rotate(90deg);
+  }
+
+  .optional-content {
+    padding: 8px 14px;
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
   }
 
   .progress-bar {
@@ -921,7 +1009,7 @@
     100% { transform: translateX(350%); }
   }
 
-  .setup-actions {
+  .step-actions {
     display: flex;
     gap: 10px;
     align-items: center;
