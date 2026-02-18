@@ -99,6 +99,13 @@
   let accessibilityPermission = $state<'unknown' | 'granted' | 'denied'>('unknown');
   let inputMonitoringPermission = $state<'unknown' | 'granted' | 'denied'>('unknown');
 
+  /** Whether all permissions are granted */
+  let allPermissionsGranted = $derived(
+    microphonePermission === 'granted' &&
+    accessibilityPermission === 'granted' &&
+    inputMonitoringPermission === 'granted'
+  );
+
   async function handleAutostartToggle() {
     autostartLoading = true;
     autostartError = null;
@@ -352,9 +359,12 @@
           />
         </svg>
       </div>
-      {#if setupState === 'ready'}
-        <p class="empty-title">Ready to transcribe</p>
+      {#if setupState === 'ready' && allPermissionsGranted}
+        <p class="empty-title">Ready to go</p>
         <p class="empty-hint">Press your shortcut key to start recording.</p>
+      {:else if setupState === 'ready'}
+        <p class="empty-title">Almost there</p>
+        <p class="empty-hint">Grant the permissions below to start using Thoth.</p>
       {:else}
         <p class="empty-title">Welcome to Thoth</p>
         <p class="empty-hint">Download a transcription model to get started.</p>
@@ -472,6 +482,9 @@
             {/if}
           </span>
         </div>
+        {#if microphonePermission !== 'granted'}
+          <p class="permission-hint">Required to capture your voice for transcription</p>
+        {/if}
         <div class="status-row">
           <span
             class="status-dot"
@@ -490,6 +503,9 @@
             {/if}
           </span>
         </div>
+        {#if accessibilityPermission !== 'granted'}
+          <p class="permission-hint">Required for the global recording shortcut to work</p>
+        {/if}
         <div class="status-row">
           <span
             class="status-dot"
@@ -508,6 +524,9 @@
             {/if}
           </span>
         </div>
+        {#if inputMonitoringPermission !== 'granted'}
+          <p class="permission-hint">Required for customising keyboard shortcuts</p>
+        {/if}
       </div>
       <div class="autostart-row">
         <span class="status-label">Launch at Login</span>
@@ -701,6 +720,9 @@
             {/if}
           </span>
         </div>
+        {#if microphonePermission !== 'granted'}
+          <p class="permission-hint">Required to capture your voice for transcription</p>
+        {/if}
         <div class="status-row">
           <span
             class="status-dot"
@@ -719,6 +741,9 @@
             {/if}
           </span>
         </div>
+        {#if accessibilityPermission !== 'granted'}
+          <p class="permission-hint">Required for the global recording shortcut to work</p>
+        {/if}
         <div class="status-row">
           <span
             class="status-dot"
@@ -737,6 +762,9 @@
             {/if}
           </span>
         </div>
+        {#if inputMonitoringPermission !== 'granted'}
+          <p class="permission-hint">Required for customising keyboard shortcuts</p>
+        {/if}
       </div>
       <div class="autostart-row">
         <span class="status-label">Launch at Login</span>
@@ -1098,6 +1126,13 @@
     color: var(--color-text-primary);
     font-weight: 500;
     min-width: 0;
+  }
+
+  .permission-hint {
+    margin: -2px 0 4px 18px;
+    font-size: 11px;
+    color: var(--color-text-tertiary);
+    line-height: 1.3;
   }
 
   .permission-actions {
