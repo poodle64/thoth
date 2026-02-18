@@ -145,6 +145,18 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
         return Err("Pipeline is already running".to_string());
     }
 
+    // Check transcription model is available before capturing audio
+    if !transcription::is_transcription_ready() {
+        PIPELINE_RUNNING.store(false, Ordering::SeqCst);
+        tracing::warn!("Pipeline: No transcription model available, blocking recording");
+        // Hide the recording indicator (shortcut handler may have shown it)
+        let _ = crate::recording_indicator::hide_recording_indicator(app.clone());
+        return Err(
+            "No transcription model downloaded. Open Settings \u{2192} Models to get started."
+                .to_string(),
+        );
+    }
+
     // Get device ID from config
     let config = crate::config::get_config().ok();
     let device_id = config.as_ref().and_then(|c| c.audio.device_id.clone());
