@@ -7,6 +7,7 @@
    */
 	import { onMount, onDestroy } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
+	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 	import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
 	import { configStore } from '../stores/config.svelte';
 	import { settingsStore } from '../stores/settings.svelte';
@@ -219,8 +220,71 @@
     startPermissionPolling();
   }
 
+  /** Model download state for setup card */
+  type SetupState = 'needed' | 'downloading' | 'initialising' | 'ready' | 'error';
+  let setupState = $state<SetupState>('ready');
+  let downloadProgress = $state(0);
+  let downloadError = $state<string | null>(null);
+  let downloadUnlisteners: UnlistenFn[] = [];
+
+  async function downloadRecommendedModel() {
+    setupState = 'downloading';
+    downloadProgress = 0;
+    downloadError = null;
+
+    try {
+      // Listen for progress events
+      const progressUn = await listen<{ percentage: number }>('model-download-progress', (event) => {
+        downloadProgress = event.payload.percentage;
+      });
+      downloadUnlisteners.push(progressUn);
+
+      const completeUn = await listen<string>('model-download-complete', async () => {
+        setupState = 'initialising';
+        try {
+          const modelDir = await invoke<string>('get_model_directory');
+          await invoke('init_transcription', { modelPath: modelDir });
+          transcriptionReady = true;
+          setupState = 'ready';
+        } catch (e) {
+          downloadError = e instanceof Error ? e.message : String(e);
+          setupState = 'error';
+        }
+        cleanupDownloadListeners();
+      });
+      downloadUnlisteners.push(completeUn);
+
+      const errorUn = await listen<string>('model-download-error', (event) => {
+        downloadError = event.payload;
+        setupState = 'error';
+        cleanupDownloadListeners();
+      });
+      downloadUnlisteners.push(errorUn);
+
+      // Start the download (null = recommended model)
+      await invoke('download_model');
+    } catch (e) {
+      downloadError = e instanceof Error ? e.message : String(e);
+      setupState = 'error';
+      cleanupDownloadListeners();
+    }
+  }
+
+  function cleanupDownloadListeners() {
+    for (const unlisten of downloadUnlisteners) {
+      unlisten();
+    }
+    downloadUnlisteners = [];
+  }
+
+  function retryDownload() {
+    invoke('reset_download_state').catch(() => {});
+    downloadRecommendedModel();
+  }
+
   onDestroy(() => {
     stopPermissionPolling();
+    cleanupDownloadListeners();
   });
 
   onMount(async () => {
@@ -250,6 +314,7 @@
       transcriptionReady = readyResult.value;
     }
 
+    setupState = transcriptionReady ? 'ready' : 'needed';
     isLoading = false;
 
     // Ollama check runs separately to avoid blocking (30s timeout)
@@ -287,9 +352,66 @@
           />
         </svg>
       </div>
-      <p class="empty-title">Ready to transcribe</p>
-      <p class="empty-hint">Press your shortcut key to start recording.</p>
+      {#if setupState === 'ready'}
+        <p class="empty-title">Ready to transcribe</p>
+        <p class="empty-hint">Press your shortcut key to start recording.</p>
+      {:else}
+        <p class="empty-title">Welcome to Thoth</p>
+        <p class="empty-hint">Download a transcription model to get started.</p>
+      {/if}
     </div>
+
+    <!-- Setup card: model download -->
+    {#if setupState !== 'ready'}
+      <section class="setup-card" aria-label="Get started">
+        <div class="setup-header">
+          <svg class="setup-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" stroke-linecap="round" stroke-linejoin="round" />
+            <polyline points="7 10 12 15 17 10" stroke-linecap="round" stroke-linejoin="round" />
+            <line x1="12" y1="15" x2="12" y2="3" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <div class="setup-text">
+            <p class="setup-title">Get Started</p>
+            <p class="setup-description">
+              {#if setupState === 'needed'}
+                Download the recommended transcription model (~1.5 GB). This runs entirely on your machine.
+              {:else if setupState === 'downloading'}
+                Downloading model... {Math.round(downloadProgress)}%
+              {:else if setupState === 'initialising'}
+                Preparing transcription engine...
+              {:else if setupState === 'error'}
+                {downloadError ?? 'Download failed.'}
+              {/if}
+            </p>
+          </div>
+        </div>
+
+        {#if setupState === 'downloading'}
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: {Math.round(downloadProgress)}%"></div>
+          </div>
+        {:else if setupState === 'initialising'}
+          <div class="progress-bar">
+            <div class="progress-fill indeterminate"></div>
+          </div>
+        {/if}
+
+        <div class="setup-actions">
+          {#if setupState === 'needed'}
+            <button class="btn-setup" onclick={downloadRecommendedModel}>
+              Download Recommended Model
+            </button>
+            <button class="btn-setup-alt" onclick={() => onNavigate('models')}>
+              Choose a different model
+            </button>
+          {:else if setupState === 'error'}
+            <button class="btn-setup" onclick={retryDownload}>
+              Retry Download
+            </button>
+          {/if}
+        </div>
+      </section>
+    {/if}
 
     <!-- System status even on fresh install -->
     <section class="section" aria-labelledby="system-title-empty">
@@ -699,6 +821,112 @@
     margin: 6px 0 0;
     font-size: var(--text-sm);
     color: var(--color-text-tertiary);
+  }
+
+  /* Setup card */
+  .setup-card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px;
+    background: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg-secondary));
+    border: 1px solid color-mix(in srgb, var(--color-accent) 25%, var(--color-border-subtle));
+    border-radius: var(--radius-md);
+  }
+
+  .setup-header {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+  }
+
+  .setup-icon {
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+    color: var(--color-accent);
+    margin-top: 1px;
+  }
+
+  .setup-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .setup-title {
+    margin: 0;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  .setup-description {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    line-height: 1.4;
+  }
+
+  .progress-bar {
+    height: 4px;
+    background: var(--color-bg-tertiary);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--color-accent);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+  }
+
+  .progress-fill.indeterminate {
+    width: 40%;
+    animation: indeterminate 1.2s ease-in-out infinite;
+  }
+
+  @keyframes indeterminate {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(350%); }
+  }
+
+  .setup-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .btn-setup {
+    padding: 8px 16px;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    background: var(--color-accent);
+    color: #000;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: opacity var(--transition-fast);
+  }
+
+  .btn-setup:hover {
+    opacity: 0.85;
+  }
+
+  .btn-setup-alt {
+    padding: 8px 12px;
+    font-size: var(--text-sm);
+    background: none;
+    border: none;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: color var(--transition-fast);
+  }
+
+  .btn-setup-alt:hover {
+    color: var(--color-text-primary);
   }
 
   /* Sections */
