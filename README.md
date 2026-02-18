@@ -39,17 +39,23 @@ cursor. No windows. No configuration. No cloud.
 
 > After installing, Thoth checks for updates automatically and installs them in-app.
 
-<details>
-<summary><strong>macOS Gatekeeper notice</strong></summary>
+### First launch
 
-The app is not yet notarised with Apple, so macOS may block it on first launch.
-To allow it, run:
+macOS will block the app the first time you open it because it isn't from the App
+Store. This is normal and only happens once.
+
+1. Open the `.dmg` and drag Thoth to **Applications**
+2. **Right-click** (or Control-click) the app and choose **Open**
+3. Click **Open** in the dialogue that appears
+
+That's it. macOS remembers your choice and won't ask again.
+
+<details>
+<summary>Alternative: remove the block from Terminal</summary>
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Thoth.app
 ```
-
-Or right-click the app → Open → confirm. This is only needed once.
 
 </details>
 
