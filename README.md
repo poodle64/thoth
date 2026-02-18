@@ -39,6 +39,20 @@ cursor. No windows. No configuration. No cloud.
 
 > After installing, Thoth checks for updates automatically and installs them in-app.
 
+<details>
+<summary><strong>macOS Gatekeeper notice</strong></summary>
+
+The app is not yet notarised with Apple, so macOS may block it on first launch.
+To allow it, run:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Thoth.app
+```
+
+Or right-click the app → Open → confirm. This is only needed once.
+
+</details>
+
 ---
 
 ## Features
