@@ -384,10 +384,67 @@ fn get_shortcut_hint() -> String {
 
 /// Pre-rendered 𓅝 ibis hieroglyph tray icons (Noto Sans Egyptian Hieroglyphs)
 static TRAY_IDLE_PNG: &[u8] = include_bytes!("../icons/tray-idle-44.png");
+static TRAY_IDLE_LIGHT_PNG: &[u8] = include_bytes!("../icons/tray-idle-light-44.png");
 static TRAY_RECORDING_PNG: &[u8] = include_bytes!("../icons/tray-recording-44.png");
 
-/// Create the idle tray icon (black silhouette, macOS auto-tints for light/dark mode)
+/// Detect if the system is using a dark theme (Linux only)
+#[cfg(target_os = "linux")]
+fn is_dark_theme() -> bool {
+    // Check GNOME/GTK theme preference
+    // Try gsettings first (most reliable for GNOME)
+    if let Ok(output) = std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "color-scheme"])
+        .output()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if stdout.contains("'prefer-dark'") || stdout.contains("'dark'") {
+            return true;
+        }
+        if stdout.contains("'prefer-light'") || stdout.contains("'light'") {
+            return false;
+        }
+    }
+
+    // Fallback: check GTK theme name
+    if let Ok(output) = std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "gtk-theme"])
+        .output()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+        if stdout.contains("dark") || stdout.contains("adwaita-dark") {
+            return true;
+        }
+    }
+
+    // Check environment variable
+    if let Ok(theme) = std::env::var("GTK_THEME") {
+        let theme_lower = theme.to_lowercase();
+        if theme_lower.contains("dark") {
+            return true;
+        }
+    }
+
+    // Default to light theme assumption
+    false
+}
+
+#[cfg(not(target_os = "linux"))]
+fn is_dark_theme() -> bool {
+    // On macOS, template mode handles this automatically
+    false
+}
+
+/// Create the idle tray icon (theme-aware on Linux)
 fn create_idle_icon() -> Image<'static> {
+    #[cfg(target_os = "linux")]
+    {
+        // On Linux, use white icon for dark themes, black for light themes
+        if is_dark_theme() {
+            return Image::from_bytes(TRAY_IDLE_LIGHT_PNG)
+                .expect("embedded light idle tray icon is valid PNG");
+        }
+    }
+
     Image::from_bytes(TRAY_IDLE_PNG).expect("embedded idle tray icon is valid PNG")
 }
 
@@ -500,6 +557,15 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
     match id {
         menu_ids::TOGGLE_RECORDING => {
             tracing::info!("Toggle recording clicked from tray menu");
+
+            // Show recording indicator immediately if not already recording
+            // This is especially important on Wayland where keyboard shortcuts may not work
+            if !crate::pipeline::is_pipeline_running() {
+                if let Err(e) = crate::recording_indicator::show_indicator_instant(app) {
+                    tracing::warn!("Failed to show recording indicator from tray: {}", e);
+                }
+            }
+
             // Emit the same event as keyboard shortcut would
             if let Err(e) = app.emit("shortcut-triggered", "toggle_recording") {
                 tracing::error!("Failed to emit shortcut-triggered event from tray: {}", e);

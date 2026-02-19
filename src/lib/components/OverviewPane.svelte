@@ -35,6 +35,20 @@
     enhancementModels: ModelStats[];
   }
 
+  interface DetectedGpu {
+    backend: string;
+    name: string;
+    vram_mb: number | null;
+  }
+
+  interface GpuInfo {
+    compiled_backend: string;
+    gpu_available: boolean;
+    gpu_name: string | null;
+    vram_mb: number | null;
+    detected_gpus: DetectedGpu[];
+  }
+
   interface Props {
     /** Callback to navigate to another Settings pane */
     onNavigate: (paneId: string) => void;
@@ -44,10 +58,12 @@
 
 	let stats = $state<TranscriptionStats | null>(null);
 	let transcriptionReady = $state(false);
+	let modelDownloaded = $state(false);
 	let isLoading = $state(true);
 	let ollamaStatus = $state<'checking' | 'connected' | 'unavailable' | 'not-configured'>(
 		'checking'
 	);
+	let gpuInfo = $state<GpuInfo | null>(null);
 
 	const updaterState = getUpdaterState();
 	let currentVersion = $state('2026.2.2'); // Will be read from package.json or tauri config
@@ -326,9 +342,11 @@
     ) {
       invoke('refresh_tray_menu').catch(() => {});
     }
-    const [statsResult, readyResult] = await Promise.allSettled([
+    const [statsResult, readyResult, downloadedResult, gpuResult] = await Promise.allSettled([
       invoke<TranscriptionStats>('get_transcription_stats_cmd'),
       invoke<boolean>('is_transcription_ready'),
+      invoke<boolean>('check_model_downloaded', { modelId: null }),
+      invoke<GpuInfo>('get_gpu_info'),
     ]);
 
     if (statsResult.status === 'fulfilled') {
@@ -337,6 +355,14 @@
 
     if (readyResult.status === 'fulfilled') {
       transcriptionReady = readyResult.value;
+    }
+
+    if (downloadedResult.status === 'fulfilled') {
+      modelDownloaded = downloadedResult.value;
+    }
+
+    if (gpuResult.status === 'fulfilled') {
+      gpuInfo = gpuResult.value;
     }
 
     setupState = transcriptionReady ? 'ready' : 'needed';
@@ -683,11 +709,45 @@
           <span
             class="status-dot"
             class:ready={transcriptionReady}
-            class:not-configured={!transcriptionReady}
+            class:not-configured={!modelDownloaded}
+            class:checking={modelDownloaded && !transcriptionReady}
           ></span>
           <span class="status-label">Transcription</span>
           <span class="status-value">
-            {transcriptionReady ? 'Ready' : 'No model downloaded'}
+            {#if transcriptionReady}
+              Ready
+            {:else if modelDownloaded}
+              Loading...
+            {:else}
+              No model downloaded
+            {/if}
+          </span>
+        </div>
+        <div class="status-row">
+          <span
+            class="status-dot"
+            class:ready={gpuInfo?.gpu_available}
+            class:not-configured={!gpuInfo}
+          ></span>
+          <span class="status-label">GPU</span>
+          <span class="status-value">
+            {#if gpuInfo}
+              {#if gpuInfo.gpu_available}
+                <span class="gpu-info">
+                  <span class="gpu-backend">{gpuInfo.compiled_backend}</span>
+                  {#if gpuInfo.gpu_name}
+                    <span class="gpu-name" title={gpuInfo.gpu_name}>{gpuInfo.gpu_name}</span>
+                  {/if}
+                  {#if gpuInfo.vram_mb}
+                    <span class="gpu-vram">{gpuInfo.vram_mb} MB</span>
+                  {/if}
+                </span>
+              {:else}
+                <span class="gpu-cpu">CPU only</span>
+              {/if}
+            {:else}
+              Checking...
+            {/if}
           </span>
         </div>
         <div class="status-row">
@@ -1245,5 +1305,35 @@
     50% {
       opacity: 0.4;
     }
+  }
+
+  /* GPU info display */
+  .gpu-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .gpu-backend {
+    font-weight: 600;
+    color: var(--color-success);
+  }
+
+  .gpu-name {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .gpu-vram {
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
+  }
+
+  .gpu-cpu {
+    color: var(--color-text-tertiary);
   }
 </style>

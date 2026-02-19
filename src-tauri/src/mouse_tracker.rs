@@ -95,8 +95,14 @@ fn get_mouse_position() -> Option<(f64, f64)> {
 /// Get the current mouse cursor position using X11.
 ///
 /// Returns `(x, y)` in logical pixels with origin at top-left of primary display.
+/// Returns `None` on Wayland (where X11 isn't available).
 #[cfg(target_os = "linux")]
 fn get_mouse_position() -> Option<(f64, f64)> {
+    // Check if we're on Wayland - X11 won't work there
+    if is_wayland() {
+        return None;
+    }
+
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::ConnectionExt;
 
@@ -115,6 +121,19 @@ fn get_mouse_position() -> Option<(f64, f64)> {
 
     // root_x and root_y are relative to the root window (entire screen)
     Some((pointer.root_x as f64, pointer.root_y as f64))
+}
+
+/// Check if we're running on Wayland (where X11 won't work)
+#[cfg(target_os = "linux")]
+fn is_wayland() -> bool {
+    // Check XDG_SESSION_TYPE first (most reliable)
+    if let Ok(session_type) = std::env::var("XDG_SESSION_TYPE") {
+        if session_type.to_lowercase() == "wayland" {
+            return true;
+        }
+    }
+    // Also check WAYLAND_DISPLAY
+    std::env::var("WAYLAND_DISPLAY").is_ok()
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]

@@ -16,6 +16,11 @@ impl WhisperTranscriptionService {
     /// Create a new whisper transcription service
     ///
     /// Expects a path to a ggml whisper model file (e.g., ggml-large-v3-turbo.bin)
+    ///
+    /// GPU acceleration is enabled by default:
+    /// - macOS: Uses Metal GPU (always available)
+    /// - Linux: Uses CUDA, HIP/ROCm, or Vulkan if compiled with the respective feature
+    /// - If GPU initialization fails on Linux, falls back to CPU automatically
     pub fn new(model_path: &Path) -> Result<Self> {
         if !model_path.exists() {
             return Err(anyhow!("Whisper model not found: {}", model_path.display()));
@@ -23,26 +28,85 @@ impl WhisperTranscriptionService {
 
         tracing::info!("Loading Whisper model from {}", model_path.display());
 
-        // Create context with GPU acceleration enabled
-        let mut params = WhisperContextParameters::default();
-        params.use_gpu(true);
-
         let model_str = model_path.to_str().ok_or_else(|| {
             anyhow!(
                 "Model path contains invalid UTF-8: {}",
                 model_path.display()
             )
         })?;
-        let ctx = WhisperContext::new_with_params(model_str, params)
-            .map_err(|e| anyhow!("Failed to load Whisper model: {:?}", e))?;
 
-        #[cfg(target_os = "macos")]
-        tracing::info!("Whisper model loaded with Metal GPU acceleration");
-        #[cfg(target_os = "linux")]
-        tracing::info!("Whisper model loaded with Vulkan GPU acceleration");
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        tracing::info!("Whisper model loaded with CPU backend");
+        // Try GPU first, fall back to CPU if it fails
+        let ctx = Self::try_load_with_gpu(model_str)
+            .or_else(|e| {
+                tracing::warn!("GPU initialization failed: {:?}, trying CPU fallback", e);
+                Self::load_with_cpu(model_str)
+            })?;
+
         Ok(Self { ctx })
+    }
+
+    /// Try to load the model with GPU acceleration
+    #[cfg(target_os = "macos")]
+    fn try_load_with_gpu(model_str: &str) -> Result<WhisperContext> {
+        let mut params = WhisperContextParameters::default();
+        params.use_gpu(true);
+
+        let ctx = WhisperContext::new_with_params(model_str, params)
+            .map_err(|e| anyhow!("Failed to load Whisper model with Metal: {:?}", e))?;
+
+        tracing::info!("Whisper model loaded with Metal GPU acceleration");
+        Ok(ctx)
+    }
+
+    /// Try to load the model with GPU acceleration (Linux)
+    #[cfg(target_os = "linux")]
+    fn try_load_with_gpu(model_str: &str) -> Result<WhisperContext> {
+        let mut params = WhisperContextParameters::default();
+        params.use_gpu(true);
+
+        let ctx = WhisperContext::new_with_params(model_str, params)
+            .map_err(|e| anyhow!("Failed to load Whisper model with GPU: {:?}", e))?;
+
+        // Log which GPU backend was actually used based on compile features
+        #[cfg(feature = "cuda")]
+        tracing::info!("Whisper model loaded with CUDA GPU acceleration");
+        #[cfg(all(not(feature = "cuda"), feature = "hipblas"))]
+        tracing::info!("Whisper model loaded with HIP/ROCm GPU acceleration");
+        #[cfg(all(not(any(feature = "cuda", feature = "hipblas")), feature = "vulkan"))]
+        tracing::info!("Whisper model loaded with Vulkan GPU acceleration");
+        #[cfg(not(any(feature = "cuda", feature = "hipblas", feature = "vulkan")))]
+        tracing::info!("Whisper model loaded with CPU backend (no GPU feature enabled)");
+
+        Ok(ctx)
+    }
+
+    /// Try to load the model with GPU acceleration (Windows)
+    #[cfg(target_os = "windows")]
+    fn try_load_with_gpu(model_str: &str) -> Result<WhisperContext> {
+        let mut params = WhisperContextParameters::default();
+        params.use_gpu(true);
+
+        let ctx = WhisperContext::new_with_params(model_str, params)
+            .map_err(|e| anyhow!("Failed to load Whisper model with GPU: {:?}", e))?;
+
+        #[cfg(feature = "cuda")]
+        tracing::info!("Whisper model loaded with CUDA GPU acceleration");
+        #[cfg(not(feature = "cuda"))]
+        tracing::info!("Whisper model loaded (GPU acceleration requires --features cuda)");
+
+        Ok(ctx)
+    }
+
+    /// Load the model with CPU only (fallback)
+    fn load_with_cpu(model_str: &str) -> Result<WhisperContext> {
+        let mut params = WhisperContextParameters::default();
+        params.use_gpu(false);
+
+        let ctx = WhisperContext::new_with_params(model_str, params)
+            .map_err(|e| anyhow!("Failed to load Whisper model with CPU: {:?}", e))?;
+
+        tracing::info!("Whisper model loaded with CPU backend (GPU fallback)");
+        Ok(ctx)
     }
 
     /// Transcribe audio from a WAV file

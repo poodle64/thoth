@@ -66,13 +66,32 @@ pub fn start_audio_preview(app: AppHandle, device_id: Option<String>) -> Result<
     // Channel for audio data
     let (tx, rx) = crossbeam_channel::bounded::<Vec<f32>>(16);
 
-    // Build the input stream
+    // Build the input stream with debug logging
+    let callback_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let callback_count_clone = callback_count.clone();
+
     let stream = {
         let tx = tx.clone();
         device
             .build_input_stream(
                 &config.into(),
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    let count = callback_count_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+                    // Log sample stats every 100 callbacks
+                    if count % 100 == 0 {
+                        let max_sample = data.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+                        let sum: f32 = data.iter().map(|s| s.abs()).sum();
+                        let avg = sum / data.len().max(1) as f32;
+                        tracing::info!(
+                            "Preview audio callback #{}: {} samples, max={:.4}, avg={:.4}",
+                            count,
+                            data.len(),
+                            max_sample,
+                            avg
+                        );
+                    }
+
                     // Mix to mono and send to emitter thread
                     let mono: Vec<f32> = data
                         .chunks(channels)
@@ -88,11 +107,15 @@ pub fn start_audio_preview(app: AppHandle, device_id: Option<String>) -> Result<
             .map_err(|e| e.to_string())?
     };
 
+    // Keep callback_count alive for the stream's lifetime
+    let _callback_count = callback_count;
+
     stream.play().map_err(|e| e.to_string())?;
 
     // Spawn emitter thread to send levels to frontend
     let emit_stop_flag = stop_flag.clone();
     let emit_handle = std::thread::spawn(move || {
+        let mut emit_count = 0u64;
         while !emit_stop_flag.load(Ordering::Relaxed) {
             // Process available audio data
             while let Ok(samples) = rx.try_recv() {
@@ -106,6 +129,17 @@ pub fn start_audio_preview(app: AppHandle, device_id: Option<String>) -> Result<
 
                 if let Err(e) = app.emit("audio-level", &event) {
                     tracing::warn!("Failed to emit audio level: {}", e);
+                }
+
+                emit_count += 1;
+                // Log every 30 emits (~1 second) to see if we're getting real audio
+                if emit_count % 30 == 0 {
+                    tracing::info!(
+                        "Preview: emitted {} events, rms={:.4}, peak={:.4}",
+                        emit_count,
+                        level.rms,
+                        level.peak
+                    );
                 }
             }
 
