@@ -6,6 +6,159 @@ pub mod macos;
 #[cfg(target_os = "linux")]
 pub mod linux;
 
+// Re-export GPU types for convenience
+#[cfg(target_os = "linux")]
+pub use linux::{GpuBackend, GpuDetectionResult, GpuInfo};
+
+/// GPU backend type (re-exported for all platforms)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GpuBackendType {
+    /// NVIDIA CUDA
+    Cuda,
+    /// AMD HIP/ROCm
+    Hipblas,
+    /// Vulkan (cross-platform)
+    Vulkan,
+    /// Apple Metal
+    Metal,
+    /// CPU only
+    Cpu,
+}
+
+impl std::fmt::Display for GpuBackendType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GpuBackendType::Cuda => write!(f, "CUDA"),
+            GpuBackendType::Hipblas => write!(f, "HIP/ROCm"),
+            GpuBackendType::Vulkan => write!(f, "Vulkan"),
+            GpuBackendType::Metal => write!(f, "Metal"),
+            GpuBackendType::Cpu => write!(f, "CPU"),
+        }
+    }
+}
+
+/// GPU information for the current system
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SystemGpuInfo {
+    /// The GPU backend compiled into this build
+    pub compiled_backend: String,
+    /// Whether GPU acceleration is available
+    pub gpu_available: bool,
+    /// Detected GPU name (if any)
+    pub gpu_name: Option<String>,
+    /// GPU VRAM in MB (if available)
+    pub vram_mb: Option<u64>,
+    /// List of all detected GPUs
+    pub detected_gpus: Vec<DetectedGpu>,
+}
+
+/// Information about a detected GPU
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DetectedGpu {
+    /// GPU backend type
+    pub backend: String,
+    /// GPU name/model
+    pub name: String,
+    /// VRAM in MB (if available)
+    pub vram_mb: Option<u64>,
+}
+
+/// Get GPU information for the current system
+#[tauri::command]
+pub fn get_gpu_info() -> SystemGpuInfo {
+    #[cfg(target_os = "linux")]
+    {
+        let detection = linux::detect_gpus();
+        SystemGpuInfo {
+            compiled_backend: detection.compiled_backend.to_string(),
+            gpu_available: detection.recommended_backend != linux::GpuBackend::Cpu,
+            gpu_name: detection.gpus.first().map(|g| g.name.clone()),
+            vram_mb: detection.gpus.first().and_then(|g| g.vram_mb),
+            detected_gpus: detection
+                .gpus
+                .iter()
+                .map(|g| DetectedGpu {
+                    backend: g.backend.to_string(),
+                    name: g.name.clone(),
+                    vram_mb: g.vram_mb,
+                })
+                .collect(),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, Metal is always available and enabled
+        SystemGpuInfo {
+            compiled_backend: "Metal".to_string(),
+            gpu_available: true,
+            gpu_name: get_macos_gpu_name(),
+            vram_mb: None, // macOS doesn't expose VRAM easily
+            detected_gpus: vec![DetectedGpu {
+                backend: "Metal".to_string(),
+                name: get_macos_gpu_name().unwrap_or_else(|| "Apple GPU".to_string()),
+                vram_mb: None,
+            }],
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        SystemGpuInfo {
+            compiled_backend: if cfg!(feature = "cuda") {
+                "CUDA".to_string()
+            } else {
+                "CPU".to_string()
+            },
+            gpu_available: cfg!(feature = "cuda"),
+            gpu_name: None,
+            vram_mb: None,
+            detected_gpus: vec![],
+        }
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        SystemGpuInfo {
+            compiled_backend: "CPU".to_string(),
+            gpu_available: false,
+            gpu_name: None,
+            vram_mb: None,
+            detected_gpus: vec![],
+        }
+    }
+}
+
+/// Get macOS GPU name via system_profiler
+#[cfg(target_os = "macos")]
+fn get_macos_gpu_name() -> Option<String> {
+    use std::process::Command;
+
+    let output = Command::new("system_profiler")
+        .args(["SPDisplaysDataType"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse GPU name from output
+    for line in stdout.lines() {
+        if line.contains("Chipset Model:") {
+            return line
+                .split(':')
+                .nth(1)
+                .map(|s| s.trim().to_string());
+        }
+    }
+
+    None
+}
+
 /// Check if accessibility permissions are available
 #[tauri::command]
 pub fn check_accessibility() -> bool {

@@ -293,6 +293,7 @@ pub fn run() {
             platform::request_accessibility,
             platform::check_microphone_permission,
             platform::request_microphone_permission,
+            platform::get_gpu_info,
             // Audio
             audio::device::list_audio_devices,
             audio::preview::start_audio_preview,
@@ -456,6 +457,7 @@ pub fn run() {
             keyboard_capture::is_key_capture_active,
             keyboard_capture::check_input_monitoring,
             keyboard_capture::request_input_monitoring,
+            keyboard_capture::report_key_event,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

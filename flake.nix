@@ -15,10 +15,9 @@
         pkgs = import nixpkgs {
           inherit system overlays;
           config = {
-            allowUnfreePredicate = pkg: builtins.elem (pkgs.lib.getName pkg) [
-              "pnpm"
-            ];
+            allowUnfree = true;  # Required for CUDA packages
             allowBroken = true;  # webkitgtk for Tauri on Linux
+            cudaSupport = true;
           };
         };
 
@@ -27,14 +26,22 @@
           extensions = [ "rust-src" "rust-analyzer" ];
         };
 
+        # CUDA packages for whisper.cpp GPU acceleration
+        cudaPackages = pkgs.cudaPackages_12;
+
       in {
         devShells.default = pkgs.mkShell {
           # Platform-specific library paths (Linux)
           LD_LIBRARY_PATH = pkgs.lib.optionalString pkgs.stdenv.isLinux
-            (pkgs.lib.makeLibraryPath [
+            (pkgs.lib.makeLibraryPath ([
               pkgs.libappindicator-gtk3
               pkgs.vulkan-loader
-            ]);
+            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+              # CUDA runtime libraries for whisper.cpp linking
+              cudaPackages.cuda_cudart
+              cudaPackages.cuda_cccl
+              cudaPackages.libcublas
+            ]) + ":/run/opengl-driver/lib");  # NVIDIA driver (libcuda.so)
 
           # Workaround for webkit2gtk Wayland issues (Linux only)
           # See: https://github.com/tauri-apps/tauri/issues/9460
@@ -42,6 +49,13 @@
 
           # libclang for whisper.cpp bindgen
           LIBCLANG_PATH = pkgs.lib.makeLibraryPath [ pkgs.llvmPackages.libclang ];
+
+          # CUDA environment variables for whisper.cpp
+          CUDA_PATH = pkgs.lib.optionalString pkgs.stdenv.isLinux "${cudaPackages.cudatoolkit}";
+          CUDA_HOME = pkgs.lib.optionalString pkgs.stdenv.isLinux "${cudaPackages.cudatoolkit}";
+
+          # Linker search path for CUDA driver (libcuda.so)
+          RUSTFLAGS = pkgs.lib.optionalString pkgs.stdenv.isLinux "-L /run/opengl-driver/lib";
 
           packages = with pkgs; [
             # Rust / Tauri
@@ -72,6 +86,14 @@
             vulkan-tools
             # Shader compiler for Vulkan
             shaderc
+            # CUDA toolkit for whisper.cpp CUDA acceleration (NVIDIA GPUs)
+            cudaPackages.cudatoolkit
+            cudaPackages.cuda_nvcc
+            cudaPackages.cuda_cudart
+            cudaPackages.cuda_cccl
+            cudaPackages.libcublas
+            # GCC for CUDA compilation
+            gcc
           ] ++ lib.optionals stdenv.isDarwin [
             # macOS: applesoft libraries (via Xcode) are used automatically
             libiconv
@@ -89,6 +111,8 @@
           ] ++ lib.optionals stdenv.isLinux [
             glib
             libsecret
+            # Native Wayland keyboard simulation (alternative to X11-based enigo)
+            wtype
           ];
 
           shellHook = ''
@@ -101,8 +125,14 @@
             echo "Commands:"
             echo "  pnpm install        - Install dependencies"
             echo "  pnpm tauri dev      - Start development build"
-            echo "  pnpm tauri build    - Build for production"
+            echo "  pnpm tauri dev -- --features cuda    - Dev with CUDA GPU acceleration"
+            echo "  pnpm tauri build -- --features cuda  - Build with CUDA"
             echo "  cargo test          - Run Rust tests (from src-tauri/)"
+            echo ""
+            echo "GPU Acceleration (Linux):"
+            echo "  --features cuda     - NVIDIA GPUs (requires CUDA drivers)"
+            echo "  --features hipblas  - AMD GPUs (requires ROCm)"
+            echo "  --features vulkan   - Cross-platform (experimental)"
           '';
         };
       });

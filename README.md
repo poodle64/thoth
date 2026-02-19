@@ -86,7 +86,7 @@ Once Thoth is open, the app walks you through setup:
 
 **Offline Transcription**
 
-- whisper.cpp with Metal GPU acceleration
+- whisper.cpp with GPU acceleration (Metal/CUDA/Vulkan)
 - Nothing leaves your machine
 - Works without internet
 - Real-time voice activity detection
@@ -119,7 +119,7 @@ Once Thoth is open, the app walks you through setup:
 **Cross-Platform**
 
 - macOS native (menu bar app)
-- Linux support planned
+- Linux with GPU acceleration
 - Global keyboard shortcuts
 - Recording indicator near cursor
 
@@ -169,6 +169,38 @@ pnpm tauri build  # Production build
 
 </details>
 
+<details>
+<summary><strong>Linux GPU Acceleration</strong></summary>
+
+whisper.cpp supports GPU acceleration on Linux for significantly faster transcription. Choose the backend that matches your hardware:
+
+| GPU | Feature Flag | Requirements |
+|-----|--------------|--------------|
+| NVIDIA | `--features cuda` | CUDA Toolkit 12.x, NVIDIA drivers |
+| AMD | `--features hipblas` | ROCm 6.x |
+| Any (experimental) | `--features vulkan` | Vulkan drivers |
+
+**Build with GPU acceleration:**
+
+```bash
+# NVIDIA (recommended for RTX/GTX cards)
+pnpm tauri build -- --features cuda
+
+# AMD (RX series)
+pnpm tauri build -- --features hipblas
+
+# Vulkan (cross-platform, experimental)
+pnpm tauri build -- --features vulkan
+```
+
+**NixOS users:** Use `nix develop` to enter the development environment with CUDA support pre-configured. The flake includes all necessary libraries and sets up `LD_LIBRARY_PATH` and `RUSTFLAGS` for CUDA linking.
+
+If GPU initialization fails, Thoth automatically falls back to CPU transcription.
+
+**GNOME Wayland users:** On first transcription, GNOME may show a "Remote Desktop" dialog requesting "Allow Remote Interaction". This is because GNOME doesn't support the Wayland virtual-keyboard protocol. Enable the permission once and GNOME will remember it for future transcriptions. Alternatively, use a different Wayland compositor (Sway, Hyprland) or X11 session.
+
+</details>
+
 ---
 
 ## Tech Stack
@@ -179,7 +211,7 @@ pnpm tauri build  # Production build
 | Backend       | Rust       | Memory safety, audio performance                             |
 | Frontend      | Svelte 5   | Reactive UI with runes                                       |
 | Audio         | cpal       | Cross-platform audio capture                                 |
-| Transcription | whisper-rs | whisper.cpp with Metal GPU acceleration (sherpa-rs fallback) |
+| Transcription | whisper-rs | whisper.cpp with GPU acceleration (sherpa-rs fallback) |
 | Database      | SQLite     | Local persistence with migrations                            |
 | AI            | Ollama     | Local LLM enhancement                                        |
 
@@ -197,7 +229,7 @@ pnpm tauri build  # Production build
 <details>
 <summary><strong>Core Technology</strong></summary>
 
-- [whisper.cpp](https://github.com/ggerganov/whisper.cpp). High-performance speech recognition with Metal GPU acceleration
+- [whisper.cpp](https://github.com/ggerganov/whisper.cpp). High-performance speech recognition with GPU acceleration (Metal/CUDA/Vulkan)
 - [whisper-rs](https://github.com/tazz4843/whisper-rs). Rust bindings for whisper.cpp
 - [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx). Fallback speech recognition inference
 - [NVIDIA Parakeet](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/parakeet-tdt-1.1b). Speech-to-text models

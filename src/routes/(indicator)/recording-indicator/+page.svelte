@@ -4,9 +4,9 @@
   import { invoke } from '@tauri-apps/api/core';
   import {
     getCurrentWindow,
+    Window,
     PhysicalPosition,
     LogicalPosition,
-    Window,
     monitorFromPoint
   } from '@tauri-apps/api/window';
 

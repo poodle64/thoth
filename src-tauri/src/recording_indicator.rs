@@ -6,7 +6,15 @@
 //!
 //! The indicator window is pre-warmed at app startup to eliminate any delay
 //! when showing it for the first time.
+//!
+//! Can be disabled via config (general.show_recording_indicator) for users
+//! who prefer no visual indicator (e.g., tiling window manager users).
+//!
+//! Note: On Wayland, mouse tracking and precise window positioning don't work
+//! reliably due to Wayland's security model. Users may want to disable the
+//! indicator on Wayland.
 
+use crate::config;
 use crate::mouse_tracker;
 use tauri::{AppHandle, LogicalPosition, Manager, Runtime, WebviewWindow};
 
@@ -19,6 +27,24 @@ const PILL_HEIGHT: f64 = 58.0;
 
 /// Fallback: padding from bottom of screen (above dock)
 const BOTTOM_PADDING: f64 = 120.0;
+
+/// Check if we're running on Wayland (where indicator positioning won't work well)
+#[cfg(target_os = "linux")]
+fn is_wayland() -> bool {
+    // Check XDG_SESSION_TYPE first (most reliable)
+    if let Ok(session_type) = std::env::var("XDG_SESSION_TYPE") {
+        if session_type.to_lowercase() == "wayland" {
+            return true;
+        }
+    }
+    // Also check WAYLAND_DISPLAY
+    std::env::var("WAYLAND_DISPLAY").is_ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn is_wayland() -> bool {
+    false
+}
 
 /// Get the recording indicator window
 fn get_indicator_window(app: &AppHandle) -> Option<WebviewWindow> {
@@ -74,23 +100,70 @@ pub(crate) fn find_monitor_for_point(
 /// Positions the indicator near the mouse cursor and starts cursor-following
 /// tracking. Falls back to bottom-centre of the main window's monitor if
 /// the mouse position cannot be determined.
+///
+/// Returns silently if the recording indicator is disabled in config.
 #[tauri::command]
 pub fn show_recording_indicator(app: AppHandle) -> Result<(), String> {
+    tracing::info!("show_recording_indicator called");
+
+    // Check if recording indicator is enabled in config
+    // If config read fails, default to showing the indicator (safe fallback)
+    let show_indicator = config::get_config()
+        .map(|c| c.general.show_recording_indicator)
+        .unwrap_or_else(|e| {
+            tracing::warn!("Failed to read config for indicator toggle: {}, defaulting to show", e);
+            true
+        });
+
+    tracing::info!("Recording indicator config: show_indicator={}", show_indicator);
+
+    if !show_indicator {
+        tracing::info!("Recording indicator disabled in config, skipping show");
+        return Ok(());
+    }
+
+    // Warn on Wayland where positioning won't work well
+    if is_wayland() {
+        tracing::warn!("Running on Wayland - indicator positioning may not work correctly. Consider disabling in settings.");
+    }
+
     let indicator = get_indicator_window(&app)
         .ok_or_else(|| "Recording indicator window not found".to_string())?;
+
+    tracing::info!("Got indicator window, current visible state: {:?}", indicator.is_visible());
+
+    // On Linux, show FIRST before positioning - this ensures the window is mapped
+    #[cfg(target_os = "linux")]
+    {
+        tracing::info!("About to call indicator.show() (Linux)...");
+        indicator.show().map_err(|e| {
+            tracing::error!("Failed to show indicator window: {}", e);
+            e.to_string()
+        })?;
+        tracing::info!("Recording indicator window shown successfully (Linux), visible: {:?}", indicator.is_visible());
+    }
 
     // Position at current mouse cursor for instant feedback
     if let Some((x, y)) = mouse_tracker::get_initial_position() {
         indicator
             .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
             .map_err(|e| e.to_string())?;
-        indicator.show().map_err(|e| e.to_string())?;
-        tracing::debug!("Recording indicator shown at cursor ({}, {})", x, y);
+        tracing::debug!("Recording indicator positioned at cursor ({}, {})", x, y);
     } else {
         // Fallback: position at bottom centre of main window's monitor
         tracing::info!("No mouse position available, falling back to bottom-centre");
         position_at_bottom_centre(&app, &indicator)?;
-        indicator.show().map_err(|e| e.to_string())?;
+    }
+
+    // On macOS, show after positioning
+    #[cfg(not(target_os = "linux"))]
+    {
+        tracing::info!("About to call indicator.show() (macOS)...");
+        indicator.show().map_err(|e| {
+            tracing::error!("Failed to show indicator window: {}", e);
+            e.to_string()
+        })?;
+        tracing::info!("Recording indicator window shown successfully (macOS), visible: {:?}", indicator.is_visible());
     }
 
     mouse_tracker::start_tracking();
@@ -153,22 +226,38 @@ fn position_at_bottom_centre(app: &AppHandle, indicator: &WebviewWindow) -> Resu
 ///
 /// We move off-screen instead of using hide() to avoid macOS window
 /// show/hide animation delays - this makes subsequent shows instant.
+///
+/// On Linux/Wayland, we use actual hide() since the window has been mapped
+/// during pre-warm. Positioning doesn't work (compositor controls it).
 #[tauri::command]
 pub fn hide_recording_indicator(app: AppHandle) -> Result<(), String> {
-    // Stop mouse tracking before moving off-screen
+    tracing::info!("hide_recording_indicator called");
+
+    // Stop mouse tracking before hiding
     mouse_tracker::stop_tracking();
 
     let window = get_indicator_window(&app)
         .ok_or_else(|| "Recording indicator window not found".to_string())?;
 
-    // Move off-screen instead of hiding - this avoids animation delays
-    window
-        .set_position(tauri::Position::Logical(LogicalPosition::new(
-            -10000.0, -10000.0,
-        )))
-        .map_err(|e| e.to_string())?;
+    // On Linux, use actual hide() - this should work now that the window
+    // has been mapped during pre-warm.
+    #[cfg(target_os = "linux")]
+    {
+        window.hide().map_err(|e| e.to_string())?;
+        tracing::info!("Recording indicator hidden (Linux)");
+    }
 
-    tracing::debug!("Recording indicator moved off-screen (hidden)");
+    #[cfg(not(target_os = "linux"))]
+    {
+        // Move off-screen instead of hiding - this avoids animation delays
+        window
+            .set_position(tauri::Position::Logical(LogicalPosition::new(
+                -10000.0, -10000.0,
+            )))
+            .map_err(|e| e.to_string())?;
+        tracing::info!("Recording indicator moved off-screen (hidden)");
+    }
+
     Ok(())
 }
 
@@ -179,11 +268,49 @@ pub fn hide_recording_indicator(app: AppHandle) -> Result<(), String> {
 ///
 /// The window is kept always-visible but positioned off-screen when "hidden"
 /// to avoid macOS window show/hide animation delays.
+///
+/// On Linux/Wayland, uses actual show()/hide() since compositor controls positioning.
+///
+/// Returns silently if the recording indicator is disabled in config.
 pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     tracing::info!("show_indicator_instant called (fast path)");
 
+    // Check if recording indicator is enabled in config
+    // If config read fails, default to showing the indicator (safe fallback)
+    let show_indicator = config::get_config()
+        .map(|c| c.general.show_recording_indicator)
+        .unwrap_or_else(|e| {
+            tracing::warn!("Failed to read config for indicator toggle: {}, defaulting to show", e);
+            true
+        });
+
+    tracing::info!("Recording indicator config: show_indicator={}", show_indicator);
+
+    if !show_indicator {
+        tracing::info!("Recording indicator disabled in config, skipping instant show");
+        return Ok(());
+    }
+
+    // Warn on Wayland where positioning won't work well
+    if is_wayland() {
+        tracing::warn!("Running on Wayland - indicator positioning may not work correctly. Consider disabling in settings.");
+    }
+
     let indicator = get_indicator_window_generic(app)
         .ok_or_else(|| "Recording indicator window not found".to_string())?;
+
+    tracing::info!("Got indicator window (instant), current visible state: {:?}", indicator.is_visible());
+
+    // On Linux, show FIRST before positioning - this ensures the window is mapped
+    #[cfg(target_os = "linux")]
+    {
+        tracing::info!("About to call indicator.show() (Linux instant)...");
+        indicator.show().map_err(|e| {
+            tracing::error!("Failed to show indicator window (Linux instant): {}", e);
+            e.to_string()
+        })?;
+        tracing::info!("Recording indicator window shown successfully (Linux instant), visible: {:?}", indicator.is_visible());
+    }
 
     // Position at current mouse cursor for instant feedback.
     // The mouse tracker will then keep it following the cursor.
@@ -191,11 +318,9 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
         indicator
             .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
             .map_err(|e| e.to_string())?;
-        let _ = indicator.show();
-        tracing::debug!("Recording indicator shown at cursor ({}, {})", x, y);
+        tracing::debug!("Recording indicator positioned at cursor ({}, {})", x, y);
     } else {
-        // Fallback if mouse position unavailable: show at primary monitor centre-bottom
-        let _ = indicator.show();
+        // Fallback if mouse position unavailable: position at primary monitor centre-bottom
         if let Ok(Some(monitor)) = indicator.primary_monitor() {
             let scale = monitor.scale_factor();
             let pos = monitor.position();
@@ -208,7 +333,18 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
             let y = my + mh - PILL_HEIGHT - BOTTOM_PADDING;
             let _ = indicator.set_position(tauri::Position::Logical(LogicalPosition::new(x, y)));
         }
-        tracing::debug!("Recording indicator shown at fallback position");
+        tracing::debug!("Recording indicator positioned at fallback (bottom-centre)");
+    }
+
+    // On macOS, show after positioning
+    #[cfg(not(target_os = "linux"))]
+    {
+        tracing::info!("About to call indicator.show() (macOS instant)...");
+        indicator.show().map_err(|e| {
+            tracing::error!("Failed to show indicator window (macOS instant): {}", e);
+            e.to_string()
+        })?;
+        tracing::info!("Recording indicator window shown successfully (macOS instant), visible: {:?}", indicator.is_visible());
     }
 
     mouse_tracker::start_tracking();
@@ -221,9 +357,17 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
 /// content is fully loaded and rendered before the user triggers recording.
 /// Should be called during app startup.
 ///
-/// The window is left visible but off-screen - we never hide() it to avoid
-/// macOS window show/hide animation delays.
+/// On macOS, the window is left visible but off-screen - we never hide() it
+/// to avoid show/hide animation delays.
+///
+/// On Linux/Wayland, we show then hide the window during pre-warm to ensure
+/// it's properly mapped with the compositor. Subsequent hide/show should work.
 pub fn prewarm_indicator_window(app: &AppHandle) {
+    // On Wayland, warn that the indicator may not work well
+    if is_wayland() {
+        tracing::info!("Running on Wayland - recording indicator positioning won't work (compositor controls it). Users can disable in settings.");
+    }
+
     let app_handle = app.clone();
 
     // Spawn async task to pre-warm without blocking startup
@@ -234,24 +378,50 @@ pub fn prewarm_indicator_window(app: &AppHandle) {
         if let Some(window) = app_handle.get_webview_window(INDICATOR_WINDOW_LABEL) {
             tracing::info!("Pre-warming recording indicator window");
 
-            // Move to off-screen position (far off-screen so it's never visible)
-            if let Err(e) = window.set_position(tauri::Position::Logical(LogicalPosition::new(
-                -10000.0, -10000.0,
-            ))) {
-                tracing::warn!("Failed to position indicator off-screen: {}", e);
+            // On Linux/Wayland, show then hide to map the window with compositor.
+            // This ensures subsequent show() calls will work.
+            #[cfg(target_os = "linux")]
+            {
+                tracing::info!("Pre-warming indicator for Linux/Wayland - showing then hiding");
+
+                // Show the window to register it with the compositor
+                if let Err(e) = window.show() {
+                    tracing::warn!("Failed to show indicator for pre-warming: {}", e);
+                }
+
+                // Wait for compositor to acknowledge
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+                // Now hide it - since it's been mapped, show() should work later
+                if let Err(e) = window.hide() {
+                    tracing::warn!("Failed to hide indicator after pre-warming: {}", e);
+                }
+
+                tracing::info!("Recording indicator window ready (Linux - hidden until needed)");
             }
 
-            // Show the window to trigger webview content load - we keep it visible
-            // (but off-screen) permanently to avoid show/hide animation delays
-            if let Err(e) = window.show() {
-                tracing::warn!("Failed to show indicator for pre-warming: {}", e);
+            // On macOS, move off-screen and keep visible to avoid animation delays
+            #[cfg(not(target_os = "linux"))]
+            {
+                // Move to off-screen position (far off-screen so it's never visible)
+                if let Err(e) = window.set_position(tauri::Position::Logical(LogicalPosition::new(
+                    -10000.0, -10000.0,
+                ))) {
+                    tracing::warn!("Failed to position indicator off-screen: {}", e);
+                }
+
+                // Show the window to trigger webview content load - we keep it visible
+                // (but off-screen) permanently to avoid show/hide animation delays
+                if let Err(e) = window.show() {
+                    tracing::warn!("Failed to show indicator for pre-warming: {}", e);
+                }
+
+                // Wait for the webview to fully load and render
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                // Window stays visible but off-screen - ready for instant positioning
+                tracing::info!("Recording indicator window pre-warmed and ready (kept visible off-screen)");
             }
-
-            // Wait for the webview to fully load and render
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-            // Window stays visible but off-screen - ready for instant positioning
-            tracing::info!("Recording indicator window pre-warmed and ready (kept visible off-screen)");
         } else {
             tracing::warn!("Recording indicator window not found for pre-warming");
         }

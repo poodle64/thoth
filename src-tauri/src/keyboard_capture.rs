@@ -3,6 +3,9 @@
 //! Uses device_query to poll keyboard state at the system level,
 //! bypassing webview limitations. This captures keys before they're
 //! consumed by macOS system shortcuts.
+//!
+//! On Wayland, device_query doesn't work (X11-only), so we fall back
+//! to webview-based capture via the `report_key_event` command.
 
 use device_query::{DeviceQuery, DeviceState, Keycode};
 use serde::{Deserialize, Serialize};
@@ -17,6 +20,18 @@ const POLL_INTERVAL_MS: u64 = 20;
 
 /// Global capture state
 static CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Check if we're running on Wayland (where device_query won't work)
+fn is_wayland() -> bool {
+    // Check XDG_SESSION_TYPE first (most reliable)
+    if let Ok(session_type) = std::env::var("XDG_SESSION_TYPE") {
+        if session_type.to_lowercase() == "wayland" {
+            return true;
+        }
+    }
+    // Also check WAYLAND_DISPLAY
+    std::env::var("WAYLAND_DISPLAY").is_ok()
+}
 
 /// Captured key combination
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,14 +86,29 @@ pub fn request_input_monitoring() {
 ///
 /// On macOS, requires Input Monitoring permission. Returns an error if
 /// permission is not granted.
+///
+/// On Wayland, device_query doesn't work (X11-only), so this returns
+/// "webview" mode - the frontend should use webview keyboard events instead.
 #[tauri::command]
-pub fn start_key_capture(app: AppHandle) -> Result<(), String> {
+pub fn start_key_capture(app: AppHandle) -> Result<String, String> {
     // Check Input Monitoring permission on macOS
     #[cfg(target_os = "macos")]
     {
         if !crate::platform::check_input_monitoring_permission() {
             tracing::warn!("Input Monitoring permission not granted");
             return Err("Input Monitoring permission required. Please grant permission in System Preferences > Privacy & Security > Input Monitoring".to_string());
+        }
+    }
+
+    // On Wayland, device_query won't work - use webview mode
+    #[cfg(target_os = "linux")]
+    {
+        if is_wayland() {
+            tracing::info!("Running on Wayland - using webview keyboard capture");
+            if CAPTURE_ACTIVE.swap(true, Ordering::SeqCst) {
+                return Err("Capture already active".to_string());
+            }
+            return Ok("webview".to_string());
         }
     }
 
@@ -141,7 +171,173 @@ pub fn start_key_capture(app: AppHandle) -> Result<(), String> {
         tracing::info!("Keyboard capture stopped");
     });
 
+    Ok("native".to_string())
+}
+
+/// Report a key event from the webview (used on Wayland where native capture doesn't work)
+///
+/// This command allows the frontend to report keyboard events directly.
+/// The backend processes them and emits capture events.
+#[tauri::command]
+pub fn report_key_event(
+    app: AppHandle,
+    key: String,
+    code: String,
+    ctrl: bool,
+    shift: bool,
+    alt: bool,
+    meta: bool,
+    event_type: String, // "keydown" or "keyup"
+) -> Result<(), String> {
+    if !CAPTURE_ACTIVE.load(Ordering::SeqCst) {
+        return Ok(()); // Not capturing, ignore
+    }
+
+    tracing::debug!(
+        "Webview key event: key={}, code={}, modifiers=({}{}{}{}), type={}",
+        key,
+        code,
+        if ctrl { "Ctrl " } else { "" },
+        if shift { "Shift " } else { "" },
+        if alt { "Alt " } else { "" },
+        if meta { "Meta " } else { "" },
+        event_type
+    );
+
+    // Process the key event
+    // On Wayland, we process keydown events and emit updates
+    if event_type == "keydown" {
+        // Build the accelerator string
+        let mut parts: Vec<String> = Vec::new();
+        let mut key_names: Vec<String> = Vec::new();
+
+        // Add modifiers in consistent order
+        if meta || ctrl {
+            parts.push("CommandOrControl".to_string());
+            key_names.push(if meta { "Super" } else { "Ctrl" }.to_string());
+        }
+        if alt {
+            parts.push("Alt".to_string());
+            key_names.push("Alt".to_string());
+        }
+        if shift {
+            parts.push("Shift".to_string());
+            key_names.push("Shift".to_string());
+        }
+
+        // Process the main key
+        let main_key = webview_key_to_accelerator(&key, &code);
+        if let Some(key_str) = &main_key {
+            parts.push(key_str.clone());
+            key_names.push(webview_key_to_display(&key, &code));
+        }
+
+        let accelerator = parts.join("+");
+        let is_valid = main_key.is_some();
+
+        // Emit update event
+        let event = KeyCaptureEvent {
+            keys: key_names.clone(),
+            accelerator: accelerator.clone(),
+            is_valid,
+        };
+
+        if let Err(e) = app.emit("key-capture-update", &event) {
+            tracing::warn!("Failed to emit key capture event: {}", e);
+        }
+
+        // Emit completion for valid shortcuts
+        if is_valid {
+            tracing::info!("Valid shortcut captured via webview: {}", accelerator);
+
+            let result = CapturedShortcut {
+                accelerator,
+                keys: key_names,
+                is_valid: true,
+            };
+
+            if let Err(e) = app.emit("key-capture-complete", &result) {
+                tracing::warn!("Failed to emit key capture complete: {}", e);
+            }
+
+            // Auto-stop capture after valid shortcut
+            CAPTURE_ACTIVE.store(false, Ordering::SeqCst);
+        }
+    }
+
     Ok(())
+}
+
+/// Convert webview key/code to Tauri accelerator format
+fn webview_key_to_accelerator(key: &str, code: &str) -> Option<String> {
+    // Handle special keys by code first (more reliable)
+    match code {
+        // Function keys
+        "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12"
+        | "F13" | "F14" | "F15" | "F16" | "F17" | "F18" | "F19" | "F20" => {
+            return Some(code.to_string());
+        }
+        // Special keys
+        "Space" => return Some("Space".to_string()),
+        "Enter" => return Some("Enter".to_string()),
+        "Tab" => return Some("Tab".to_string()),
+        "Backspace" => return Some("Backspace".to_string()),
+        "Delete" => return Some("Delete".to_string()),
+        "Insert" => return Some("Insert".to_string()),
+        "Home" => return Some("Home".to_string()),
+        "End" => return Some("End".to_string()),
+        "PageUp" => return Some("PageUp".to_string()),
+        "PageDown" => return Some("PageDown".to_string()),
+        "ArrowUp" => return Some("Up".to_string()),
+        "ArrowDown" => return Some("Down".to_string()),
+        "ArrowLeft" => return Some("Left".to_string()),
+        "ArrowRight" => return Some("Right".to_string()),
+        // Skip pure modifiers
+        "ControlLeft" | "ControlRight" | "ShiftLeft" | "ShiftRight" | "AltLeft" | "AltRight"
+        | "MetaLeft" | "MetaRight" => return None,
+        _ => {}
+    }
+
+    // Handle by key for letters and numbers
+    let key_upper = key.to_uppercase();
+    if key_upper.len() == 1 {
+        let c = key_upper.chars().next()?;
+        if c.is_ascii_alphabetic() {
+            return Some(key_upper);
+        }
+        if c.is_ascii_digit() {
+            return Some(key_upper);
+        }
+    }
+
+    // Handle some special keys by key name
+    match key {
+        " " => Some("Space".to_string()),
+        "+" => Some("Plus".to_string()),
+        "-" => Some("Minus".to_string()),
+        _ => None,
+    }
+}
+
+/// Convert webview key/code to display string
+fn webview_key_to_display(key: &str, code: &str) -> String {
+    match code {
+        "ArrowUp" => "↑".to_string(),
+        "ArrowDown" => "↓".to_string(),
+        "ArrowLeft" => "←".to_string(),
+        "ArrowRight" => "→".to_string(),
+        "Space" => "Space".to_string(),
+        "Enter" => "Return".to_string(),
+        "Backspace" => "⌫".to_string(),
+        "Tab" => "⇥".to_string(),
+        _ => {
+            if key.len() == 1 {
+                key.to_uppercase()
+            } else {
+                key.to_string()
+            }
+        }
+    }
 }
 
 /// Stop capturing keyboard input

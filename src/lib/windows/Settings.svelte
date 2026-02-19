@@ -350,6 +350,42 @@
               <div class="row-separator"></div>
               <div class="setting-row">
                 <div class="setting-info">
+                  <span class="setting-label">Recording Indicator</span>
+                  <span class="setting-description"
+                    >Show floating indicator during recording</span
+                  >
+                </div>
+                <label class="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={configStore.general.showRecordingIndicator}
+                    onchange={async () => {
+                      const newValue = !configStore.general.showRecordingIndicator;
+                      configStore.updateGeneral('showRecordingIndicator', newValue);
+                      await configStore.save();
+
+                      // Immediately hide or show the indicator
+                      try {
+                        if (newValue) {
+                          // If currently recording, show the indicator
+                          if (pipelineStore.isRecording) {
+                            await invoke('show_recording_indicator');
+                          }
+                        } else {
+                          // Always hide when toggling off
+                          await invoke('hide_recording_indicator');
+                        }
+                      } catch (e) {
+                        console.error('Failed to update indicator visibility:', e);
+                      }
+                    }}
+                  />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="row-separator"></div>
+              <div class="setting-row">
+                <div class="setting-info">
                   <span class="setting-label">Restore Clipboard</span>
                   <span class="setting-description"
                     >Restore original clipboard after pasting transcript</span

@@ -206,7 +206,7 @@
   /** Delete a custom prompt */
   async function deletePrompt(promptId: string): Promise<void> {
     try {
-      await invoke('delete_custom_prompt_cmd', { promptId });
+      await invoke('delete_custom_prompt_cmd', { prompt_id: promptId });
       await loadPrompts();
 
       // If the deleted prompt was selected, reset to default

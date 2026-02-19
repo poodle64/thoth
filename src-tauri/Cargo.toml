@@ -85,18 +85,25 @@ core-graphics = "0.24"
 [features]
 default = []
 parakeet = ["sherpa-rs"]
+# GPU acceleration for whisper.cpp (mutually exclusive, only use one)
+# Use: cargo build --features cuda      for NVIDIA GPUs
+# Use: cargo build --features hipblas   for AMD GPUs (ROCm/HIP)
+# Use: cargo build --features vulkan    for cross-platform Vulkan (experimental)
+cuda = ["whisper-rs/cuda"]
+hipblas = ["whisper-rs/hipblas"]
+vulkan = ["whisper-rs/vulkan"]
 
 # Linux-specific
 [target.'cfg(target_os = "linux")'.dependencies]
-# whisper-rs with Vulkan GPU acceleration (works on both AMD and NVIDIA)
-whisper-rs = { version = "0.15", default-features = false, features = ["vulkan"] }
+# whisper-rs - GPU features enabled via --features flag
+whisper-rs = { version = "0.15", default-features = false }
 # XDG Desktop Portal for Wayland global shortcuts
 ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
 # X11 support for display server detection and mouse tracking
 x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
 
-# Non-macOS, non-Linux (e.g., Windows)
-[target.'cfg(all(not(target_os = "macos"), not(target_os = "linux")))'.dependencies]
+# Windows - CPU mode with optional GPU via features
+[target.'cfg(target_os = "windows")'.dependencies]
 whisper-rs = { version = "0.15", default-features = false }
 [dev-dependencies]
 tempfile = "3.25"

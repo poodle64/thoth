@@ -7,7 +7,7 @@ use super::ring_buffer::AudioRingBuffer;
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// Audio recorder using cpal
@@ -133,10 +133,30 @@ impl AudioRecorder {
         let callback_buffer = self.ring_buffer.clone();
         let secondary_callback_buffer = self.secondary_buffer.clone();
 
+        // Debug: count callbacks and track max sample value
+        let callback_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let callback_count_clone = callback_count.clone();
+
         // Build input stream
         let stream = device.build_input_stream(
             &config.into(),
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                let count = callback_count_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+                // Debug: Log every 100 callbacks with sample stats
+                if count % 100 == 0 {
+                    let max_sample = data.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+                    let sum: f32 = data.iter().map(|s| s.abs()).sum();
+                    let avg = sum / data.len().max(1) as f32;
+                    tracing::debug!(
+                        "Audio callback #{}: {} samples, max={:.4}, avg={:.4}",
+                        count,
+                        data.len(),
+                        max_sample,
+                        avg
+                    );
+                }
+
                 // LOCK-FREE: Ring buffer write does not allocate
                 let written = callback_buffer.write(data);
                 if written < data.len() {

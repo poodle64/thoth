@@ -40,20 +40,52 @@ pub fn get_device_display_name(device: &cpal::Device) -> String {
 pub fn list_input_devices() -> Vec<AudioDevice> {
     let host = cpal::default_host();
 
+    // Log host information for debugging Linux audio issues
+    tracing::info!("CPAL host: {}", host.id().name());
+
     // Get default device ID for comparison
-    let default_device_id = host
-        .default_input_device()
+    let default_device = host.default_input_device();
+    let default_device_id = default_device
+        .as_ref()
         .and_then(|d| d.id().ok())
         .map(|id| id.to_string());
 
+    if let Some(ref device) = default_device {
+        let name = get_device_display_name(device);
+        if let Ok(config) = device.default_input_config() {
+            tracing::info!(
+                "Default input device: '{}', {}Hz, {}ch, format={:?}",
+                name,
+                config.sample_rate(),
+                config.channels(),
+                config.sample_format()
+            );
+        }
+    } else {
+        tracing::warn!("No default input device found!");
+    }
+
     // Enumerate all input devices
-    host.input_devices()
-        .map(|devices| {
-            devices
+    let devices: Vec<AudioDevice> = host
+        .input_devices()
+        .map(|device_iter| {
+            device_iter
                 .filter_map(|device| {
                     // Use id() for stable identification (persists across restarts)
                     let device_id = device.id().ok()?.to_string();
                     let device_name = get_device_display_name(&device);
+
+                    // Log each device for debugging
+                    if let Ok(config) = device.default_input_config() {
+                        tracing::debug!(
+                            "Found input device: '{}' (id: {}), {}Hz, {}ch",
+                            device_name,
+                            device_id,
+                            config.sample_rate(),
+                            config.channels()
+                        );
+                    }
+
                     Some(AudioDevice {
                         id: device_id.clone(),
                         name: device_name,
@@ -62,7 +94,10 @@ pub fn list_input_devices() -> Vec<AudioDevice> {
                 })
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    tracing::info!("Found {} input devices", devices.len());
+    devices
 }
 
 /// Get the default input device
@@ -89,6 +124,8 @@ pub fn find_input_device_by_id(id_str: &str) -> Option<cpal::Device> {
 /// If a device ID is configured and found, uses that device.
 /// Otherwise falls back to the system default.
 pub fn get_recording_device(device_id: Option<&str>) -> Option<cpal::Device> {
+    tracing::info!("get_recording_device called with device_id: {:?}", device_id);
+
     if let Some(id) = device_id {
         if let Some(device) = find_input_device_by_id(id) {
             let name = get_device_display_name(&device);
@@ -112,7 +149,19 @@ pub fn get_recording_device(device_id: Option<&str>) -> Option<cpal::Device> {
     let device = get_default_input_device();
     if let Some(ref d) = device {
         let name = get_device_display_name(d);
-        tracing::info!("Using default audio device: {}", name);
+        if let Ok(config) = d.default_input_config() {
+            tracing::info!(
+                "Using default audio device: '{}', {}Hz, {}ch, format={:?}",
+                name,
+                config.sample_rate(),
+                config.channels(),
+                config.sample_format()
+            );
+        } else {
+            tracing::info!("Using default audio device: '{}' (could not get config)", name);
+        }
+    } else {
+        tracing::error!("No default input device available!");
     }
     device
 }
