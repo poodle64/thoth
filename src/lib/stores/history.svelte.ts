@@ -250,6 +250,28 @@ function createHistoryStore() {
     }
   }
 
+  /** Delete all transcriptions */
+  async function deleteAll(): Promise<boolean> {
+    try {
+      await invoke('delete_all_transcriptions_cmd');
+
+      records = [];
+      selectedId = null;
+      pagination = {
+        offset: 0,
+        limit: 50,
+        hasMore: false,
+        isLoading: false,
+      };
+
+      return true;
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to delete all transcriptions';
+      console.error('Failed to delete all transcriptions:', e);
+      return false;
+    }
+  }
+
   /** Copy text to clipboard */
   async function copyToClipboard(text: string): Promise<boolean> {
     try {
@@ -336,6 +358,7 @@ function createHistoryStore() {
     selectRecord,
     deleteRecord,
     deleteRecords,
+    deleteAll,
     copyToClipboard,
     addRecord,
     updateRecord,

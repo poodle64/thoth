@@ -15,6 +15,7 @@
   import { onMount } from 'svelte';
   import type { TranscriptionRecord } from '../stores/history.svelte';
   import { historyStore } from '../stores/history.svelte';
+  import { toastStore } from '../stores/toast.svelte';
   import HistoryList from './HistoryList.svelte';
   import HistoryFilterPanel, { type FilterState } from './HistoryFilterPanel.svelte';
   import ExportDialog from './ExportDialog.svelte';
@@ -32,7 +33,6 @@
     showUnenhancedOnly: false,
   };
 
-  let copyFeedback = $state<string | null>(null);
   let deleteConfirm = $state<TranscriptionRecord | null>(null);
   let showExportDialog = $state(false);
   let showPerformanceDialog = $state(false);
@@ -41,7 +41,11 @@
   let filters = $state<FilterState>({ ...defaultFilters });
   let bulkSelectedIds = $state(new Set<string>());
   let bulkDeleteConfirm = $state(false);
+  let clearAllConfirm = $state(false);
   let bulkExportIds = $state<string[]>([]);
+
+  /** Whether we're in bulk selection mode */
+  const bulkMode = $derived(bulkSelectedIds.size > 0);
 
   /** Apply advanced filters to records */
   const filteredRecords = $derived.by(() => {
@@ -100,9 +104,25 @@
       filters.showUnenhancedOnly
   );
 
+  /** Whether all filtered items are selected */
+  const allSelected = $derived(
+    filteredRecords.length > 0 && bulkSelectedIds.size === filteredRecords.length
+  );
+
+  /** Whether some (but not all) filtered items are selected */
+  const someSelected = $derived(bulkSelectedIds.size > 0 && !allSelected);
+
   // Load initial data on mount
   onMount(() => {
     historyStore.loadRecords();
+  });
+
+  // Route history store errors through the toast system
+  $effect(() => {
+    if (historyStore.error) {
+      toastStore.error(historyStore.error);
+      historyStore.clearError();
+    }
   });
 
   /** Handle filter changes from panel */
@@ -120,6 +140,22 @@
     filters = { ...defaultFilters };
   }
 
+  /** Handle search input with debouncing */
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  function handleSearchInput(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const value = target.value;
+
+    if (searchDebounceTimer) {
+      clearTimeout(searchDebounceTimer);
+    }
+
+    searchDebounceTimer = setTimeout(() => {
+      filters = { ...filters, searchQuery: value };
+      searchDebounceTimer = null;
+    }, 300);
+  }
+
   /** Handle item selection */
   function handleSelect(item: TranscriptionRecord) {
     historyStore.selectRecord(item.id);
@@ -129,10 +165,7 @@
   async function handleCopy(item: TranscriptionRecord) {
     const success = await historyStore.copyToClipboard(item.text);
     if (success) {
-      copyFeedback = 'Copied to clipboard';
-      setTimeout(() => {
-        copyFeedback = null;
-      }, 2000);
+      toastStore.success('Copied to clipboard');
     }
   }
 
@@ -176,14 +209,9 @@
   /** Handle keyboard navigation in modal */
   function handleModalKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
-      cancelDelete();
-    }
-  }
-
-  /** Handle bulk delete modal keyboard */
-  function handleBulkDeleteKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      cancelBulkDelete();
+      if (deleteConfirm) cancelDelete();
+      else if (bulkDeleteConfirm) cancelBulkDelete();
+      else if (clearAllConfirm) clearAllConfirm = false;
     }
   }
 
@@ -198,7 +226,7 @@
       }
     }
     // Escape to clear bulk selection
-    if (event.key === 'Escape' && bulkSelectedIds.size > 0 && !deleteConfirm && !bulkDeleteConfirm) {
+    if (event.key === 'Escape' && bulkSelectedIds.size > 0) {
       deselectAll();
     }
     // Backspace/Delete for bulk delete when items selected
@@ -239,6 +267,15 @@
     bulkSelectedIds = next;
   }
 
+  /** Toggle select-all checkbox */
+  function toggleSelectAll() {
+    if (allSelected) {
+      deselectAll();
+    } else {
+      selectAll();
+    }
+  }
+
   /** Select all visible/filtered items */
   function selectAll() {
     bulkSelectedIds = new Set(filteredRecords.map((r) => r.id));
@@ -259,9 +296,11 @@
   /** Confirm bulk deletion */
   async function confirmBulkDelete() {
     const ids = [...bulkSelectedIds];
+    const count = ids.length;
     const success = await historyStore.deleteRecords(ids);
     if (success) {
       bulkSelectedIds = new Set();
+      toastStore.success(`Deleted ${count} transcription${count === 1 ? '' : 's'}`);
     }
     bulkDeleteConfirm = false;
   }
@@ -271,95 +310,208 @@
     bulkDeleteConfirm = false;
   }
 
+  /** Request clear all confirmation */
+  function handleClearAllRequest() {
+    clearAllConfirm = true;
+  }
+
+  /** Confirm clear all */
+  async function confirmClearAll() {
+    const success = await historyStore.deleteAll();
+    if (success) {
+      bulkSelectedIds = new Set();
+      toastStore.success('All history cleared');
+    }
+    clearAllConfirm = false;
+  }
+
   /** Open export dialog with bulk selection context */
   function handleBulkExport() {
     bulkExportIds = [...bulkSelectedIds];
     showExportDialog = true;
   }
+
+  /** Determine active modal for keyboard handling */
+  const hasActiveModal = $derived(deleteConfirm !== null || bulkDeleteConfirm || clearAllConfirm);
 </script>
 
-<svelte:window onkeydown={deleteConfirm ? handleModalKeydown : bulkDeleteConfirm ? handleBulkDeleteKeydown : handleGlobalKeydown} />
+<svelte:window onkeydown={hasActiveModal ? handleModalKeydown : handleGlobalKeydown} />
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="history-pane">
   <div class="toolbar">
-    <div class="toolbar-left">
-      <span class="count">
-        {#if hasActiveFilters}
-          {filteredRecords.length} of {historyStore.records.length}
-        {:else}
-          {filteredRecords.length} items
-        {/if}
-      </span>
-    </div>
-
-    <div class="toolbar-right">
-      {#if hasActiveFilters && !showFilterPanel}
-        <button class="clear-filters-btn" onclick={clearFilters} type="button">
-          Clear filters
+    {#if bulkMode}
+      <!-- Selection toolbar -->
+      <div class="toolbar-left">
+        <button
+          class="select-all-checkbox"
+          onclick={toggleSelectAll}
+          type="button"
+          title={allSelected ? 'Deselect all' : 'Select all'}
+          aria-label={allSelected ? 'Deselect all' : 'Select all'}
+        >
+          <div class="checkbox" class:checked={allSelected} class:indeterminate={someSelected}>
+            {#if allSelected}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            {:else if someSelected}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            {/if}
+          </div>
         </button>
-      {/if}
-      <button
-        class="filter-toggle-btn"
-        class:active={showFilterPanel}
-        onclick={toggleFilterPanel}
-        aria-expanded={showFilterPanel}
-        aria-label="Toggle filter panel"
-        type="button"
-      >
-        <svg
-          class="filter-icon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
+        <span class="bulk-count">{bulkSelectedIds.size} selected</span>
+      </div>
+      <div class="toolbar-right">
+        <button class="toolbar-btn" onclick={handleBulkExport} type="button" title="Export selected">
+          <svg class="toolbar-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Export
+        </button>
+        <button class="toolbar-btn danger" onclick={handleBulkDeleteRequest} type="button" title="Delete selected">
+          <svg class="toolbar-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+          Delete
+        </button>
+        <button class="toolbar-btn" onclick={deselectAll} type="button" title="Cancel selection">
+          <svg class="toolbar-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+    {:else}
+      <!-- Default toolbar -->
+      <div class="toolbar-left">
+        <button
+          class="select-all-checkbox"
+          onclick={toggleSelectAll}
+          type="button"
+          title="Select all"
+          aria-label="Select all"
+          disabled={filteredRecords.length === 0}
         >
-          <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
-        </svg>
-        <span>Filters</span>
-        {#if hasActiveFilters}
-          <span class="filter-badge"></span>
+          <div class="checkbox">
+          </div>
+        </button>
+        <div class="search-field">
+          <svg
+            class="search-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="11" cy="11" r="8"></circle>
+            <path d="m21 21-4.35-4.35"></path>
+          </svg>
+          <input
+            type="search"
+            class="search-input"
+            placeholder="Search..."
+            value={filters.searchQuery}
+            oninput={handleSearchInput}
+          />
+        </div>
+        <span class="count">
+          {#if hasActiveFilters}
+            {filteredRecords.length} of {historyStore.records.length}
+          {:else}
+            {filteredRecords.length}
+          {/if}
+        </span>
+      </div>
+
+      <div class="toolbar-right">
+        {#if hasActiveFilters && !showFilterPanel}
+          <button class="toolbar-btn subtle" onclick={clearFilters} type="button">
+            Clear
+          </button>
         {/if}
-      </button>
-      <button
-        class="btn stats-btn"
-        onclick={() => (showPerformanceDialog = true)}
-        title="Performance analysis"
-        type="button"
-      >
-        <svg
-          class="btn-icon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
+        <button
+          class="toolbar-btn"
+          class:active={showFilterPanel}
+          onclick={toggleFilterPanel}
+          aria-expanded={showFilterPanel}
+          aria-label="Toggle filter panel"
+          type="button"
         >
-          <line x1="18" y1="20" x2="18" y2="10"></line>
-          <line x1="12" y1="20" x2="12" y2="4"></line>
-          <line x1="6" y1="20" x2="6" y2="14"></line>
-        </svg>
-        Stats
-      </button>
-      <button
-        class="btn export-btn"
-        onclick={() => (showExportDialog = true)}
-        title="Export transcriptions"
-        type="button"
-      >
-        <svg
-          class="btn-icon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
+          <svg
+            class="toolbar-btn-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+          </svg>
+          {#if hasActiveFilters}
+            <span class="filter-badge"></span>
+          {/if}
+        </button>
+        <button
+          class="toolbar-btn"
+          onclick={() => (showPerformanceDialog = true)}
+          title="Performance analysis"
+          type="button"
         >
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-          <polyline points="7 10 12 15 17 10"></polyline>
-          <line x1="12" y1="15" x2="12" y2="3"></line>
-        </svg>
-        Export
-      </button>
-    </div>
+          <svg
+            class="toolbar-btn-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <line x1="18" y1="20" x2="18" y2="10"></line>
+            <line x1="12" y1="20" x2="12" y2="4"></line>
+            <line x1="6" y1="20" x2="6" y2="14"></line>
+          </svg>
+        </button>
+        <button
+          class="toolbar-btn"
+          onclick={() => (showExportDialog = true)}
+          title="Export transcriptions"
+          type="button"
+        >
+          <svg
+            class="toolbar-btn-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+        </button>
+        {#if historyStore.records.length > 0}
+          <button
+            class="toolbar-btn danger"
+            onclick={handleClearAllRequest}
+            title="Clear all history"
+            type="button"
+          >
+            <svg
+              class="toolbar-btn-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+          </button>
+        {/if}
+      </div>
+    {/if}
   </div>
 
   <div class="content">
@@ -375,7 +527,42 @@
         onLoadMore={handleLoadMore}
         isLoading={historyStore.pagination.isLoading}
         hasMore={historyStore.pagination.hasMore && !hasActiveFilters}
-      />
+      >
+        {#snippet emptyState()}
+          {#if hasActiveFilters}
+            <div class="list-empty-state">
+              <svg
+                class="list-empty-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              >
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.35-4.35"></path>
+              </svg>
+              <p class="list-empty-title">No matches</p>
+              <p class="list-empty-hint">Try adjusting your search or filters.</p>
+              <button class="list-empty-btn" onclick={clearFilters} type="button">Clear filters</button>
+            </div>
+          {:else}
+            <div class="list-empty-state">
+              <svg
+                class="list-empty-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              >
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <p class="list-empty-title">No transcriptions yet</p>
+              <p class="list-empty-hint">Record or import audio to get started.</p>
+            </div>
+          {/if}
+        {/snippet}
+      </HistoryList>
     </aside>
 
     <main class="detail-panel">
@@ -581,32 +768,6 @@
     {/if}
   </div>
 
-  {#if historyStore.error}
-    <div class="error-toast">
-      <span>{historyStore.error}</span>
-      <button onclick={() => historyStore.clearError()} aria-label="Dismiss error" type="button">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M18 6L6 18M6 6l12 12"></path>
-        </svg>
-      </button>
-    </div>
-  {/if}
-
-  {#if copyFeedback}
-    <div class="toast success">
-      <svg
-        class="toast-icon"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-      >
-        <path d="M20 6L9 17l-5-5"></path>
-      </svg>
-      <span>{copyFeedback}</span>
-    </div>
-  {/if}
-
   {#if deleteConfirm}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="modal-overlay" onclick={cancelDelete} role="presentation">
@@ -642,32 +803,19 @@
     </div>
   {/if}
 
-  {#if bulkSelectedIds.size > 0}
-    <div class="bulk-toolbar">
-      <span class="bulk-count">{bulkSelectedIds.size} selected</span>
-      <div class="bulk-actions">
-        <button class="bulk-btn" onclick={selectAll} type="button" title="Select all">
-          Select all
-        </button>
-        <button class="bulk-btn" onclick={deselectAll} type="button" title="Deselect all">
-          Deselect
-        </button>
-        <button class="bulk-btn" onclick={handleBulkExport} type="button" title="Export selected">
-          <svg class="bulk-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="7 10 12 15 17 10"></polyline>
-            <line x1="12" y1="15" x2="12" y2="3"></line>
-          </svg>
-          Export
-        </button>
-        <button class="bulk-btn danger" onclick={handleBulkDeleteRequest} type="button" title="Delete selected">
-          <svg class="bulk-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="3 6 5 6 21 6"></polyline>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-          </svg>
-          Delete
-        </button>
-      </div>
+  {#if clearAllConfirm}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div class="modal-overlay" onclick={() => (clearAllConfirm = false)} role="presentation">
+      <dialog class="modal" open aria-labelledby="clear-all-title">
+        <h3 id="clear-all-title" class="modal-title">Clear All History</h3>
+        <p class="modal-text">
+          This will permanently delete all {historyStore.records.length} transcription{historyStore.records.length === 1 ? '' : 's'}. This action cannot be undone.
+        </p>
+        <div class="modal-actions">
+          <button class="btn" onclick={() => (clearAllConfirm = false)} type="button">Cancel</button>
+          <button class="btn danger" onclick={confirmClearAll} type="button">Clear All</button>
+        </div>
+      </dialog>
     </div>
   {/if}
 
@@ -685,77 +833,189 @@
     position: relative;
   }
 
+  /* ========== Toolbar ========== */
+
   .toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--spacing-md) var(--spacing-lg);
+    padding: var(--spacing-sm) var(--spacing-md);
     background: var(--color-bg-secondary);
     border-bottom: 1px solid var(--color-border);
+    gap: var(--spacing-sm);
+    min-height: 44px;
   }
 
   .toolbar-left {
     display: flex;
     align-items: center;
-    gap: var(--spacing-md);
+    gap: var(--spacing-sm);
+    flex: 1;
+    min-width: 0;
   }
 
   .toolbar-right {
     display: flex;
     align-items: center;
-    gap: var(--spacing-sm);
+    gap: var(--spacing-xs);
+    flex-shrink: 0;
+  }
+
+  /* Select-all checkbox */
+  .select-all-checkbox {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background var(--transition-fast);
+  }
+
+  .select-all-checkbox:hover:not(:disabled) {
+    background: var(--color-bg-hover);
+  }
+
+  .select-all-checkbox:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+
+  .checkbox {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--color-text-tertiary);
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+      background var(--transition-fast),
+      border-color var(--transition-fast);
+  }
+
+  .checkbox.checked,
+  .checkbox.indeterminate {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+
+  .checkbox svg {
+    width: 12px;
+    height: 12px;
+    color: white;
+  }
+
+  /* Inline search */
+  .search-field {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    max-width: 240px;
+  }
+
+  .search-icon {
+    position: absolute;
+    left: 8px;
+    width: 14px;
+    height: 14px;
+    color: var(--color-text-tertiary);
+    pointer-events: none;
+  }
+
+  .search-input {
+    width: 100%;
+    padding: 5px 8px 5px 28px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    font-size: var(--text-xs);
+  }
+
+  .search-input::placeholder {
+    color: var(--color-text-tertiary);
+  }
+
+  .search-input:focus {
+    border-color: var(--color-accent);
+    outline: none;
   }
 
   .count {
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
     color: var(--color-text-tertiary);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .bulk-count {
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--color-accent);
     white-space: nowrap;
   }
 
-  .clear-filters-btn {
-    padding: var(--spacing-xs) var(--spacing-sm);
-    font-size: var(--text-xs);
-    background: transparent;
-    border: 1px solid var(--color-border);
-    color: var(--color-text-secondary);
-  }
-
-  .clear-filters-btn:hover {
-    background: var(--color-bg-hover);
-    color: var(--color-text-primary);
-  }
-
-  .filter-toggle-btn {
+  /* Toolbar buttons */
+  .toolbar-btn {
     display: flex;
     align-items: center;
     gap: var(--spacing-xs);
-    padding: var(--spacing-sm) var(--spacing-md);
+    padding: 5px 8px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     background: var(--color-bg-tertiary);
     color: var(--color-text-secondary);
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
     cursor: pointer;
     transition:
       background var(--transition-fast),
+      color var(--transition-fast),
       border-color var(--transition-fast);
+    white-space: nowrap;
     position: relative;
   }
 
-  .filter-toggle-btn:hover {
+  .toolbar-btn:hover {
     background: var(--color-bg-hover);
     color: var(--color-text-primary);
   }
 
-  .filter-toggle-btn.active {
+  .toolbar-btn.active {
     background: var(--color-accent);
     border-color: var(--color-accent);
     color: white;
   }
 
-  .filter-icon {
+  .toolbar-btn.subtle {
+    background: transparent;
+    border-color: transparent;
+  }
+
+  .toolbar-btn.subtle:hover {
+    background: var(--color-bg-hover);
+  }
+
+  .toolbar-btn.danger {
+    color: var(--color-error);
+    border-color: color-mix(in srgb, var(--color-error) 40%, transparent);
+  }
+
+  .toolbar-btn.danger:hover {
+    background: color-mix(in srgb, var(--color-error) 10%, transparent);
+  }
+
+  .toolbar-btn-icon {
     width: 14px;
     height: 14px;
+    flex-shrink: 0;
   }
 
   .filter-badge {
@@ -769,14 +1029,12 @@
     border: 2px solid var(--color-bg-secondary);
   }
 
-  .filter-toggle-btn.active .filter-badge {
+  .toolbar-btn.active .filter-badge {
     background: white;
     border-color: var(--color-accent);
   }
 
-  .export-btn {
-    flex-shrink: 0;
-  }
+  /* ========== Content ========== */
 
   .content {
     display: flex;
@@ -798,6 +1056,8 @@
     overflow: hidden;
     min-width: 0;
   }
+
+  /* ========== Detail View ========== */
 
   .detail-header {
     display: flex;
@@ -1043,6 +1303,8 @@
     height: 16px;
   }
 
+  /* ========== Empty States ========== */
+
   .empty-detail {
     display: flex;
     flex-direction: column;
@@ -1065,73 +1327,53 @@
     margin: 0;
   }
 
-  .toast,
-  .error-toast {
-    position: absolute;
-    bottom: var(--spacing-lg);
-    left: 50%;
-    transform: translateX(-50%);
+  /* List empty state (passed as snippet to HistoryList) */
+  .list-empty-state {
     display: flex;
-    align-items: center;
-    gap: var(--spacing-sm);
-    padding: var(--spacing-sm) var(--spacing-md);
-    border-radius: var(--radius-md);
-    font-size: var(--text-sm);
-    box-shadow: var(--shadow-lg);
-    animation: slideUp 0.2s ease;
-    z-index: 100;
-  }
-
-  .toast.success {
-    background: var(--color-success);
-    color: white;
-  }
-
-  .toast-icon {
-    width: 16px;
-    height: 16px;
-  }
-
-  .error-toast {
-    background: var(--color-error);
-    color: white;
-  }
-
-  .error-toast button {
-    display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: white;
+    height: 100%;
+    padding: var(--spacing-xl);
+    text-align: center;
+  }
+
+  .list-empty-icon {
+    width: 40px;
+    height: 40px;
+    color: var(--color-text-tertiary);
+    margin-bottom: var(--spacing-md);
+  }
+
+  .list-empty-title {
+    font-size: var(--text-base);
+    color: var(--color-text-secondary);
+    margin: 0 0 var(--spacing-xs) 0;
+  }
+
+  .list-empty-hint {
+    font-size: var(--text-sm);
+    color: var(--color-text-tertiary);
+    margin: 0 0 var(--spacing-md) 0;
+  }
+
+  .list-empty-btn {
+    padding: var(--spacing-xs) var(--spacing-md);
+    font-size: var(--text-xs);
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-text-secondary);
     cursor: pointer;
-    opacity: 0.8;
-    transition: opacity var(--transition-fast);
+    transition: background var(--transition-fast);
   }
 
-  .error-toast button:hover {
-    opacity: 1;
+  .list-empty-btn:hover {
+    background: var(--color-bg-hover);
+    color: var(--color-text-primary);
   }
 
-  .error-toast button svg {
-    width: 14px;
-    height: 14px;
-  }
-
-  @keyframes slideUp {
-    from {
-      opacity: 0;
-      transform: translate(-50%, 10px);
-    }
-    to {
-      opacity: 1;
-      transform: translate(-50%, 0);
-    }
-  }
+  /* ========== Modals ========== */
 
   .modal-overlay {
     position: fixed;
@@ -1183,69 +1425,6 @@
     display: flex;
     justify-content: flex-end;
     gap: var(--spacing-sm);
-  }
-
-  .bulk-toolbar {
-    position: absolute;
-    bottom: var(--spacing-lg);
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-md);
-    padding: var(--spacing-sm) var(--spacing-md);
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg);
-    z-index: 50;
-    animation: slideUp 0.2s ease;
-  }
-
-  .bulk-count {
-    font-size: var(--text-sm);
-    font-weight: 500;
-    color: var(--color-text-primary);
-    white-space: nowrap;
-  }
-
-  .bulk-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-  }
-
-  .bulk-btn {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-    padding: var(--spacing-xs) var(--spacing-sm);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-primary);
-    font-size: var(--text-xs);
-    cursor: pointer;
-    transition: background var(--transition-fast);
-    white-space: nowrap;
-  }
-
-  .bulk-btn:hover {
-    background: var(--color-bg-hover);
-  }
-
-  .bulk-btn.danger {
-    color: var(--color-error);
-    border-color: var(--color-error);
-  }
-
-  .bulk-btn.danger:hover {
-    background: color-mix(in srgb, var(--color-error) 10%, transparent);
-  }
-
-  .bulk-icon {
-    width: 14px;
-    height: 14px;
   }
 
   @keyframes fadeIn {

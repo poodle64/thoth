@@ -226,6 +226,16 @@ pub fn delete_transcription(id: &str) -> Result<bool, DatabaseError> {
     }
 }
 
+/// Deletes all transcriptions from the database.
+pub fn delete_all_transcriptions() -> Result<usize, DatabaseError> {
+    let conn = open_connection()?;
+
+    let rows_affected = conn.execute("DELETE FROM transcriptions", [])?;
+    tracing::info!("Deleted all transcriptions ({} rows)", rows_affected);
+
+    Ok(rows_affected)
+}
+
 /// Lists all transcriptions, ordered by creation date (newest first).
 pub fn list_transcriptions(
     limit: Option<i64>,
@@ -510,6 +520,15 @@ pub fn delete_transcription_by_id(id: String) -> Result<bool, String> {
     delete_transcription(&id).map_err(|e| {
         tracing::error!("Failed to delete transcription {}: {}", id, e);
         format!("Failed to delete transcription: {}", e)
+    })
+}
+
+/// Deletes all transcriptions.
+#[tauri::command]
+pub fn delete_all_transcriptions_cmd() -> Result<usize, String> {
+    delete_all_transcriptions().map_err(|e| {
+        tracing::error!("Failed to delete all transcriptions: {}", e);
+        format!("Failed to delete all transcriptions: {}", e)
     })
 }
 
