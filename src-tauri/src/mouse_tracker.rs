@@ -12,10 +12,10 @@
 //! origin at the top-left of the primary display, matching Tauri's
 //! `LogicalPosition` directly.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::OnceLock;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 use tauri::{AppHandle, LogicalPosition, Manager};
@@ -32,8 +32,14 @@ const CURSOR_OFFSET_Y: f64 = -70.0; // 58px height + 12px gap (directly above)
 /// Skip repositioning if cursor moved less than this (logical pixels)
 const MOVE_THRESHOLD: f64 = 1.0;
 
+/// Smoothing factor for position interpolation (0.0 = no movement, 1.0 = instant snap)
+const SMOOTHING_FACTOR: f64 = 0.45;
+
 /// Re-query monitor bounds when cursor is within this margin of cached edges
 const MONITOR_REFRESH_MARGIN: f64 = 100.0;
+
+/// Minimum interval between monitor bounds refreshes (milliseconds)
+const MONITOR_REFRESH_COOLDOWN_MS: u64 = 500;
 
 /// Recording indicator window label (must match tauri.conf.json)
 const INDICATOR_WINDOW_LABEL: &str = "recording-indicator";
@@ -48,12 +54,15 @@ struct CachedMonitor {
 
 struct TrackerState {
     is_running: AtomicBool,
+    /// Counter for consecutive mouse position failures (for rate-limited logging)
+    consecutive_failures: AtomicU32,
 }
 
 impl Default for TrackerState {
     fn default() -> Self {
         Self {
             is_running: AtomicBool::new(false),
+            consecutive_failures: AtomicU32::new(0),
         }
     }
 }
@@ -186,17 +195,28 @@ pub fn start_tracking() {
         return;
     }
 
+    // Reset failure counter on fresh start
+    tracker
+        .read()
+        .consecutive_failures
+        .store(0, Ordering::SeqCst);
+
     let Some(app) = APP_HANDLE.get().cloned() else {
         tracing::warn!("Mouse tracker not initialised, cannot start tracking");
         tracker.read().is_running.store(false, Ordering::SeqCst);
         return;
     };
 
+    // Cache the window handle up front instead of looking it up every frame
+    let Some(window) = app.get_webview_window(INDICATOR_WINDOW_LABEL) else {
+        tracing::warn!("Recording indicator window not found, cannot start tracking");
+        tracker.read().is_running.store(false, Ordering::SeqCst);
+        return;
+    };
+
     // Make indicator window click-through
-    if let Some(window) = app.get_webview_window(INDICATOR_WINDOW_LABEL) {
-        if let Err(e) = window.set_ignore_cursor_events(true) {
-            tracing::warn!("Failed to set ignore cursor events: {}", e);
-        }
+    if let Err(e) = window.set_ignore_cursor_events(true) {
+        tracing::warn!("Failed to set ignore cursor events: {}", e);
     }
 
     tracing::info!("Starting mouse cursor tracking for recording indicator");
@@ -204,10 +224,26 @@ pub fn start_tracking() {
     thread::spawn(move || {
         let mut last_x: f64 = f64::NAN;
         let mut last_y: f64 = f64::NAN;
+        // Smoothed position (what's actually set on the window)
+        let mut smooth_x: f64 = f64::NAN;
+        let mut smooth_y: f64 = f64::NAN;
         let mut cached_monitor: Option<CachedMonitor> = None;
+        let mut last_monitor_refresh: Option<Instant> = None;
 
         while get_tracker().read().is_running.load(Ordering::SeqCst) {
             if let Some((cx, cy)) = get_mouse_position() {
+                // Reset failure counter on success
+                let failures = get_tracker()
+                    .read()
+                    .consecutive_failures
+                    .swap(0, Ordering::SeqCst);
+                if failures > 0 {
+                    tracing::info!(
+                        "Mouse position polling recovered after {} failures",
+                        failures
+                    );
+                }
+
                 let dx = (cx - last_x).abs();
                 let dy = (cy - last_y).abs();
 
@@ -216,32 +252,57 @@ pub fn start_tracking() {
                     last_x = cx;
                     last_y = cy;
 
-                    // Refresh monitor bounds if cursor near edge or no cache
-                    if cached_monitor.is_none()
+                    // Refresh monitor bounds if cursor near edge or no cache,
+                    // but throttle to avoid expensive IPC every frame
+                    let should_refresh = cached_monitor.is_none()
                         || cached_monitor
                             .as_ref()
-                            .is_some_and(|m| needs_monitor_refresh(cx, cy, m))
-                    {
+                            .is_some_and(|m| needs_monitor_refresh(cx, cy, m));
+
+                    let cooldown_elapsed = last_monitor_refresh
+                        .map(|t| t.elapsed().as_millis() >= MONITOR_REFRESH_COOLDOWN_MS as u128)
+                        .unwrap_or(true);
+
+                    if should_refresh && cooldown_elapsed {
                         cached_monitor = refresh_monitor_bounds(&app, cx, cy);
+                        last_monitor_refresh = Some(Instant::now());
                     }
 
-                    // Calculate indicator position (above-left of cursor)
+                    // Calculate indicator position (centred above cursor)
                     let target_x = cx + CURSOR_OFFSET_X;
                     let target_y = cy + CURSOR_OFFSET_Y;
 
                     // Clamp to monitor bounds if available
-                    let (final_x, final_y) = if let Some(ref monitor) = cached_monitor {
+                    let (clamped_x, clamped_y) = if let Some(ref monitor) = cached_monitor {
                         clamp_to_monitor(target_x, target_y, monitor)
                     } else {
                         (target_x, target_y)
                     };
 
-                    // Reposition the indicator window
-                    if let Some(window) = app.get_webview_window(INDICATOR_WINDOW_LABEL) {
-                        let _ = window.set_position(tauri::Position::Logical(
-                            LogicalPosition::new(final_x, final_y),
-                        ));
+                    // Apply smoothing (lerp). On first frame, snap instantly.
+                    if smooth_x.is_nan() {
+                        smooth_x = clamped_x;
+                        smooth_y = clamped_y;
+                    } else {
+                        smooth_x += (clamped_x - smooth_x) * SMOOTHING_FACTOR;
+                        smooth_y += (clamped_y - smooth_y) * SMOOTHING_FACTOR;
                     }
+
+                    // Reposition the indicator window
+                    let _ = window.set_position(tauri::Position::Logical(LogicalPosition::new(
+                        smooth_x, smooth_y,
+                    )));
+                }
+            } else {
+                // Mouse position unavailable — log once, then rate-limit
+                let count = get_tracker()
+                    .read()
+                    .consecutive_failures
+                    .fetch_add(1, Ordering::SeqCst);
+                if count == 0 {
+                    tracing::warn!("Failed to get mouse position, indicator tracking paused");
+                } else if count == 100 {
+                    tracing::warn!("Mouse position polling has failed 100 consecutive times");
                 }
             }
 
