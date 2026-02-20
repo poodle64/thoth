@@ -174,6 +174,8 @@ pub struct GeneralConfig {
     pub show_in_dock: bool,
     /// Automatically check for updates on launch
     pub check_for_updates: bool,
+    /// Show the floating recording indicator during recording
+    pub show_recording_indicator: bool,
 }
 
 impl Default for GeneralConfig {
@@ -183,6 +185,7 @@ impl Default for GeneralConfig {
             show_in_menu_bar: true,
             show_in_dock: false,
             check_for_updates: true,
+            show_recording_indicator: true,
         }
     }
 }
@@ -679,6 +682,7 @@ mod tests {
                 show_in_menu_bar: false,
                 show_in_dock: true,
                 check_for_updates: true,
+                show_recording_indicator: true,
             },
             recorder: RecorderConfig {
                 position: RecorderPosition::Centre,

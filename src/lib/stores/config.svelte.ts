@@ -66,6 +66,8 @@ export interface GeneralConfig {
   showInDock: boolean;
   /** Automatically check for updates on launch */
   checkForUpdates: boolean;
+  /** Show the floating recording indicator during recording */
+  showRecordingIndicator: boolean;
 }
 
 /** Recorder window position options */
@@ -139,6 +141,7 @@ interface ConfigRaw {
     show_in_menu_bar: boolean;
     show_in_dock: boolean;
     check_for_updates: boolean;
+    show_recording_indicator: boolean;
   };
   recorder: {
     position: RecorderPosition;
@@ -180,6 +183,7 @@ function parseConfig(raw: ConfigRaw): Config {
       showInMenuBar: raw.general.show_in_menu_bar,
       showInDock: raw.general.show_in_dock,
       checkForUpdates: raw.general.check_for_updates,
+      showRecordingIndicator: raw.general.show_recording_indicator,
     },
     recorder: {
       position: raw.recorder.position,
@@ -222,6 +226,7 @@ function serialiseConfig(config: Config): ConfigRaw {
       show_in_menu_bar: config.general.showInMenuBar,
       show_in_dock: config.general.showInDock,
       check_for_updates: config.general.checkForUpdates,
+      show_recording_indicator: config.general.showRecordingIndicator,
     },
     recorder: {
       position: config.recorder.position,
@@ -264,6 +269,7 @@ function getDefaultConfig(): Config {
       showInMenuBar: true,
       showInDock: false,
       checkForUpdates: true,
+      showRecordingIndicator: true,
     },
     recorder: {
       position: 'top-right',

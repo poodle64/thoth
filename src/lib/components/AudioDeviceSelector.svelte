@@ -105,7 +105,7 @@
 
       // Start the preview stream
       await invoke('start_audio_preview', {
-        deviceId: settingsStore.selectedDeviceId,
+        device_id: settingsStore.selectedDeviceId,
       });
 
       isPreviewActive = true;

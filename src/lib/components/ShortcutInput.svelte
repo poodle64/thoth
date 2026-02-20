@@ -5,6 +5,9 @@
    * Uses native Rust-based keyboard capture via device_query to capture keys
    * at the system level, bypassing webview limitations that prevent capturing
    * keys intercepted by macOS (like Cmd+letter combinations).
+   *
+   * On Wayland, falls back to webview keyboard events since device_query
+   * doesn't work there (X11-only).
    */
 
   import { onDestroy } from 'svelte';
@@ -61,6 +64,8 @@
   let savedShortcuts = $state<ShortcutInfo[]>([]);
   /** Event listeners to clean up */
   let unlisteners: UnlistenFn[] = [];
+  /** Whether using webview mode (Wayland) */
+  let webviewMode = $state(false);
 
   /** Formatted display value for the current shortcut */
   let displayValue = $derived(formatForDisplay(value));
@@ -148,7 +153,7 @@
   async function startCapture(): Promise<void> {
     if (disabled || isCapturing) return;
 
-    debug('Starting native capture...');
+    debug('Starting capture...');
 
     // Pause global shortcuts first
     await pauseGlobalShortcuts();
@@ -158,7 +163,7 @@
     pendingKeys = [];
 
     try {
-      // Set up event listeners for native capture
+      // Set up event listeners for capture events
       const updateUnlisten = await listen<{ keys: string[]; accelerator: string; isValid: boolean }>(
         'key-capture-update',
         (event) => {
@@ -169,7 +174,7 @@
           if (event.payload.accelerator && !event.payload.isValid) {
             // Only show error if there's a non-modifier key
             const hasNonModifier = event.payload.keys.some(
-              (k) => !['Cmd', 'Ctrl', 'Alt', 'Shift'].includes(k)
+              (k) => !['Cmd', 'Ctrl', 'Alt', 'Shift', 'Super', 'Meta'].includes(k)
             );
             if (hasNonModifier) {
               validationError = 'Invalid shortcut combination';
@@ -207,14 +212,15 @@
       );
       unlisteners.push(completeUnlisten);
 
-      // Start native key capture
-      await invoke('start_key_capture');
-      debug('Native capture started');
+      // Start key capture - returns 'native' or 'webview' mode
+      const mode = await invoke<string>('start_key_capture');
+      webviewMode = mode === 'webview';
+      debug(`Capture started in ${mode} mode`);
 
       // Focus button for visual feedback
       buttonRef?.focus();
     } catch (e) {
-      console.error('Failed to start native capture:', e);
+      console.error('Failed to start capture:', e);
       const errorMsg = String(e);
 
       // Check if it's a permission error
@@ -241,6 +247,7 @@
 
     isCapturing = false;
     pendingKeys = [];
+    webviewMode = false;
 
     // Clean up listeners
     for (const unlisten of unlisteners) {
@@ -267,7 +274,9 @@
   }
 
   /**
-   * Handle keyboard events - only for Escape to cancel
+   * Handle keyboard events
+   * - In webview mode (Wayland): report keys to backend
+   * - In native mode: only handle Escape to cancel
    */
   async function handleKeyDown(event: KeyboardEvent): Promise<void> {
     if (!isCapturing) return;
@@ -276,6 +285,40 @@
     if (event.key === 'Escape') {
       event.preventDefault();
       await cancelCapture();
+      return;
+    }
+
+    // In webview mode, report key events to backend
+    if (webviewMode) {
+      event.preventDefault();
+
+      // Ignore pure modifier keydowns (they're tracked separately)
+      const isModifier = ['Control', 'Shift', 'Alt', 'Meta'].includes(event.key);
+      if (isModifier) {
+        // Update pending display for modifiers
+        const modNames: string[] = [];
+        if (event.ctrlKey) modNames.push('Ctrl');
+        if (event.shiftKey) modNames.push('Shift');
+        if (event.altKey) modNames.push('Alt');
+        if (event.metaKey) modNames.push('Super');
+        pendingKeys = modNames;
+        return;
+      }
+
+      // Report key event to backend
+      try {
+        await invoke('report_key_event', {
+          key: event.key,
+          code: event.code,
+          ctrl: event.ctrlKey,
+          shift: event.shiftKey,
+          alt: event.altKey,
+          meta: event.metaKey,
+          event_type: 'keydown',
+        });
+      } catch (e) {
+        console.error('Failed to report key event:', e);
+      }
     }
   }
 
