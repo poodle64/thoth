@@ -68,10 +68,6 @@
   /** About dialog visibility */
   let showAbout = $state(false);
 
-  /** Clipboard settings */
-  let restoreClipboardAfterPaste = $state(true);
-  let clipboardRestoreDelay = $state(1.0);
-
   /** Map of shortcut IDs to their pending (unsaved) accelerators */
   const pendingChanges = $state<Map<string, string>>(new Map());
 
@@ -349,34 +345,6 @@
                   <span class="toggle-slider"></span>
                 </label>
               </div>
-              <div class="setting-row card">
-                <div class="setting-info">
-                  <span class="setting-label">Restore Clipboard</span>
-                  <span class="setting-description"
-                    >Restore original clipboard after pasting transcript</span
-                  >
-                </div>
-                <label class="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={restoreClipboardAfterPaste}
-                    onchange={() => (restoreClipboardAfterPaste = !restoreClipboardAfterPaste)}
-                  />
-                  <span class="toggle-slider"></span>
-                </label>
-              </div>
-              {#if restoreClipboardAfterPaste}
-                <div class="setting-row card">
-                  <div class="setting-info">
-                    <span class="setting-label">Restore Delay</span>
-                  </div>
-                  <select bind:value={clipboardRestoreDelay} class="select-control">
-                    <option value={1.0}>1 second</option>
-                    <option value={2.0}>2 seconds</option>
-                    <option value={3.0}>3 seconds</option>
-                  </select>
-                </div>
-              {/if}
             </div>
           </section>
         </div>

@@ -32,10 +32,10 @@ export interface ClipboardHistoryEntry {
 function createClipboardStore() {
   // Settings state
   let settings = $state<ClipboardSettings>({
-    autoCopyEnabled: true,
+    autoCopyEnabled: false,
     format: 'plain_text',
     showNotification: false,
-    preserveClipboard: false,
+    preserveClipboard: true,
     restoreDelayMs: 1000,
     historyEnabled: true,
   });

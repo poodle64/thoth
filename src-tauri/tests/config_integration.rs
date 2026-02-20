@@ -72,7 +72,7 @@ impl Default for TranscriptionConfig {
     fn default() -> Self {
         Self {
             language: "en".to_string(),
-            auto_copy: true,
+            auto_copy: false,
             auto_paste: true,
             add_leading_space: false,
         }
@@ -183,7 +183,7 @@ fn test_audio_config_defaults() {
 fn test_transcription_config_defaults() {
     let transcription = TranscriptionConfig::default();
     assert_eq!(transcription.language, "en");
-    assert!(transcription.auto_copy);
+    assert!(!transcription.auto_copy);
     assert!(transcription.auto_paste);
     assert!(!transcription.add_leading_space);
 }
@@ -373,7 +373,7 @@ fn test_reset_config() {
     // Save a modified config
     let mut config = Config::default();
     config.audio.sample_rate = 48000;
-    config.transcription.auto_copy = false;
+    config.transcription.auto_copy = true;
     config.enhancement.enabled = true;
     save_config(&config, &config_path).expect("Failed to save");
 
@@ -384,7 +384,7 @@ fn test_reset_config() {
     // Verify reset worked
     let loaded = load_config(&config_path).expect("Failed to load");
     assert_eq!(loaded.audio.sample_rate, 16000);
-    assert!(loaded.transcription.auto_copy);
+    assert!(!loaded.transcription.auto_copy);
     assert!(!loaded.enhancement.enabled);
 }
 

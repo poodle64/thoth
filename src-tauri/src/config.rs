@@ -94,7 +94,7 @@ impl Default for TranscriptionConfig {
         Self {
             model_id: None,
             language: "en".to_string(),
-            auto_copy: true,
+            auto_copy: false,
             auto_paste: true,
             add_leading_space: false,
         }
@@ -521,7 +521,7 @@ mod tests {
     fn test_transcription_config_defaults() {
         let transcription = TranscriptionConfig::default();
         assert_eq!(transcription.language, "en");
-        assert!(transcription.auto_copy);
+        assert!(!transcription.auto_copy);
         assert!(transcription.auto_paste);
         assert!(!transcription.add_leading_space);
     }
