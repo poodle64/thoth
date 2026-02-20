@@ -139,13 +139,6 @@
 </script>
 
 <div class="dictionary-editor">
-  <div class="header">
-    <h3>Dictionary</h3>
-    <p class="description">
-      Add custom word replacements for domain-specific vocabulary and corrections.
-    </p>
-  </div>
-
   {#if successMessage}
     <div class="message success">{successMessage}</div>
   {/if}
@@ -293,45 +286,30 @@
   .dictionary-editor {
     display: flex;
     flex-direction: column;
-    gap: 16px;
-  }
-
-  .header h3 {
-    margin: 0 0 4px 0;
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--color-text-primary);
-  }
-
-  .description {
-    margin: 0;
-    font-size: 13px;
-    color: var(--color-text-secondary);
+    gap: 24px;
   }
 
   .message {
     padding: 10px 14px;
     border-radius: var(--radius-md);
-    font-size: 13px;
+    font-size: var(--text-sm);
   }
 
   .message.success {
-    background: color-mix(in srgb, var(--color-success) 15%, transparent);
+    background: color-mix(in srgb, var(--color-success) 10%, transparent);
     color: var(--color-success);
-    border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
   }
 
   .message.error {
-    background: color-mix(in srgb, var(--color-error) 15%, transparent);
+    background: color-mix(in srgb, var(--color-error) 10%, transparent);
     color: var(--color-error);
-    border: 1px solid color-mix(in srgb, var(--color-error) 30%, transparent);
   }
 
   .form-section {
     background: var(--color-bg-secondary);
     padding: 16px;
     border-radius: var(--radius-md);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-border-subtle);
   }
 
   .form-row {
@@ -353,7 +331,7 @@
   }
 
   .form-field label {
-    font-size: 12px;
+    font-size: var(--text-xs);
     font-weight: 500;
     color: var(--color-text-secondary);
     text-transform: uppercase;
@@ -368,7 +346,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: var(--text-sm);
     color: var(--color-text-secondary);
     cursor: pointer;
   }
@@ -386,7 +364,7 @@
 
   .form-actions button {
     padding: 8px 16px;
-    font-size: 13px;
+    font-size: var(--text-sm);
   }
 
   .entries-section {
@@ -402,7 +380,7 @@
   }
 
   .entries-count {
-    font-size: 13px;
+    font-size: var(--text-sm);
     color: var(--color-text-secondary);
   }
 
@@ -416,7 +394,7 @@
     align-items: center;
     gap: 6px;
     padding: 6px 12px;
-    font-size: 12px;
+    font-size: var(--text-xs);
     background: var(--color-bg-secondary);
     border: 1px solid var(--color-border);
   }
@@ -429,7 +407,7 @@
     padding: 24px;
     text-align: center;
     color: var(--color-text-secondary);
-    font-size: 13px;
+    font-size: var(--text-sm);
   }
 
   .empty-state {
@@ -437,13 +415,13 @@
     text-align: center;
     background: var(--color-bg-secondary);
     border-radius: var(--radius-md);
-    border: 1px dashed var(--color-border);
+    border: 1px dashed var(--color-border-subtle);
   }
 
   .empty-state p {
     margin: 0;
     color: var(--color-text-secondary);
-    font-size: 13px;
+    font-size: var(--text-sm);
   }
 
   .empty-state .hint {
@@ -464,7 +442,7 @@
     padding: 10px 14px;
     background: var(--color-bg-secondary);
     border-radius: var(--radius-md);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-border-subtle);
     transition: border-color var(--transition-fast);
   }
 

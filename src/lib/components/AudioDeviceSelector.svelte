@@ -318,7 +318,7 @@
   }
 
   .status-label {
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -330,7 +330,7 @@
   }
 
   .status-device {
-    font-size: 13px;
+    font-size: var(--text-sm);
     font-weight: 500;
     color: var(--color-text-primary);
     white-space: nowrap;
@@ -341,7 +341,7 @@
   .status-action {
     flex-shrink: 0;
     padding: 6px 12px;
-    font-size: 12px;
+    font-size: var(--text-xs);
     font-weight: 500;
     background: var(--color-warning);
     border: none;
@@ -362,7 +362,7 @@
   }
 
   .label {
-    font-size: 13px;
+    font-size: var(--text-sm);
     font-weight: 500;
     color: var(--color-text-secondary);
   }
@@ -380,7 +380,7 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     color: var(--color-text-primary);
-    font-size: 14px;
+    font-size: var(--text-base);
     cursor: pointer;
     appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
@@ -466,7 +466,7 @@
 
   .preview-btn {
     padding: 6px 16px;
-    font-size: 13px;
+    font-size: var(--text-sm);
     font-weight: 500;
     background: var(--color-bg-tertiary);
     border: none;
@@ -542,14 +542,14 @@
   .meter-labels {
     display: flex;
     justify-content: space-between;
-    font-size: 10px;
+    font-size: var(--text-xs);
     color: var(--color-text-tertiary);
     padding: 0 2px;
   }
 
   .preview-hint {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--text-xs);
     color: var(--color-text-tertiary);
     font-style: italic;
     text-align: center;
@@ -562,6 +562,6 @@
     border: 1px solid color-mix(in srgb, var(--color-error) 30%, transparent);
     border-radius: var(--radius-md);
     color: var(--color-error);
-    font-size: 13px;
+    font-size: var(--text-sm);
   }
 </style>

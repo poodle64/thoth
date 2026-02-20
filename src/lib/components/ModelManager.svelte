@@ -204,30 +204,29 @@
 </script>
 
 <div class="model-manager">
-  <div class="header">
-    <div class="header-text">
-      <h3>Transcription Models</h3>
-      <p class="subtitle">Manage offline transcription model downloads</p>
-    </div>
-    <div class="header-actions">
-      <button
-        class="check-updates-btn"
-        onclick={checkForUpdates}
-        disabled={checking || isDownloading()}
-      >
-        {#if checking}
-          <span class="spinner small"></span>
-          Checking...
+  <div class="setting-row card">
+    <div class="setting-info">
+      <span class="setting-label">Model Updates</span>
+      <span class="setting-description">
+        {#if lastChecked}
+          Last checked: {lastChecked}
         {:else}
-          Check for Updates
+          Check for new or updated transcription models
         {/if}
-      </button>
+      </span>
     </div>
+    <button
+      class="btn-small"
+      onclick={checkForUpdates}
+      disabled={checking || isDownloading()}
+    >
+      {#if checking}
+        Checking...
+      {:else}
+        Check for Updates
+      {/if}
+    </button>
   </div>
-
-  {#if lastChecked}
-    <p class="last-checked">Last checked: {lastChecked}</p>
-  {/if}
 
   {#if loading}
     <div class="loading">
@@ -235,10 +234,9 @@
       <span>Loading models...</span>
     </div>
   {:else if error}
-    <div class="error-banner">
-      <span class="error-icon">!</span>
-      <span class="error-text">{error}</span>
-      <button class="dismiss-btn" onclick={() => (error = null)}>Dismiss</button>
+    <div class="error-row">
+      <span class="error-message">{error}</span>
+      <button class="btn-small" onclick={() => (error = null)}>Dismiss</button>
     </div>
   {/if}
 
@@ -366,61 +364,7 @@
   .model-manager {
     display: flex;
     flex-direction: column;
-    gap: 16px;
-  }
-
-  .header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 16px;
-  }
-
-  .header-text h3 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--color-text-primary);
-  }
-
-  .subtitle {
-    margin: 4px 0 0 0;
-    font-size: 13px;
-    color: var(--color-text-secondary);
-  }
-
-  .header-actions {
-    flex-shrink: 0;
-  }
-
-  .check-updates-btn {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 16px;
-    font-size: 13px;
-    font-weight: 500;
-    background: var(--color-bg-tertiary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    color: var(--color-text-primary);
-    cursor: pointer;
-    transition: background var(--transition-fast);
-  }
-
-  .check-updates-btn:hover:not(:disabled) {
-    background: var(--color-bg-hover);
-  }
-
-  .check-updates-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .last-checked {
-    margin: 0;
-    font-size: 12px;
-    color: var(--color-text-tertiary);
+    gap: 24px;
   }
 
   .loading {
@@ -440,57 +384,26 @@
     animation: spin 1s linear infinite;
   }
 
-  .spinner.small {
-    width: 14px;
-    height: 14px;
-    border-width: 1.5px;
-  }
-
   @keyframes spin {
     to {
       transform: rotate(360deg);
     }
   }
 
-  .error-banner {
+  .error-row {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 12px;
-    padding: 12px 16px;
+    padding: 10px 14px;
     background: color-mix(in srgb, var(--color-error) 10%, transparent);
-    border: 1px solid var(--color-error);
     border-radius: var(--radius-md);
   }
 
-  .error-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    background: var(--color-error);
-    color: white;
-    font-size: 12px;
-    font-weight: 700;
-    border-radius: 50%;
-  }
-
-  .error-text {
-    flex: 1;
-    font-size: 13px;
-    color: var(--color-error);
-  }
-
-  .dismiss-btn {
-    padding: 4px 12px;
-    font-size: 12px;
-    background: transparent;
-    border: 1px solid var(--color-error);
-    color: var(--color-error);
-  }
-
-  .dismiss-btn:hover {
-    background: color-mix(in srgb, var(--color-error) 10%, transparent);
+  .error-row .error-message {
+    margin: 0;
+    padding: 0;
+    background: none;
   }
 
   .model-list {
@@ -505,7 +418,7 @@
     gap: 12px;
     padding: 16px;
     background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-md);
     transition: border-color var(--transition-fast);
   }
@@ -532,7 +445,7 @@
   }
 
   .model-name {
-    font-size: 15px;
+    font-size: var(--text-lg);
     font-weight: 600;
     color: var(--color-text-primary);
   }
@@ -545,7 +458,7 @@
 
   .status-badge {
     padding: 2px 8px;
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-weight: 500;
     border-radius: var(--radius-full);
   }
@@ -572,7 +485,7 @@
 
   .model-description {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--text-sm);
     color: var(--color-text-secondary);
     line-height: 1.4;
   }
@@ -584,7 +497,7 @@
   }
 
   .detail {
-    font-size: 12px;
+    font-size: var(--text-xs);
     color: var(--color-text-tertiary);
   }
 
@@ -600,7 +513,7 @@
   .delete-btn,
   .retry-btn {
     padding: 8px 16px;
-    font-size: 13px;
+    font-size: var(--text-sm);
     font-weight: 500;
     border-radius: var(--radius-md);
     transition: all var(--transition-fast);
@@ -616,7 +529,7 @@
   }
 
   .download-btn:disabled {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: not-allowed;
   }
 
@@ -631,7 +544,7 @@
   }
 
   .delete-btn:disabled {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: not-allowed;
   }
 
@@ -676,7 +589,7 @@
   }
 
   .progress-text {
-    font-size: 12px;
+    font-size: var(--text-xs);
     color: var(--color-text-secondary);
   }
 
@@ -689,7 +602,7 @@
 
   .failed-text {
     flex: 1;
-    font-size: 12px;
+    font-size: var(--text-xs);
     color: var(--color-error);
   }
 
@@ -697,6 +610,7 @@
     padding: 32px;
     text-align: center;
     color: var(--color-text-tertiary);
+    font-size: var(--text-sm);
   }
 
   /* Modal styles */
@@ -725,14 +639,14 @@
 
   .modal h4 {
     margin: 0 0 12px 0;
-    font-size: 16px;
+    font-size: var(--text-lg);
     font-weight: 600;
     color: var(--color-text-primary);
   }
 
   .modal p {
     margin: 0 0 20px 0;
-    font-size: 14px;
+    font-size: var(--text-base);
     color: var(--color-text-secondary);
     line-height: 1.5;
   }
@@ -745,7 +659,7 @@
 
   .cancel-btn {
     padding: 8px 16px;
-    font-size: 13px;
+    font-size: var(--text-sm);
     background: var(--color-bg-tertiary);
     color: var(--color-text-primary);
     border-radius: var(--radius-md);
@@ -753,13 +667,13 @@
 
   .confirm-delete-btn {
     padding: 8px 16px;
-    font-size: 13px;
+    font-size: var(--text-sm);
     background: var(--color-error);
     color: white;
     border-radius: var(--radius-md);
   }
 
   .confirm-delete-btn:hover {
-    background: #ff6961;
+    background: color-mix(in srgb, var(--color-error) 85%, white);
   }
 </style>
