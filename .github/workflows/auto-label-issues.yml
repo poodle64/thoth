@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       issues: write
-      models: read
+      models: read # required by github/ai-assessment-comment-labeler for GitHub Models API
       contents: read
 
     steps:
