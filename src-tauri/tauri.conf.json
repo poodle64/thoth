@@ -65,7 +65,7 @@
       "requireLiteralLeadingDot": false
     },
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJERDVEMzBDRDJEN0REMEUKUldRTzNkZlNETlBWdmNqRkJkVG8zU1EyNzRNREJlMWF6TWppQ0dEcWJXUVpCb0kvSlJoV2VEclIK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlEMkNDNTZCN0NDOTI2ODEKUldTQkpzbDhhOFVzblkvaVRUMGZXSUZ3SjRURGtkYkZuZklXbFpNaThwQm1OU2dZSHkwcFl0b0cK",
       "endpoints": ["https://github.com/poodle64/thoth/releases/latest/download/latest.json"]
     }
   },
