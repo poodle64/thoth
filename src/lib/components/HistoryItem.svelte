@@ -192,26 +192,21 @@
     color: white;
   }
 
-  /* Checkbox area */
+  /* Checkbox area - always visible for discoverability */
   .checkbox-area {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 0;
-    overflow: hidden;
+    width: 24px;
     flex-shrink: 0;
-    opacity: 0;
-    transition:
-      width 0.15s ease,
-      opacity 0.15s ease,
-      margin 0.15s ease;
+    margin-right: var(--spacing-sm);
+    opacity: 0.3;
+    transition: opacity 0.15s ease;
   }
 
   .history-item:hover .checkbox-area,
   .history-item.bulk-mode .checkbox-area {
-    width: 24px;
     opacity: 1;
-    margin-right: var(--spacing-sm);
   }
 
   .checkbox {

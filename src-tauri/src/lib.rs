@@ -358,6 +358,7 @@ pub fn run() {
             database::transcription::get_transcription_by_id,
             database::transcription::list_all_transcriptions,
             database::transcription::delete_transcription_by_id,
+            database::transcription::delete_all_transcriptions_cmd,
             database::transcription::search_transcriptions_text,
             database::transcription::count_transcriptions_filtered,
             database::transcription::get_transcription_stats_cmd,
@@ -427,6 +428,7 @@ pub fn run() {
             // Pipeline (full recording -> transcription -> output flow)
             pipeline::pipeline_start_recording,
             pipeline::pipeline_stop_and_process,
+            pipeline::pipeline_transcribe_file,
             pipeline::pipeline_cancel,
             pipeline::is_pipeline_running,
             pipeline::get_pipeline_state,
