@@ -134,30 +134,24 @@
 </script>
 
 <div class="filter-settings">
-  <div class="section">
+  <div class="setting-group">
     <h3>Output Filters</h3>
-    <p class="section-description">
-      Configure how transcription output is processed before display and copying.
-    </p>
 
     <div class="filter-options">
       {#each filterDefinitions as filter}
-        <div class="filter-option">
-          <div class="filter-header">
-            <button
-              type="button"
-              class="toggle"
-              class:active={options[filter.key]}
-              onclick={() => toggleOption(filter.key)}
-              role="switch"
-              aria-checked={options[filter.key]}
-              aria-label={filter.label}
-            ></button>
-            <div class="filter-info">
-              <span class="filter-label">{filter.label}</span>
-              <span class="filter-description">{filter.description}</span>
-            </div>
+        <div class="setting-row card">
+          <div class="setting-info">
+            <span class="setting-label">{filter.label}</span>
+            <span class="setting-description">{filter.description}</span>
           </div>
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              checked={options[filter.key]}
+              onchange={() => toggleOption(filter.key)}
+            />
+            <span class="toggle-slider"></span>
+          </label>
         </div>
       {/each}
     </div>
@@ -167,7 +161,7 @@
     {/if}
   </div>
 
-  <div class="section">
+  <div class="setting-group">
     <div class="preview-header">
       <h3>Preview</h3>
       <button
@@ -229,12 +223,12 @@
     </div>
   </div>
 
-  <div class="section">
+  <div class="setting-group">
     <h3>Custom Word Replacements</h3>
-    <p class="section-description">
+    <p class="hint">
       Configure custom word replacements in the Dictionary settings.
     </p>
-    <button type="button" class="dictionary-link" onclick={() => onOpenDictionary?.()}>
+    <button type="button" class="btn-outline" onclick={() => onOpenDictionary?.()}>
       Open Dictionary Settings
     </button>
   </div>
@@ -247,66 +241,10 @@
     gap: 24px;
   }
 
-  .section {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .section h3 {
-    margin: 0;
-    font-size: var(--text-base);
-    font-weight: 600;
-    color: var(--color-text-primary);
-  }
-
-  .section-description {
-    margin: 0;
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-  }
-
   .filter-options {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    margin-top: 4px;
-  }
-
-  .filter-option {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .filter-header {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-  }
-
-  .filter-info {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    flex: 1;
-  }
-
-  .filter-label {
-    font-size: var(--text-sm);
-    font-weight: 500;
-    color: var(--color-text-primary);
-  }
-
-  .filter-description {
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
-  }
-
-  /* Toggle styling using global .toggle class */
-  .toggle {
-    flex-shrink: 0;
-    margin-top: 2px;
+    gap: 8px;
   }
 
   .reset-btn {
@@ -420,19 +358,4 @@
     color: var(--color-text-tertiary);
   }
 
-  .dictionary-link {
-    align-self: flex-start;
-    padding: 8px 16px;
-    font-size: var(--text-sm);
-    color: var(--color-accent);
-    background: transparent;
-    border: 1px solid var(--color-accent);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: background var(--transition-fast);
-  }
-
-  .dictionary-link:hover {
-    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-  }
 </style>

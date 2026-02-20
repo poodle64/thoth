@@ -19,6 +19,7 @@
     History,
     BookOpen,
     FileText,
+    Info,
   } from 'lucide-svelte';
   import AIEnhancementSettings from '../components/AIEnhancementSettings.svelte';
   import AudioDeviceSelector from '../components/AudioDeviceSelector.svelte';
@@ -26,6 +27,7 @@
   import FilterSettings from '../components/FilterSettings.svelte';
   import HistoryPane from '../components/HistoryPane.svelte';
   import ModelManager from '../components/ModelManager.svelte';
+  import TranscribePane from '../components/TranscribePane.svelte';
 	import OverviewPane from '../components/OverviewPane.svelte';
 	import AboutDialog from '../components/AboutDialog.svelte';
 	import ShortcutInput from '../components/ShortcutInput.svelte';
@@ -235,8 +237,11 @@
         {/each}
       </div>
       <div class="sidebar-footer">
-        <button class="sidebar-about" onclick={() => (showAbout = true)}>
-          About Thoth
+        <button class="sidebar-item" onclick={() => (showAbout = true)}>
+          <span class="sidebar-icon">
+            <Info size={16} />
+          </span>
+          <span class="sidebar-label">About Thoth</span>
         </button>
       </div>
     </nav>
@@ -247,7 +252,7 @@
 			<UpdateNotificationBanner />
 
 			{#if activePane === 'overview'}
-        <div class="pane overview-pane">
+        <div class="pane">
           <OverviewPane onNavigate={(paneId) => (activePane = paneId)} />
         </div>
       {:else if activePane === 'recording'}
@@ -294,7 +299,7 @@
               {#if !shortcutsStore.isLoading}
                 <div class="shortcuts-list">
                   {#each allShortcuts as shortcut, i (shortcut.id)}
-                    <div class="setting-row">
+                    <div class="setting-row card">
                       <div class="setting-info">
                         <span class="setting-label">{shortcut.description}</span>
                         <span
@@ -314,9 +319,6 @@
                         placeholder="Click to set"
                       />
                     </div>
-                    {#if i < allShortcuts.length - 1}
-                      <div class="row-separator"></div>
-                    {/if}
                   {/each}
                 </div>
               {/if}
@@ -330,7 +332,7 @@
               <p class="section-description">Audio and clipboard handling during transcription</p>
             </div>
             <div class="section-content">
-              <div class="setting-row">
+              <div class="setting-row card">
                 <div class="setting-info">
                   <span class="setting-label">Sound Feedback</span>
                   <span class="setting-description"
@@ -347,8 +349,7 @@
                   <span class="toggle-slider"></span>
                 </label>
               </div>
-              <div class="row-separator"></div>
-              <div class="setting-row">
+              <div class="setting-row card">
                 <div class="setting-info">
                   <span class="setting-label">Restore Clipboard</span>
                   <span class="setting-description"
@@ -365,8 +366,7 @@
                 </label>
               </div>
               {#if restoreClipboardAfterPaste}
-                <div class="row-separator"></div>
-                <div class="setting-row">
+                <div class="setting-row card">
                   <div class="setting-info">
                     <span class="setting-label">Restore Delay</span>
                   </div>
@@ -429,18 +429,13 @@
         <div class="pane">
           <section class="settings-section">
             <div class="section-header">
-              <h2 class="section-title">Transcribe Audio Files</h2>
-              <p class="section-description">Transcribe existing audio files (WAV, MP3, M4A)</p>
+              <h2 class="section-title">Import Audio Files</h2>
+              <p class="section-description">Transcribe existing audio files</p>
             </div>
             <div class="section-content">
-              <div class="transcribe-dropzone">
-                <span class="dropzone-icon">📁</span>
-                <p class="dropzone-text">Drop audio files here or click to select</p>
-                <p class="dropzone-hint">Supports WAV, MP3, M4A formats</p>
-              </div>
+              <TranscribePane />
             </div>
           </section>
-
           <section class="settings-section">
             <div class="section-header">
               <h2 class="section-title">Output Filtering</h2>
@@ -488,7 +483,7 @@
   }
 
   .title-text {
-    font-size: 13px;
+    font-size: var(--text-sm);
     font-weight: 500;
     color: var(--color-text-primary);
     user-select: none;
@@ -527,7 +522,7 @@
     background: transparent;
     border: none;
     color: var(--color-text-secondary);
-    font-size: 13px;
+    font-size: var(--text-sm);
     font-weight: 400;
     text-align: left;
     cursor: pointer;
@@ -564,24 +559,6 @@
     border-top: 1px solid var(--color-border);
   }
 
-  .sidebar-about {
-    width: 100%;
-    padding: 6px 12px;
-    background: transparent;
-    border: none;
-    color: var(--color-text-tertiary);
-    font-size: var(--text-xs);
-    text-align: left;
-    cursor: pointer;
-    border-radius: 6px;
-    transition: color var(--transition-fast), background-color var(--transition-fast);
-  }
-
-  .sidebar-about:hover {
-    color: var(--color-text-secondary);
-    background-color: rgba(255, 255, 255, 0.05);
-  }
-
   /* Content area */
   .content {
     flex: 1;
@@ -594,26 +571,6 @@
     display: flex;
     flex-direction: column;
     gap: 24px;
-  }
-
-  /* Section layout */
-  .settings-section {
-    display: flex;
-    flex-direction: column;
-    margin-bottom: 32px;
-  }
-
-  .settings-section:last-child {
-    margin-bottom: 0;
-  }
-
-  .section-content {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .row-separator {
-    display: none;
   }
 
   /* Mode selector */
@@ -647,7 +604,7 @@
   }
 
   .mode-title {
-    font-size: 13px;
+    font-size: var(--text-sm);
     font-weight: 600;
     color: var(--color-text-primary);
   }
@@ -666,59 +623,15 @@
   .shortcuts-list {
     display: flex;
     flex-direction: column;
+    gap: 8px;
   }
 
   .shortcut-status {
-    font-size: 11px;
+    font-size: var(--text-xs);
   }
 
   .shortcut-status.enabled {
     color: var(--color-success);
-  }
-
-  /* Transcribe dropzone */
-  .transcribe-dropzone {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 48px 24px;
-    border: 2px dashed var(--color-border);
-    border-radius: var(--radius-lg);
-    cursor: pointer;
-    transition: border-color var(--transition-fast), background var(--transition-fast);
-  }
-
-  .transcribe-dropzone:hover {
-    border-color: var(--color-accent);
-    background: color-mix(in srgb, var(--color-accent) 5%, transparent);
-  }
-
-  .dropzone-icon {
-    font-size: 48px;
-    margin-bottom: 12px;
-  }
-
-  .dropzone-text {
-    margin: 0;
-    font-size: 14px;
-    color: var(--color-text-primary);
-  }
-
-  .dropzone-hint {
-    margin: 4px 0 0;
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
-  }
-
-  /* Overview pane: remove content padding so the component manages its own */
-  .content:has(.overview-pane) {
-    padding: 0;
-    overflow: hidden;
-  }
-
-  .overview-pane {
-    height: 100%;
   }
 
   /* History pane: remove content padding so the 3-panel layout fills the space */
