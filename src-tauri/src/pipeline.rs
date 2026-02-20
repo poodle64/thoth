@@ -35,6 +35,8 @@ pub enum PipelineState {
     Filtering,
     /// Enhancing text with AI
     Enhancing,
+    /// Converting imported audio to 16kHz mono WAV
+    Converting,
     /// Outputting result (clipboard/paste)
     Outputting,
     /// Pipeline completed successfully
@@ -131,6 +133,20 @@ pub struct PipelineProgress {
 
 /// Track if pipeline is currently running
 static PIPELINE_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Cancellation signal for file import operations
+static IMPORT_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+/// RAII guard that resets PIPELINE_RUNNING to false on drop.
+/// Prevents the pipeline from being permanently locked if a command
+/// panics or returns early without explicit cleanup.
+struct PipelineGuard;
+
+impl Drop for PipelineGuard {
+    fn drop(&mut self) {
+        PIPELINE_RUNNING.store(false, Ordering::SeqCst);
+    }
+}
 
 /// Start the recording phase of the pipeline
 ///
@@ -244,6 +260,9 @@ pub async fn pipeline_stop_and_process(
     tracing::info!("Pipeline: stop_and_process called");
     let config = config.unwrap_or_default();
 
+    // RAII guard ensures PIPELINE_RUNNING is reset even on early return
+    let _guard = PipelineGuard;
+
     // Stop recording metering
     crate::audio::stop_recording_metering();
 
@@ -260,7 +279,6 @@ pub async fn pipeline_stop_and_process(
     let audio_path = match crate::audio::stop_recording() {
         Ok(path) => path,
         Err(e) => {
-            PIPELINE_RUNNING.store(false, Ordering::SeqCst);
             emit_progress(
                 &app,
                 PipelineState::Failed,
@@ -274,9 +292,6 @@ pub async fn pipeline_stop_and_process(
 
     // Run the processing pipeline
     let result = process_audio(&app, &audio_path, &config).await;
-
-    // Mark pipeline as not running
-    PIPELINE_RUNNING.store(false, Ordering::SeqCst);
 
     // Emit completion event
     match &result {
@@ -308,6 +323,9 @@ pub fn pipeline_cancel(app: AppHandle) -> Result<(), String> {
     if let Err(e) = crate::recording_indicator::hide_recording_indicator(app.clone()) {
         tracing::warn!("Pipeline: Failed to hide recording indicator on cancel: {}", e);
     }
+
+    // Signal cancellation for file import operations
+    IMPORT_CANCELLED.store(true, Ordering::SeqCst);
 
     // Stop recording if in progress
     if crate::audio::is_recording() {
@@ -625,6 +643,94 @@ fn get_audio_duration(audio_path: &str) -> Option<f64> {
     }
 }
 
+/// Transcribe an imported audio file through the full pipeline.
+///
+/// Decodes the input file (WAV, MP3, M4A, OGG, FLAC) to 16kHz mono WAV,
+/// then runs the standard transcription pipeline (transcribe → filter → enhance → save).
+/// Does NOT auto-copy or auto-paste (the user is already in the app).
+#[tauri::command]
+pub async fn pipeline_transcribe_file(
+    app: AppHandle,
+    file_path: String,
+    config: Option<PipelineConfig>,
+) -> Result<PipelineResult, String> {
+    tracing::info!("Pipeline: transcribe_file called for {}", file_path);
+
+    if PIPELINE_RUNNING.swap(true, Ordering::SeqCst) {
+        return Err("Pipeline is already running".to_string());
+    }
+
+    // RAII guard ensures PIPELINE_RUNNING is reset even on early return
+    let _guard = PipelineGuard;
+
+    // Check transcription model is available
+    if !transcription::is_transcription_ready() {
+        return Err(
+            "No transcription model downloaded. Open Settings \u{2192} Models to get started."
+                .to_string(),
+        );
+    }
+
+    // Reset cancellation signal
+    IMPORT_CANCELLED.store(false, Ordering::SeqCst);
+
+    // Build config with auto_copy and auto_paste disabled (manual copy from UI)
+    let mut config = config.unwrap_or_default();
+    config.auto_copy = false;
+    config.auto_paste = false;
+
+    // Generate output path for the decoded WAV
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let recordings_dir = home.join(".thoth").join("Recordings");
+    std::fs::create_dir_all(&recordings_dir)
+        .map_err(|e| format!("Failed to create recordings directory: {}", e))?;
+
+    let filename = format!(
+        "thoth_import_{}.wav",
+        chrono::Utc::now().format("%Y%m%d_%H%M%S")
+    );
+    let output_wav = recordings_dir.join(&filename);
+
+    // Decode the audio file to 16kHz mono WAV (CPU-bound, run off async runtime)
+    emit_progress(
+        &app,
+        PipelineState::Converting,
+        "Converting audio format...",
+    );
+
+    let input_path = PathBuf::from(&file_path);
+    let output_path = output_wav.clone();
+    let decode_result = tokio::task::spawn_blocking(move || {
+        crate::audio::decode::decode_audio_to_wav(&input_path, &output_path, &IMPORT_CANCELLED)
+    })
+    .await
+    .map_err(|e| format!("Decode task failed: {}", e))?;
+
+    let _duration = decode_result?;
+
+    let wav_path = output_wav.to_string_lossy().to_string();
+    tracing::info!("Pipeline: Decoded to {}", wav_path);
+
+    // Run the standard processing pipeline
+    let result = process_audio(&app, &wav_path, &config).await;
+
+    // Emit completion event
+    match &result {
+        Ok(r) => {
+            tracing::info!("Pipeline: Emitting pipeline-complete event");
+            if let Err(e) = app.emit("pipeline-complete", r) {
+                tracing::error!("Pipeline: Failed to emit pipeline-complete: {}", e);
+            }
+        }
+        Err(e) => {
+            tracing::error!("Pipeline: File transcription failed: {}", e);
+            emit_progress(&app, PipelineState::Failed, e);
+        }
+    }
+
+    result
+}
+
 /// Emit a pipeline progress event
 fn emit_progress(app: &AppHandle, state: PipelineState, message: &str) {
     emit_progress_with_device(app, state, message, None);
@@ -669,6 +775,11 @@ mod tests {
 
         let deserialised: PipelineState = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialised, PipelineState::Recording);
+
+        // Verify new Converting state serialises correctly
+        let converting = PipelineState::Converting;
+        let json = serde_json::to_string(&converting).unwrap();
+        assert_eq!(json, "\"converting\"");
     }
 
     #[test]
