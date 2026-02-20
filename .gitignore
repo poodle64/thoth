@@ -29,6 +29,7 @@ Thumbs.db
 .claude/commands/master
 .claude/commands/deploy.md
 .claude/commands/git-release.md
+.claude/commands/screenshot.md
 .claude/hooks/master
 .claude/rules/master
 .claude/skills
