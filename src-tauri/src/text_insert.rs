@@ -155,43 +155,48 @@ impl TextInsertService {
     fn insert_by_typing_macos(&self, text: &str) -> Result<(), String> {
         use enigo::{Enigo, Keyboard, Settings};
 
-        // Try enigo first (preferred method)
-        match Enigo::new(&Settings::default()) {
-            Ok(mut enigo) => {
-                // For text with special characters or multi-byte Unicode,
-                // use character-by-character insertion
-                if self.config.keystroke_delay_ms > 0 || !text.is_ascii() {
-                    for c in text.chars() {
-                        if let Err(e) = enigo.text(&c.to_string()) {
-                            warn!("Failed to type character '{}': {}", c, e);
-                            // Fall back to AppleScript for this character
-                            self.type_char_applescript(c)?;
-                        }
-                        if self.config.keystroke_delay_ms > 0 {
-                            thread::sleep(Duration::from_millis(self.config.keystroke_delay_ms));
-                        }
-                    }
-                } else {
-                    // For plain ASCII text without delay, type all at once
-                    if let Err(e) = enigo.text(text) {
-                        warn!(
-                            "Enigo text insertion failed: {}, falling back to AppleScript",
-                            e
-                        );
-                        return self.type_text_applescript(text);
-                    }
-                }
-                info!("Successfully inserted {} characters via enigo", text.len());
-                Ok(())
-            }
+        let mut enigo = match Enigo::new(&Settings::default()) {
+            Ok(e) => e,
             Err(e) => {
                 warn!(
                     "Failed to initialise enigo: {}, falling back to AppleScript",
                     e
                 );
-                self.type_text_applescript(text)
+                return self.type_text_applescript(text);
+            }
+        };
+
+        // For text with special characters, multi-byte Unicode, or keystroke delay,
+        // type character by character
+        if self.config.keystroke_delay_ms > 0 || !text.is_ascii() {
+            self.type_chars_with_enigo(&mut enigo, text)?;
+        } else if let Err(e) = enigo.text(text) {
+            warn!(
+                "Enigo text insertion failed: {}, falling back to AppleScript",
+                e
+            );
+            return self.type_text_applescript(text);
+        }
+
+        info!("Successfully inserted {} characters via enigo", text.len());
+        Ok(())
+    }
+
+    /// Type text character by character via enigo, falling back to AppleScript per character.
+    #[cfg(target_os = "macos")]
+    fn type_chars_with_enigo(&self, enigo: &mut enigo::Enigo, text: &str) -> Result<(), String> {
+        use enigo::Keyboard;
+
+        for c in text.chars() {
+            if let Err(e) = enigo.text(&c.to_string()) {
+                warn!("Failed to type character '{}': {}", c, e);
+                self.type_char_applescript(c)?;
+            }
+            if self.config.keystroke_delay_ms > 0 {
+                thread::sleep(Duration::from_millis(self.config.keystroke_delay_ms));
             }
         }
+        Ok(())
     }
 
     #[cfg(target_os = "macos")]
@@ -264,17 +269,58 @@ impl TextInsertService {
 
     #[cfg(target_os = "linux")]
     fn insert_by_typing_linux(&self, text: &str) -> Result<(), String> {
+        // Try wtype first (native Wayland support)
+        if Self::try_type_with_wtype(text, self.config.keystroke_delay_ms) {
+            info!("Successfully inserted {} characters via wtype", text.len());
+            return Ok(());
+        }
+
+        // Fall back to enigo (X11/XWayland)
+        debug!("wtype not available, falling back to enigo for typing");
+        Self::type_with_enigo(text, self.config.keystroke_delay_ms)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn try_type_with_wtype(text: &str, keystroke_delay_ms: u64) -> bool {
+        use std::process::Command;
+
+        // wtype is a native Wayland tool (requires virtual-keyboard protocol support)
+        if keystroke_delay_ms > 0 {
+            // Type character by character with delay
+            for c in text.chars() {
+                if c.is_control() {
+                    continue;
+                }
+                match Command::new("wtype").arg(&c.to_string()).status() {
+                    Ok(status) if status.success() => {}
+                    _ => return false,
+                }
+                thread::sleep(Duration::from_millis(keystroke_delay_ms));
+            }
+            true
+        } else {
+            // Type all at once
+            Command::new("wtype")
+                .arg(text)
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn type_with_enigo(text: &str, keystroke_delay_ms: u64) -> Result<(), String> {
         use enigo::{Enigo, Keyboard, Settings};
 
         let mut enigo = Enigo::new(&Settings::default())
             .map_err(|e| format!("Failed to initialise enigo: {}", e))?;
 
-        if self.config.keystroke_delay_ms > 0 {
+        if keystroke_delay_ms > 0 {
             for c in text.chars() {
                 if let Err(e) = enigo.text(&c.to_string()) {
                     return Err(format!("Failed to type character '{}': {}", c, e));
                 }
-                thread::sleep(Duration::from_millis(self.config.keystroke_delay_ms));
+                thread::sleep(Duration::from_millis(keystroke_delay_ms));
             }
         } else {
             enigo
@@ -288,22 +334,62 @@ impl TextInsertService {
 
     #[cfg(target_os = "linux")]
     fn paste_linux(&self) -> Result<(), String> {
+        // Try wtype first (native Wayland support, no modifier key issues)
+        if Self::try_paste_with_wtype() {
+            debug!("Pasted via wtype (native Wayland)");
+            return Ok(());
+        }
+
+        // Fall back to enigo (X11/XWayland)
+        debug!("wtype not available, falling back to enigo");
+        Self::paste_with_enigo()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn try_paste_with_wtype() -> bool {
+        use std::process::Command;
+
+        // wtype is a native Wayland tool that avoids modifier key sync issues
+        // Note: Only works on compositors supporting the virtual-keyboard protocol (Sway, Hyprland, etc.)
+        // Falls back to enigo on GNOME which triggers the "Allow Remote Interaction" dialog
+        match Command::new("wtype")
+            .args(["-M", "ctrl", "v", "-m", "ctrl"])
+            .status()
+        {
+            Ok(status) => status.success(),
+            Err(_) => false,
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn paste_with_enigo() -> Result<(), String> {
         use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
         let mut enigo = Enigo::new(&Settings::default())
             .map_err(|e| format!("Failed to initialise enigo: {}", e))?;
 
-        // Press Ctrl+V
-        enigo
-            .key(Key::Control, Direction::Press)
-            .map_err(|e| format!("Failed to press Control: {}", e))?;
-        enigo
-            .key(Key::Unicode('v'), Direction::Click)
-            .map_err(|e| format!("Failed to press V: {}", e))?;
-        enigo
-            .key(Key::Control, Direction::Release)
-            .map_err(|e| format!("Failed to release Control: {}", e))?;
+        // Helper to ensure Control is released even on error
+        let result = {
+            // Press Control key
+            enigo
+                .key(Key::Control, Direction::Press)
+                .map_err(|e| format!("Failed to press Control: {}", e))?;
 
+            // Click V key while Control is held
+            let click_result = enigo
+                .key(Key::Unicode('v'), Direction::Click)
+                .map_err(|e| format!("Failed to press V: {}", e));
+
+            // Always release Control
+            let release_result = enigo.key(Key::Control, Direction::Release);
+            if let Err(e) = release_result {
+                tracing::error!("Failed to release Control key: {}", e);
+            }
+
+            click_result
+        };
+
+        result?;
         debug!("Pasted via enigo");
         Ok(())
     }

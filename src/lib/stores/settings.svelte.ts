@@ -86,7 +86,7 @@ export function createSettingsStore() {
    * @param deviceId - The device ID to select, or null for system default
    */
   async function selectAudioDevice(deviceId: string | null): Promise<void> {
-    await invoke('set_audio_device', { deviceId });
+    await invoke('set_audio_device', { device_id: deviceId });
     // Update the in-memory config so the UI reflects the change immediately
     configStore.updateAudio('deviceId', deviceId);
   }

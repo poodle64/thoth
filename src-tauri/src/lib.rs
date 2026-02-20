@@ -72,52 +72,40 @@ fn register_single_shortcut(
 fn register_shortcuts_from_config(app: &tauri::AppHandle, cfg: &config::Config) {
     use shortcuts::manager::shortcut_ids;
 
-    // Toggle recording shortcut
-    if !cfg.shortcuts.toggle_recording.is_empty() {
-        if let Err(e) = register_single_shortcut(
-            app,
+    // Collect (id, accelerator, description) tuples for all configured shortcuts
+    let shortcuts: Vec<(&str, &str, &str)> = [
+        Some((
             shortcut_ids::TOGGLE_RECORDING,
-            &cfg.shortcuts.toggle_recording,
+            cfg.shortcuts.toggle_recording.as_str(),
             "Toggle recording",
-        ) {
-            tracing::warn!("Failed to register toggle_recording shortcut: {}", e);
-        } else {
-            tracing::info!(
-                "Registered toggle_recording shortcut: {}",
-                cfg.shortcuts.toggle_recording
-            );
-        }
-    }
-
-    // Alternative toggle recording shortcut
-    if let Some(ref alt) = cfg.shortcuts.toggle_recording_alt {
-        if !alt.is_empty() {
-            if let Err(e) = register_single_shortcut(
-                app,
-                shortcut_ids::TOGGLE_RECORDING_ALT,
-                alt,
-                "Toggle recording (alternative)",
-            ) {
-                tracing::warn!("Failed to register toggle_recording_alt shortcut: {}", e);
-            } else {
-                tracing::info!("Registered toggle_recording_alt shortcut: {}", alt);
-            }
-        }
-    }
-
-    // Copy last transcription shortcut
-    if let Some(ref copy) = cfg.shortcuts.copy_last {
-        if !copy.is_empty() {
-            if let Err(e) = register_single_shortcut(
-                app,
+        )),
+        cfg.shortcuts
+            .toggle_recording_alt
+            .as_deref()
+            .map(|accel| {
+                (
+                    shortcut_ids::TOGGLE_RECORDING_ALT,
+                    accel,
+                    "Toggle recording (alternative)",
+                )
+            }),
+        cfg.shortcuts.copy_last.as_deref().map(|accel| {
+            (
                 shortcut_ids::COPY_LAST_TRANSCRIPTION,
-                copy,
+                accel,
                 "Copy last transcription",
-            ) {
-                tracing::warn!("Failed to register copy_last shortcut: {}", e);
-            } else {
-                tracing::info!("Registered copy_last shortcut: {}", copy);
-            }
+            )
+        }),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|(_, accel, _)| !accel.is_empty())
+    .collect();
+
+    for (id, accelerator, description) in shortcuts {
+        match register_single_shortcut(app, id, accelerator, description) {
+            Ok(()) => tracing::info!("Registered {} shortcut: {}", id, accelerator),
+            Err(e) => tracing::warn!("Failed to register {} shortcut: {}", id, e),
         }
     }
 
@@ -293,6 +281,7 @@ pub fn run() {
             platform::request_accessibility,
             platform::check_microphone_permission,
             platform::request_microphone_permission,
+            platform::get_gpu_info,
             // Audio
             audio::device::list_audio_devices,
             audio::preview::start_audio_preview,
@@ -458,6 +447,7 @@ pub fn run() {
             keyboard_capture::is_key_capture_active,
             keyboard_capture::check_input_monitoring,
             keyboard_capture::request_input_monitoring,
+            keyboard_capture::report_key_event,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

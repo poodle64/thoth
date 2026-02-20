@@ -140,7 +140,6 @@ impl AudioRecorder {
                 // LOCK-FREE: Ring buffer write does not allocate
                 let written = callback_buffer.write(data);
                 if written < data.len() {
-                    // Buffer overflow - samples dropped (this is worth logging)
                     tracing::warn!(
                         "Audio buffer overflow: dropped {} samples",
                         data.len() - written

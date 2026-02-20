@@ -14,8 +14,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # macOS ARM64 (Metal GPU acceleration built-in)
           - platform: macos-14
             args: '--target aarch64-apple-darwin'
+          # Linux x86_64 (CUDA GPU acceleration for NVIDIA, CPU fallback)
+          - platform: ubuntu-22.04
+            args: ''
 
     runs-on: ${{ matrix.platform }}
 
@@ -34,23 +38,33 @@ jobs:
           version: 10
 
       - name: Get pnpm store directory
-        id: pnpm-store
         shell: bash
         run: |
-          echo "path=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
       - name: Setup pnpm cache
         uses: actions/cache@v4
         with:
-          path: ${{ steps.pnpm-store.outputs.path }}
+          path: ${{ env.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
+
+      - name: Install CUDA dependencies (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          # Install minimal CUDA development headers/libs for whisper.cpp
+          sudo apt-get update
+          sudo apt-get install -y nvidia-cuda-dev nvidia-cuda-toolkit
+
+      - name: Install system dependencies (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -64,10 +78,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          CFLAGS: '-march=armv8-a'
-          CXXFLAGS: '-march=armv8-a'
+          CFLAGS: ${{ matrix.platform == 'macos-14' && '-march=armv8-a' || '' }}
+          CXXFLAGS: ${{ matrix.platform == 'macos-14' && '-march=armv8-a' || '' }}
         with:
           tagName: v__VERSION__
           releaseName: 'Thoth v__VERSION__'

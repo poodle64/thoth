@@ -131,7 +131,7 @@
     try {
       downloadState = 'Downloading';
       downloadingModelId = model.id;
-      await invoke('download_model', { modelId: model.id });
+      await invoke('download_model', { model_id: model.id });
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
       downloadState = { Failed: error };
@@ -149,7 +149,7 @@
 
     error = null;
     try {
-      await invoke('delete_model', { modelId: modelToDelete.id });
+      await invoke('delete_model', { model_id: modelToDelete.id });
       showDeleteConfirm = false;
       modelToDelete = null;
       await loadModels(false);

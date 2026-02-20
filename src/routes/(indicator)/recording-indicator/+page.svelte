@@ -3,7 +3,6 @@
   import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
   import { invoke } from '@tauri-apps/api/core';
 
-
   // Helper to emit logs to main window (since this window's console is separate)
   function indicatorLog(...args: unknown[]) {
     const message = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');

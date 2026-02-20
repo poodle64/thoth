@@ -21,14 +21,14 @@ pub struct AudioLevelEvent {
     pub peak: f32,
 }
 
-/// Audio preview state
-struct PreviewState {
+/// Shared state for an audio metering stream (preview or recording indicator)
+struct MeteringState {
     stream: Option<cpal::Stream>,
     stop_flag: Arc<AtomicBool>,
     emit_handle: Option<std::thread::JoinHandle<()>>,
 }
 
-impl Default for PreviewState {
+impl Default for MeteringState {
     fn default() -> Self {
         Self {
             stream: None,
@@ -39,7 +39,7 @@ impl Default for PreviewState {
 }
 
 /// Global preview state (only one preview can run at a time)
-static PREVIEW_STATE: Mutex<Option<PreviewState>> = Mutex::new(None);
+static PREVIEW_STATE: Mutex<Option<MeteringState>> = Mutex::new(None);
 
 /// Start audio preview for a specific device
 ///
@@ -94,7 +94,6 @@ pub fn start_audio_preview(app: AppHandle, device_id: Option<String>) -> Result<
     let emit_stop_flag = stop_flag.clone();
     let emit_handle = std::thread::spawn(move || {
         while !emit_stop_flag.load(Ordering::Relaxed) {
-            // Process available audio data
             while let Ok(samples) = rx.try_recv() {
                 let mut meter = meter.lock();
                 let level = meter.process(&samples);
@@ -116,7 +115,7 @@ pub fn start_audio_preview(app: AppHandle, device_id: Option<String>) -> Result<
 
     // Store state
     let mut state_guard = PREVIEW_STATE.lock();
-    *state_guard = Some(PreviewState {
+    *state_guard = Some(MeteringState {
         stream: Some(stream),
         stop_flag,
         emit_handle: Some(emit_handle),
@@ -165,25 +164,8 @@ pub fn is_audio_preview_running() -> bool {
 // Recording Metering (for the recording indicator overlay)
 // =============================================================================
 
-/// Recording metering state (separate from preview)
-struct RecordingMeterState {
-    stream: Option<cpal::Stream>,
-    stop_flag: Arc<AtomicBool>,
-    emit_handle: Option<std::thread::JoinHandle<()>>,
-}
-
-impl Default for RecordingMeterState {
-    fn default() -> Self {
-        Self {
-            stream: None,
-            stop_flag: Arc::new(AtomicBool::new(false)),
-            emit_handle: None,
-        }
-    }
-}
-
 /// Global recording meter state
-static RECORDING_METER_STATE: Mutex<Option<RecordingMeterState>> = Mutex::new(None);
+static RECORDING_METER_STATE: Mutex<Option<MeteringState>> = Mutex::new(None);
 
 /// Start recording metering - emits `recording-audio-level` events
 ///
@@ -224,24 +206,12 @@ pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Resu
     let (tx, rx) = crossbeam_channel::bounded::<Vec<f32>>(16);
 
     // Build the input stream
-    let callback_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let callback_count_clone = callback_count.clone();
     let stream = {
         let tx = tx.clone();
         device
             .build_input_stream(
                 &config.into(),
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    let count =
-                        callback_count_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if count % 100 == 0 {
-                        tracing::info!(
-                            "Recording metering: audio callback #{}, {} samples",
-                            count,
-                            data.len()
-                        );
-                    }
-                    // Mix to mono and send to emitter thread
                     let mono: Vec<f32> = data
                         .chunks(channels)
                         .map(|frame| frame.iter().sum::<f32>() / channels as f32)
@@ -259,9 +229,6 @@ pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Resu
             })?
     };
 
-    // Keep callback_count alive
-    let _callback_count = callback_count;
-
     stream.play().map_err(|e| {
         tracing::error!("Recording metering: failed to play stream: {}", e);
         e.to_string()
@@ -269,12 +236,10 @@ pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Resu
 
     tracing::info!("Recording metering: audio stream active");
 
-    // Spawn emitter thread to send levels to frontend
+    // Spawn emitter thread to send levels to the recording-indicator window
     let emit_stop_flag = stop_flag.clone();
     let emit_handle = std::thread::spawn(move || {
-        let mut emit_count = 0u64;
         while !emit_stop_flag.load(Ordering::Relaxed) {
-            // Process available audio data
             while let Ok(samples) = rx.try_recv() {
                 let mut meter = meter.lock();
                 let level = meter.process(&samples);
@@ -284,58 +249,29 @@ pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Resu
                     peak: level.peak,
                 };
 
-                // Try to emit directly to the recording-indicator window
+                // Try to emit directly to the recording-indicator window, fall back to global
                 let emitted =
                     if let Some(indicator_window) = app.get_webview_window("recording-indicator") {
-                        match indicator_window.emit("recording-audio-level", &event) {
-                            Ok(()) => true,
-                            Err(e) => {
-                                if emit_count % 100 == 0 {
-                                    tracing::warn!("Failed to emit to indicator window: {}", e);
-                                }
-                                false
-                            }
-                        }
+                        indicator_window
+                            .emit("recording-audio-level", &event)
+                            .is_ok()
                     } else {
-                        if emit_count % 100 == 0 {
-                            tracing::warn!("Recording indicator window not found");
-                        }
                         false
                     };
 
-                // Also emit globally as fallback
                 if !emitted {
-                    if let Err(e) = app.emit("recording-audio-level", &event) {
-                        if emit_count % 100 == 0 {
-                            tracing::warn!("Failed to emit recording audio level globally: {}", e);
-                        }
-                    }
-                }
-
-                emit_count += 1;
-                // Log every 30 emits (~1 second)
-                if emit_count % 30 == 0 {
-                    tracing::debug!(
-                        "Recording metering: emitted {} events, last rms={:.4}, peak={:.4}",
-                        emit_count,
-                        level.rms,
-                        level.peak
-                    );
+                    let _ = app.emit("recording-audio-level", &event);
                 }
             }
 
             // Rate limit to ~30fps
             std::thread::sleep(std::time::Duration::from_millis(33));
         }
-        tracing::info!(
-            "Recording metering: emitter thread stopped after {} events",
-            emit_count
-        );
     });
 
     // Store state
     let mut state_guard = RECORDING_METER_STATE.lock();
-    *state_guard = Some(RecordingMeterState {
+    *state_guard = Some(MeteringState {
         stream: Some(stream),
         stop_flag,
         emit_handle: Some(emit_handle),
@@ -385,8 +321,8 @@ mod tests {
     }
 
     #[test]
-    fn test_preview_state_default() {
-        let state = PreviewState::default();
+    fn test_metering_state_default() {
+        let state = MeteringState::default();
         assert!(state.stream.is_none());
         assert!(!state.stop_flag.load(Ordering::Relaxed));
     }
