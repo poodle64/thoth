@@ -3,6 +3,7 @@
 //! Handles audio device enumeration, recording, buffer management, and voice activity detection.
 
 pub mod capture;
+pub mod decode;
 pub mod device;
 pub mod format;
 pub mod metering;

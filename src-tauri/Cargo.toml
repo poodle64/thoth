@@ -30,6 +30,7 @@ hound = "3.5"
 rubato = "0.15"
 crossbeam-channel = "0.5"
 webrtc-vad = "0.4"
+symphonia = { version = "0.5", features = ["mp3", "aac", "ogg", "vorbis", "flac", "wav", "pcm", "isomp4"] }
 
 # Transcription
 # sherpa-rs: Backup for Parakeet models (no CoreML/Metal support)

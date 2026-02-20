@@ -25,6 +25,7 @@ import { soundStore } from './sound.svelte';
 export type PipelineState =
   | 'idle'
   | 'recording'
+  | 'converting'
   | 'transcribing'
   | 'filtering'
   | 'enhancing'
@@ -453,6 +454,57 @@ function createPipelineStore() {
   }
 
   /**
+   * Transcribe an imported audio file (WAV, MP3, M4A, OGG, FLAC)
+   */
+  async function transcribeFile(
+    filePath: string
+  ): Promise<{ success: boolean; result?: PipelineResult; error?: string }> {
+    debug(' transcribeFile() called:', filePath);
+    if (isRunning) {
+      return { success: false, error: 'Pipeline is already running' };
+    }
+
+    error = null;
+    lastResult = null;
+    isRunning = true;
+
+    try {
+      const defaultConfig = await getDefaultConfig();
+      const config: PipelineConfig = {
+        ...defaultConfig,
+        autoCopy: false,
+        autoPaste: false,
+      };
+
+      const result = await invoke<PipelineResult>('pipeline_transcribe_file', {
+        filePath,
+        config,
+      });
+
+      lastResult = result;
+
+      if (result.success) {
+        state = 'completed';
+        return { success: true, result };
+      } else {
+        state = 'failed';
+        error = result.error ?? 'Unknown error';
+        soundStore.playError();
+        return { success: false, error: result.error ?? 'Unknown error' };
+      }
+    } catch (e) {
+      const errorMsg = `${e}`;
+      console.error('[Pipeline] Exception in transcribeFile:', errorMsg);
+      error = errorMsg;
+      state = 'failed';
+      soundStore.playError();
+      return { success: false, error: errorMsg };
+    } finally {
+      isRunning = false;
+    }
+  }
+
+  /**
    * Force reset the pipeline state (for recovery from stuck states)
    * This should only be called when the pipeline is known to be stuck
    */
@@ -514,6 +566,7 @@ function createPipelineStore() {
     },
     get isProcessing() {
       return (
+        state === 'converting' ||
         state === 'transcribing' ||
         state === 'filtering' ||
         state === 'enhancing' ||
@@ -542,6 +595,7 @@ function createPipelineStore() {
     startRecording,
     stopAndProcess,
     toggleRecording,
+    transcribeFile,
     cancel,
     reset,
     forceReset,
