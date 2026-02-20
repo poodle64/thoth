@@ -2,6 +2,7 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import Toaster from '$lib/components/Toaster.svelte';
   import type { Snippet } from 'svelte';
 
   interface Props {
@@ -23,3 +24,5 @@
 {#if children}
   {@render children()}
 {/if}
+
+<Toaster />

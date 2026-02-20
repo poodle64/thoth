@@ -9,6 +9,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import { configStore } from '../stores/config.svelte';
+  import { toastStore } from '../stores/toast.svelte';
 
   /** Prompt template matching Rust PromptTemplate struct */
   interface PromptTemplate {
@@ -25,7 +26,6 @@
   let isLoadingModels = $state(false);
   let isLoadingPrompts = $state(false);
   let error = $state<string | null>(null);
-  let saveStatus = $state<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   // Custom prompt editor state
   let isEditing = $state(false);
@@ -82,17 +82,12 @@
 
   /** Save settings to backend with auto-save */
   async function saveSettings(): Promise<void> {
-    saveStatus = 'saving';
-
     try {
       await configStore.save();
-      saveStatus = 'saved';
-      setTimeout(() => {
-        if (saveStatus === 'saved') saveStatus = 'idle';
-      }, 2000);
+      toastStore.success('Settings saved');
     } catch (e) {
       console.error('Failed to save settings:', e);
-      saveStatus = 'error';
+      toastStore.error('Failed to save settings');
     }
   }
 
@@ -248,8 +243,6 @@
     <div class="loading">Loading settings...</div>
   {:else}
     <div class="setting-group">
-      <h3>AI Enhancement</h3>
-
       <div class="setting-row card">
         <div class="setting-info">
           <span class="setting-label">Enable AI enhancement</span>
@@ -274,7 +267,7 @@
       <div class="setting-row card vertical">
         <div class="setting-info">
           <span class="setting-label">Server URL</span>
-          <span class="setting-description"> The URL of your local Ollama server </span>
+          <span class="setting-description">The URL of your local Ollama server</span>
         </div>
         <div class="url-input-row">
           <input
@@ -289,37 +282,32 @@
             {isCheckingOllama ? 'Testing...' : 'Test Connection'}
           </button>
         </div>
-      </div>
-
-      <div
-        class="connection-status"
-        class:connected={ollamaAvailable}
-        class:disconnected={!ollamaAvailable && !isCheckingOllama}
-      >
-        {#if isCheckingOllama}
-          <span class="status-indicator checking"></span>
-          <span>Checking connection...</span>
-        {:else if ollamaAvailable}
-          <span class="status-indicator connected"></span>
-          <span>Connected to Ollama</span>
-        {:else}
-          <span class="status-indicator disconnected"></span>
-          <span>Not connected. Make sure Ollama is running.</span>
-        {/if}
+        <div
+          class="connection-inline"
+          class:connected={ollamaAvailable}
+          class:disconnected={!ollamaAvailable && !isCheckingOllama}
+        >
+          {#if isCheckingOllama}
+            <span class="status-indicator checking"></span>
+            <span>Checking connection...</span>
+          {:else if ollamaAvailable}
+            <span class="status-indicator connected"></span>
+            <span>Connected to Ollama</span>
+          {:else}
+            <span class="status-indicator disconnected"></span>
+            <span>Not connected. Make sure Ollama is running.</span>
+          {/if}
+        </div>
       </div>
 
       {#if error}
         <div class="error-message">{error}</div>
       {/if}
-    </div>
-
-    <div class="setting-group">
-      <h3>Model Selection</h3>
 
       <div class="setting-row card">
         <div class="setting-info">
-          <span class="setting-label">Ollama Model</span>
-          <span class="setting-description"> Select the model to use for text enhancement </span>
+          <span class="setting-label">Model</span>
+          <span class="setting-description">The Ollama model used for text enhancement</span>
         </div>
         <select
           class="select-control"
@@ -352,46 +340,44 @@
     <div class="setting-group">
       <h3>Prompt Templates</h3>
 
-      <div class="setting-row card">
-        <div class="setting-info">
-          <span class="setting-label">Active Prompt</span>
-          <span class="setting-description">
-            The prompt template used to enhance transcriptions
-          </span>
+      <div class="setting-row card vertical">
+        <div class="prompt-selector-row">
+          <div class="setting-info">
+            <span class="setting-label">Active Prompt</span>
+            <span class="setting-description">
+              The prompt template used to enhance transcriptions
+            </span>
+          </div>
+          <select
+            class="select-control"
+            value={configStore.config.enhancement.promptId}
+            onchange={handlePromptChange}
+            disabled={isLoadingPrompts}
+          >
+            {#if isLoadingPrompts}
+              <option>Loading...</option>
+            {:else}
+              {#each prompts as prompt}
+                <option value={prompt.id}>
+                  {prompt.name}
+                  {prompt.isBuiltin ? '' : ' (Custom)'}
+                </option>
+              {/each}
+            {/if}
+          </select>
         </div>
-        <select
-          class="select-control"
-          value={configStore.config.enhancement.promptId}
-          onchange={handlePromptChange}
-          disabled={isLoadingPrompts}
-        >
-          {#if isLoadingPrompts}
-            <option>Loading...</option>
-          {:else}
-            {#each prompts as prompt}
-              <option value={prompt.id}>
-                {prompt.name}
-                {prompt.isBuiltin ? '' : ' (Custom)'}
-              </option>
-            {/each}
-          {/if}
-        </select>
+        {#if getSelectedPrompt()}
+          <pre class="prompt-preview-text">{getSelectedPrompt()?.template}</pre>
+        {/if}
       </div>
 
-      {#if getSelectedPrompt()}
-        <div class="prompt-preview">
-          <span class="preview-label">Preview:</span>
-          <pre class="preview-text">{getSelectedPrompt()?.template}</pre>
-        </div>
-      {/if}
-
-      <div class="prompts-section">
-        <div class="prompts-header">
-          <span class="prompts-title">Custom Prompts</span>
-          <button class="add-btn" onclick={startNewPrompt}> + Add Prompt </button>
+      <div class="custom-prompts-section">
+        <div class="custom-prompts-header">
+          <span class="setting-label">Custom Prompts</span>
+          <button class="btn-small" onclick={startNewPrompt}>+ Add Prompt</button>
         </div>
 
-        <p class="prompts-help">
+        <p class="hint">
           Create your own prompt templates for specific use cases.
           <button class="help-link" onclick={openPromptGuide}>
             View Prompt Writing Guide
@@ -469,13 +455,6 @@
       </div>
     </div>
 
-    {#if saveStatus === 'saving'}
-      <div class="save-status saving">Saving...</div>
-    {:else if saveStatus === 'saved'}
-      <div class="save-status saved">Settings saved</div>
-    {:else if saveStatus === 'error'}
-      <div class="save-status error">Failed to save settings</div>
-    {/if}
   {/if}
 </div>
 
@@ -538,65 +517,59 @@
     cursor: not-allowed;
   }
 
-  /* Prompt preview */
-  .prompt-preview {
-    padding: 12px;
-    background: var(--color-bg-secondary);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--color-border-subtle);
+  /* Connection status inline within card */
+  .connection-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
   }
 
-  .preview-label {
-    display: block;
-    font-size: var(--text-xs);
-    font-weight: 500;
-    color: var(--color-text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 8px;
+  .connection-inline.connected {
+    background: color-mix(in srgb, var(--color-success) 10%, transparent);
+    color: var(--color-success);
   }
 
-  .preview-text {
+  .connection-inline.disconnected {
+    background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+    color: var(--color-warning);
+  }
+
+  /* Prompt selector row (horizontal layout within vertical card) */
+  .prompt-selector-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  /* Prompt preview inline within card */
+  .prompt-preview-text {
     margin: 0;
+    padding: 10px 12px;
     font-size: var(--text-xs);
     font-family: var(--font-mono);
     color: var(--color-text-secondary);
     white-space: pre-wrap;
     word-break: break-word;
     line-height: 1.5;
+    background: var(--color-bg-tertiary);
+    border-radius: var(--radius-sm);
   }
 
-  /* Prompts section */
-  .prompts-section {
+  /* Custom prompts section */
+  .custom-prompts-section {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    padding: 12px;
-    background: var(--color-bg-secondary);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--color-border-subtle);
   }
 
-  .prompts-header {
+  .custom-prompts-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-  }
-
-  .prompts-title {
-    font-size: var(--text-sm);
-    font-weight: 500;
-    color: var(--color-text-primary);
-  }
-
-  .prompts-help {
-    margin: 0;
-    padding: 8px 12px;
-    background: var(--color-bg-tertiary);
-    border-radius: var(--radius-md);
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
-    line-height: 1.5;
   }
 
   .help-link {
