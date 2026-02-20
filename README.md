@@ -8,7 +8,7 @@
 
 **Press a key. Speak. Text appears.**
 
-**[Download for macOS](https://github.com/poodle64/thoth/releases/latest)**
+**[Download for macOS](https://github.com/poodle64/thoth/releases/latest)** · **[Download for Linux](https://github.com/poodle64/thoth/releases/latest)**
 
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8D8?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.75+-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -21,9 +21,10 @@
 
 ![Thoth in action](docs/screenshots/hero.gif)
 
-Voice input on macOS is either cloud-dependent or requires complex setup. Thoth
-runs speech-to-text **locally** using whisper.cpp with Metal GPU acceleration.
-Nothing leaves the machine. No subscription. No cloud. No internet required.
+Voice input on macOS and Linux is either cloud-dependent or requires complex
+setup. Thoth runs speech-to-text **locally** using whisper.cpp with GPU
+acceleration (Metal on macOS, CUDA/Vulkan on Linux). Nothing leaves the machine.
+No subscription. No cloud. No internet required.
 
 ---
 
@@ -31,7 +32,7 @@ Nothing leaves the machine. No subscription. No cloud. No internet required.
 
 > After installing, Thoth checks for updates automatically and installs them in-app.
 
-### First launch
+### First launch (macOS)
 
 macOS will block the app the first time you open it because it isn't from the App
 Store. This is normal and only happens once.
@@ -48,6 +49,15 @@ xattr -dr com.apple.quarantine /Applications/Thoth.app
 ```
 
 </details>
+
+### First launch (Linux)
+
+1. Download the `.AppImage` from the [latest release](https://github.com/poodle64/thoth/releases/latest)
+2. Make it executable: `chmod +x Thoth_*.AppImage`
+3. Run it: `./Thoth_*.AppImage`
+
+> **NVIDIA users**: Ensure CUDA drivers are installed for GPU-accelerated transcription.
+> Without them, Thoth falls back to CPU.
 
 ### Setup
 
