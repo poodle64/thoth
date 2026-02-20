@@ -243,7 +243,7 @@ function getDefaultConfig(): Config {
     },
     transcription: {
       language: 'en',
-      autoCopy: true,
+      autoCopy: false,
       autoPaste: true,
       addLeadingSpace: false,
     },

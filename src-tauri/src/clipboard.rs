@@ -48,10 +48,10 @@ pub struct ClipboardSettings {
 impl Default for ClipboardSettings {
     fn default() -> Self {
         Self {
-            auto_copy_enabled: true,
+            auto_copy_enabled: false,
             format: ClipboardFormat::PlainText,
             show_notification: false,
-            preserve_clipboard: false,
+            preserve_clipboard: true,
             restore_delay_ms: 1000,
             history_enabled: true,
         }
@@ -474,17 +474,17 @@ mod tests {
     #[test]
     fn test_clipboard_manager_creation() {
         let manager = ClipboardManager::new();
-        assert!(manager.settings().auto_copy_enabled);
+        assert!(!manager.settings().auto_copy_enabled);
         assert!(manager.get_history().is_empty());
     }
 
     #[test]
     fn test_clipboard_settings_default() {
         let settings = ClipboardSettings::default();
-        assert!(settings.auto_copy_enabled);
+        assert!(!settings.auto_copy_enabled);
         assert_eq!(settings.format, ClipboardFormat::PlainText);
         assert!(!settings.show_notification);
-        assert!(!settings.preserve_clipboard);
+        assert!(settings.preserve_clipboard);
         assert_eq!(settings.restore_delay_ms, 1000);
         assert!(settings.history_enabled);
     }

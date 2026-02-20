@@ -75,7 +75,7 @@ impl Default for PipelineConfig {
             enhancement_enabled: false,
             enhancement_model: "llama3.2".to_string(),
             enhancement_prompt: DEFAULT_ENHANCEMENT_PROMPT.to_string(),
-            auto_copy: true,
+            auto_copy: false,
             auto_paste: true,
             insertion_method: "paste".to_string(),
         }
@@ -763,7 +763,7 @@ mod tests {
         assert!(config.apply_dictionary);
         assert!(config.apply_filtering);
         assert!(!config.enhancement_enabled);
-        assert!(config.auto_copy);
+        assert!(!config.auto_copy);
         assert!(config.auto_paste);
     }
 
