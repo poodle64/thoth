@@ -104,6 +104,7 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         selected_device_id.as_deref(),
         enhancement_enabled,
         &active_prompt_id,
+        cfg.as_ref().map(|c| &c.shortcuts),
     )?;
 
     // Create tray icon
@@ -141,6 +142,7 @@ fn build_tray_menu(
     selected_device_id: Option<&str>,
     enhancement_enabled: bool,
     active_prompt_id: &str,
+    shortcuts: Option<&config::ShortcutConfig>,
 ) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
     // Status item (non-interactive, coloured dot as visual indicator)
     let status_text = if is_recording {
@@ -181,15 +183,27 @@ fn build_tray_menu(
     } else {
         "Start Recording"
     };
-    let toggle_recording =
-        MenuItemBuilder::with_id(menu_ids::TOGGLE_RECORDING, recording_text).build(app)?;
+    let mut toggle_builder = MenuItemBuilder::with_id(menu_ids::TOGGLE_RECORDING, recording_text);
+    if let Some(sc) = shortcuts {
+        if !sc.toggle_recording.is_empty() {
+            toggle_builder = toggle_builder.accelerator(&sc.toggle_recording);
+        }
+    }
+    let toggle_recording = toggle_builder.build(app)?;
 
     let separator2 = PredefinedMenuItem::separator(app)?;
 
     // Copy last transcription
-    let copy_last = MenuItemBuilder::with_id(menu_ids::COPY_LAST, "Copy Last Transcription")
-        .enabled(last_transcription.is_some())
-        .build(app)?;
+    let mut copy_builder = MenuItemBuilder::with_id(menu_ids::COPY_LAST, "Copy Last Transcription")
+        .enabled(last_transcription.is_some());
+    if let Some(sc) = shortcuts {
+        if let Some(ref key) = sc.copy_last {
+            if !key.is_empty() {
+                copy_builder = copy_builder.accelerator(key);
+            }
+        }
+    }
+    let copy_last = copy_builder.build(app)?;
 
     // Transcribe
     let transcribe =
@@ -476,6 +490,7 @@ fn rebuild_tray_menu(app: &AppHandle) {
         selected_device_id.as_deref(),
         enhancement_enabled,
         &active_prompt_id,
+        cfg.as_ref().map(|c| &c.shortcuts),
     ) {
         Ok(menu) => {
             drop(state); // Release lock before menu operations

@@ -8,13 +8,13 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+	import { getVersion } from '@tauri-apps/api/app';
 	import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
 	import { configStore } from '../stores/config.svelte';
 	import { settingsStore } from '../stores/settings.svelte';
 	import {
 		formatDuration,
-		formatTotalDuration,
-		formatSpeedFactor
+		formatTotalDuration
 	} from '../utils/format';
 	import { getUpdaterState, checkForUpdate } from '../stores/updater.svelte';
 
@@ -50,28 +50,13 @@
 	);
 
 	const updaterState = getUpdaterState();
-	let currentVersion = $state('2026.2.2'); // Will be read from package.json or tauri config
+	let currentVersion = $state('');
 
-  /** Average speed factor across all transcription models */
-  let avgSpeedFactor = $derived.by(() => {
-    if (!stats || stats.transcriptionModels.length === 0) return 0;
-    const totalWeighted = stats.transcriptionModels.reduce(
-      (sum, m) => sum + m.speedFactor * m.count,
-      0
-    );
-    const totalCount = stats.transcriptionModels.reduce((sum, m) => sum + m.count, 0);
-    return totalCount > 0 ? totalWeighted / totalCount : 0;
-  });
-
-  /** Top models by usage, capped at 3 */
-  let topModels = $derived.by(() => {
-    if (!stats) return [];
-    const sorted = [...stats.transcriptionModels].sort((a, b) => b.count - a.count);
-    return sorted.slice(0, 3);
-  });
-
-  let remainingModelCount = $derived(
-    stats ? Math.max(0, stats.transcriptionModels.length - 3) : 0
+  /** Average recording duration */
+  let avgRecordingDuration = $derived(
+    stats && stats.analysableCount > 0
+      ? stats.totalAudioDuration / stats.analysableCount
+      : 0
   );
 
   /** Selected device display name */
@@ -315,6 +300,7 @@
   onMount(async () => {
     loadAutostartState();
     loadDockState();
+    getVersion().then((v) => { currentVersion = v; }).catch(() => {});
     await checkPermissions();
 
     // If all permissions are already granted, refresh tray in case it was built
@@ -357,223 +343,225 @@
   });
 </script>
 
-<div class="overview-pane">
-  {#if isLoading}
-    <div class="loading">Loading...</div>
-  {:else if stats && stats.totalCount === 0}
-    <!-- First-run setup: stepped checklist -->
-    <div class="empty-state" class:celebrating={showCelebration}>
-      <div class="empty-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path
-            d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-          <path
-            d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </div>
-      {#if allRequiredDone}
-        <p class="empty-title">Ready to go</p>
-        <p class="empty-hint">Press your shortcut key to start recording.</p>
-      {:else}
-        <p class="empty-title">Set up Thoth</p>
-        <p class="empty-hint">Three quick steps and you're recording.</p>
-      {/if}
+{#if isLoading}
+  <div class="loading">Loading...</div>
+{:else if stats && stats.totalCount === 0}
+  <!-- First-run setup: stepped checklist -->
+  <div class="empty-state" class:celebrating={showCelebration}>
+    <div class="empty-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path
+          d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+        <path
+          d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </svg>
     </div>
+    {#if allRequiredDone}
+      <p class="empty-title">Ready to go</p>
+      <p class="empty-hint">Press your shortcut key to start recording.</p>
+    {:else}
+      <p class="empty-title">Set up Thoth</p>
+      <p class="empty-hint">Three quick steps and you're recording.</p>
+    {/if}
+  </div>
 
-    <!-- Setup steps -->
-    <div class="setup-checklist">
-      <!-- Step 1: Download speech model -->
-      <div class="setup-step" class:completed={modelStepDone}>
-        <div class="step-indicator" class:pending={!modelStepDone} class:done={modelStepDone}>
-          {#if modelStepDone}
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 8.5l3.5 3.5 6.5-7" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          {:else}
-            1
-          {/if}
-        </div>
-        <div class="step-body">
-          <p class="step-title">Download speech model</p>
-          {#if modelStepDone}
-            <p class="step-description done">Model ready</p>
-          {:else}
-            <p class="step-description">
-              {#if setupState === 'downloading'}
-                Downloading... {Math.round(downloadProgress)}%
-              {:else if setupState === 'initialising'}
-                Preparing transcription engine...
-              {:else if setupState === 'error'}
-                {downloadError ?? 'Download failed.'}
-              {:else}
-                A ~1.5 GB model that runs entirely on your machine. Nothing is sent to the cloud.
-              {/if}
-            </p>
+  <!-- Setup steps -->
+  <div class="setup-checklist">
+    <!-- Step 1: Download speech model -->
+    <div class="setup-step" class:completed={modelStepDone}>
+      <div class="step-indicator" class:pending={!modelStepDone} class:done={modelStepDone}>
+        {#if modelStepDone}
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 8.5l3.5 3.5 6.5-7" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        {:else}
+          1
+        {/if}
+      </div>
+      <div class="step-body">
+        <p class="step-title">Download speech model</p>
+        {#if modelStepDone}
+          <p class="step-description done">Model ready</p>
+        {:else}
+          <p class="step-description">
             {#if setupState === 'downloading'}
-              <div class="progress-bar">
-                <div class="progress-fill" style="width: {Math.round(downloadProgress)}%"></div>
-              </div>
+              Downloading... {Math.round(downloadProgress)}%
             {:else if setupState === 'initialising'}
-              <div class="progress-bar">
-                <div class="progress-fill indeterminate"></div>
-              </div>
-            {/if}
-            {#if setupState === 'needed'}
-              <div class="step-actions">
-                <button class="btn-setup" onclick={downloadRecommendedModel}>
-                  Download Recommended Model
-                </button>
-                <button class="btn-setup-alt" onclick={() => onNavigate('models')}>
-                  Choose a different model
-                </button>
-              </div>
+              Preparing transcription engine...
             {:else if setupState === 'error'}
-              <div class="step-actions">
-                <button class="btn-setup" onclick={retryDownload}>
-                  Retry Download
-                </button>
-              </div>
+              {downloadError ?? 'Download failed.'}
+            {:else}
+              A ~1.5 GB model that runs entirely on your machine. Nothing is sent to the cloud.
             {/if}
-          {/if}
-        </div>
-      </div>
-
-      <!-- Step 2: Allow microphone -->
-      <div class="setup-step" class:completed={micStepDone}>
-        <div class="step-indicator" class:pending={!micStepDone} class:done={micStepDone}>
-          {#if micStepDone}
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 8.5l3.5 3.5 6.5-7" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          {:else}
-            2
-          {/if}
-        </div>
-        <div class="step-body">
-          <p class="step-title">Allow microphone access</p>
-          {#if micStepDone}
-            <p class="step-description done">Microphone access granted</p>
-          {:else}
-            <p class="step-description">Thoth needs to hear you to transcribe your speech.</p>
-            <div class="step-actions">
-              <button class="btn-setup" onclick={() => requestPermission('request_microphone_permission')}>Allow</button>
-              <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
+          </p>
+          {#if setupState === 'downloading'}
+            <div class="progress-bar">
+              <div class="progress-fill" style="width: {Math.round(downloadProgress)}%"></div>
+            </div>
+          {:else if setupState === 'initialising'}
+            <div class="progress-bar">
+              <div class="progress-fill indeterminate"></div>
             </div>
           {/if}
-        </div>
-      </div>
-
-      <!-- Step 3: Allow global shortcut -->
-      <div class="setup-step" class:completed={shortcutStepDone}>
-        <div class="step-indicator" class:pending={!shortcutStepDone} class:done={shortcutStepDone}>
-          {#if shortcutStepDone}
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 8.5l3.5 3.5 6.5-7" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          {:else}
-            3
-          {/if}
-        </div>
-        <div class="step-body">
-          <p class="step-title">Allow global shortcut</p>
-          {#if shortcutStepDone}
-            <p class="step-description done">Shortcut access granted</p>
-          {:else}
-            <p class="step-description">Lets you start recording from anywhere with a keyboard shortcut.</p>
+          {#if setupState === 'needed'}
             <div class="step-actions">
-              <button class="btn-setup" onclick={() => requestPermission('request_accessibility')}>Allow</button>
-              <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
+              <button class="btn-setup" onclick={downloadRecommendedModel}>
+                Download Recommended Model
+              </button>
+              <button class="btn-setup-alt" onclick={() => onNavigate('models')}>
+                Choose a different model
+              </button>
+            </div>
+          {:else if setupState === 'error'}
+            <div class="step-actions">
+              <button class="btn-setup" onclick={retryDownload}>
+                Retry Download
+              </button>
             </div>
           {/if}
-        </div>
+        {/if}
       </div>
     </div>
 
-    <!-- Optional settings -->
-    <details class="optional-section">
-      <summary class="optional-summary">Optional settings</summary>
-      <div class="optional-content">
-        <div class="status-row">
-          <span
-            class="status-dot"
-            class:ready={inputMonitoringPermission === 'granted'}
-            class:warning={inputMonitoringPermission === 'denied'}
-          ></span>
-          <span class="status-label">Input Monitoring</span>
-          <span class="status-value">
-            {#if inputMonitoringPermission === 'granted'}
-              Granted
-            {:else}
-              <span class="permission-actions">
-                <button class="btn-small" onclick={() => requestPermission('request_input_monitoring')}>Grant Access</button>
-                <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
-              </span>
-            {/if}
-          </span>
-        </div>
-        {#if inputMonitoringPermission !== 'granted'}
-          <p class="permission-hint">Needed only if you want to customise the recording shortcut</p>
+    <!-- Step 2: Allow microphone -->
+    <div class="setup-step" class:completed={micStepDone}>
+      <div class="step-indicator" class:pending={!micStepDone} class:done={micStepDone}>
+        {#if micStepDone}
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 8.5l3.5 3.5 6.5-7" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        {:else}
+          2
         {/if}
-        <div class="status-row">
-          <span
-            class="status-dot"
-            class:ready={ollamaStatus === 'connected'}
-            class:not-configured={ollamaStatus === 'not-configured'}
-            class:warning={ollamaStatus === 'unavailable'}
-            class:checking={ollamaStatus === 'checking'}
-          ></span>
-          <span class="status-label">AI Enhancement</span>
-          <span class="status-value">
-            {#if ollamaStatus === 'checking'}
-              Checking...
-            {:else if ollamaStatus === 'connected'}
-              Connected
-            {:else if ollamaStatus === 'not-configured'}
-              Not configured
-            {:else}
-              Unavailable
-            {/if}
-          </span>
-        </div>
-        <div class="autostart-row">
-          <span class="status-label">Launch at Login</span>
-          <label class="toggle-switch">
-            <input
-              type="checkbox"
-              checked={autostartEnabled}
-              disabled={autostartLoading}
-              onchange={handleAutostartToggle}
-            />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        {#if autostartError}
-          <div class="setting-error">{autostartError}</div>
-        {/if}
-        <div class="autostart-row">
-          <span class="status-label">Show in Dock</span>
-          <label class="toggle-switch">
-            <input
-              type="checkbox"
-              checked={showInDock}
-              disabled={dockLoading}
-              onchange={handleDockToggle}
-            />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
       </div>
-    </details>
-  {:else if stats}
-    <!-- Summary Cards -->
-    <section class="section" aria-labelledby="summary-title">
-      <h3 id="summary-title" class="section-title">Summary</h3>
+      <div class="step-body">
+        <p class="step-title">Allow microphone access</p>
+        {#if micStepDone}
+          <p class="step-description done">Microphone access granted</p>
+        {:else}
+          <p class="step-description">Thoth needs to hear you to transcribe your speech.</p>
+          <div class="step-actions">
+            <button class="btn-setup" onclick={() => requestPermission('request_microphone_permission')}>Allow</button>
+            <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
+          </div>
+        {/if}
+      </div>
+    </div>
+
+    <!-- Step 3: Allow global shortcut -->
+    <div class="setup-step" class:completed={shortcutStepDone}>
+      <div class="step-indicator" class:pending={!shortcutStepDone} class:done={shortcutStepDone}>
+        {#if shortcutStepDone}
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 8.5l3.5 3.5 6.5-7" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        {:else}
+          3
+        {/if}
+      </div>
+      <div class="step-body">
+        <p class="step-title">Allow global shortcut</p>
+        {#if shortcutStepDone}
+          <p class="step-description done">Shortcut access granted</p>
+        {:else}
+          <p class="step-description">Lets you start recording from anywhere with a keyboard shortcut.</p>
+          <div class="step-actions">
+            <button class="btn-setup" onclick={() => requestPermission('request_accessibility')}>Allow</button>
+            <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
+          </div>
+        {/if}
+      </div>
+    </div>
+  </div>
+
+  <!-- Optional settings -->
+  <details class="optional-section">
+    <summary class="optional-summary">Optional settings</summary>
+    <div class="optional-content">
+      <div class="status-row">
+        <span
+          class="status-dot"
+          class:ready={inputMonitoringPermission === 'granted'}
+          class:warning={inputMonitoringPermission === 'denied'}
+        ></span>
+        <span class="status-label">Input Monitoring</span>
+        <span class="status-value">
+          {#if inputMonitoringPermission === 'granted'}
+            Granted
+          {:else}
+            <span class="permission-actions">
+              <button class="btn-small" onclick={() => requestPermission('request_input_monitoring')}>Grant Access</button>
+              <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
+            </span>
+          {/if}
+        </span>
+      </div>
+      {#if inputMonitoringPermission !== 'granted'}
+        <p class="permission-hint">Needed only if you want to customise the recording shortcut</p>
+      {/if}
+      <div class="status-row">
+        <span
+          class="status-dot"
+          class:ready={ollamaStatus === 'connected'}
+          class:not-configured={ollamaStatus === 'not-configured'}
+          class:warning={ollamaStatus === 'unavailable'}
+          class:checking={ollamaStatus === 'checking'}
+        ></span>
+        <span class="status-label">AI Enhancement</span>
+        <span class="status-value">
+          {#if ollamaStatus === 'checking'}
+            Checking...
+          {:else if ollamaStatus === 'connected'}
+            Connected
+          {:else if ollamaStatus === 'not-configured'}
+            Not configured
+          {:else}
+            Unavailable
+          {/if}
+        </span>
+      </div>
+      <div class="autostart-row">
+        <span class="status-label">Launch at Login</span>
+        <label class="toggle-switch">
+          <input
+            type="checkbox"
+            checked={autostartEnabled}
+            disabled={autostartLoading}
+            onchange={handleAutostartToggle}
+          />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      {#if autostartError}
+        <div class="setting-error">{autostartError}</div>
+      {/if}
+      <div class="autostart-row">
+        <span class="status-label">Show in Dock</span>
+        <label class="toggle-switch">
+          <input
+            type="checkbox"
+            checked={showInDock}
+            disabled={dockLoading}
+            onchange={handleDockToggle}
+          />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+  </details>
+{:else if stats}
+  <!-- Summary Cards -->
+  <section class="settings-section">
+    <div class="section-header">
+      <h2 class="section-title">Summary</h2>
+    </div>
+    <div class="section-content">
       <div class="cards">
         <div class="card">
           <span class="card-value">{stats.totalCount}</span>
@@ -588,96 +576,81 @@
           <span class="card-label">Enhanced</span>
         </div>
         <div class="card">
-          <span class="card-value">{avgSpeedFactor > 0 ? formatSpeedFactor(avgSpeedFactor) : '--'}</span>
-          <span class="card-label">Avg RTFX</span>
+          <span class="card-value">{avgRecordingDuration > 0 ? formatDuration(avgRecordingDuration) : '--'}</span>
+          <span class="card-label">Avg recording</span>
         </div>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <!-- Model Performance -->
-    {#if topModels.length > 0}
-      <section class="section" aria-labelledby="models-title">
-        <h3 id="models-title" class="section-title">Models</h3>
-        <div class="model-list">
-          {#each topModels as model}
-            <div class="model-row">
-              <div class="model-name truncate">{model.name}</div>
-              <div class="model-metrics">
-                <span class="metric">
-                  <span class="metric-value">{model.count}</span>
-                  <span class="metric-label">uses</span>
-                </span>
-                <span class="metric">
-                  <span class="metric-value">{formatSpeedFactor(model.speedFactor)}</span>
-                  <span class="metric-label">RTFX</span>
-                </span>
-                <span class="metric">
-                  <span class="metric-value">{formatDuration(model.avgProcessingTime)}</span>
-                  <span class="metric-label">avg time</span>
-                </span>
-              </div>
-            </div>
-          {/each}
-          {#if remainingModelCount > 0}
-            <button class="link-btn" onclick={() => onNavigate('history')}>
-              and {remainingModelCount} more
-            </button>
-          {/if}
+  <!-- Updates -->
+  <section class="settings-section">
+    <div class="section-header">
+      <h2 class="section-title">Updates</h2>
+      <p class="section-description">Application version and update preferences</p>
+    </div>
+    <div class="section-content">
+      <div class="status-list">
+        <div class="status-row">
+          <span class="status-label">Current Version</span>
+          <span class="status-value">{currentVersion}</span>
         </div>
-			</section>
-		{/if}
+        <div class="status-row">
+          <span class="status-label">Status</span>
+          <span class="status-value">
+            {#if updaterState.state === 'checking'}
+              Checking...
+            {:else if updaterState.state === 'available'}
+              <span class="status-update-available">Update available: {updaterState.updateVersion}</span>
+            {:else if updaterState.state === 'up-to-date'}
+              Up to date
+            {:else if updaterState.state === 'error'}
+              <span class="status-error">{updaterState.error || 'Check failed'}</span>
+            {:else}
+              Not checked
+            {/if}
+          </span>
+        </div>
+        <div class="autostart-row">
+          <span class="status-label">Check on Launch</span>
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              bind:checked={configStore.general.checkForUpdates}
+              onchange={async () => {
+                await configStore.save();
+              }}
+            />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="autostart-row">
+          <span class="status-label">
+            {#if updaterState.state === 'checking'}
+              Checking...
+            {:else}
+              Check Now
+            {/if}
+          </span>
+          <button
+            class="btn-small"
+            onclick={() => checkForUpdate()}
+            disabled={updaterState.state === 'checking'}
+          >
+            {updaterState.state === 'checking' ? 'Checking...' : 'Check for Updates'}
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
 
-		<!-- Updates -->
-		<section class="section" aria-labelledby="updates-title">
-			<h3 id="updates-title" class="section-title">Updates</h3>
-			<div class="status-list">
-				<div class="status-row">
-					<span class="status-label">Current Version</span>
-					<span class="status-value">{currentVersion}</span>
-				</div>
-				<div class="status-row">
-					<span class="status-label">Status</span>
-					<span class="status-value">
-						{#if updaterState.state === 'checking'}
-							Checking...
-						{:else if updaterState.state === 'available'}
-							<span class="status-update-available">Update available: {updaterState.updateVersion}</span>
-						{:else if updaterState.state === 'up-to-date'}
-							Up to date
-						{:else if updaterState.state === 'error'}
-							<span class="status-error">{updaterState.error || 'Check failed'}</span>
-						{:else}
-							Not checked
-						{/if}
-					</span>
-				</div>
-				<div class="status-row">
-					<button
-						class="btn-check-update"
-						onclick={() => checkForUpdate()}
-						disabled={updaterState.state === 'checking'}
-					>
-						{updaterState.state === 'checking' ? 'Checking...' : 'Check for Updates'}
-					</button>
-				</div>
-				<div class="status-row">
-					<label class="toggle-row">
-						<input
-							type="checkbox"
-							bind:checked={configStore.general.checkForUpdates}
-							onchange={async () => {
-								await configStore.save();
-							}}
-						/>
-						<span>Automatically check for updates on launch</span>
-					</label>
-				</div>
-			</div>
-		</section>
-
-		<!-- System Status -->
-		<section class="section" aria-labelledby="system-title">
-			<h3 id="system-title" class="section-title">System</h3>
+  <!-- System Status -->
+  <section class="settings-section">
+    <div class="section-header">
+      <h2 class="section-title">System</h2>
+      <p class="section-description">Services, permissions, and application preferences</p>
+    </div>
+    <div class="section-content">
       <div class="status-list">
         <div class="status-row">
           <span
@@ -779,48 +752,39 @@
         {#if inputMonitoringPermission !== 'granted'}
           <p class="permission-hint">Required for customising keyboard shortcuts</p>
         {/if}
+        <div class="autostart-row">
+          <span class="status-label">Launch at Login</span>
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              checked={autostartEnabled}
+              disabled={autostartLoading}
+              onchange={handleAutostartToggle}
+            />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        {#if autostartError}
+          <div class="setting-error">{autostartError}</div>
+        {/if}
+        <div class="autostart-row">
+          <span class="status-label">Show in Dock</span>
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              checked={showInDock}
+              disabled={dockLoading}
+              onchange={handleDockToggle}
+            />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
       </div>
-      <div class="autostart-row">
-        <span class="status-label">Launch at Login</span>
-        <label class="toggle-switch">
-          <input
-            type="checkbox"
-            checked={autostartEnabled}
-            disabled={autostartLoading}
-            onchange={handleAutostartToggle}
-          />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      {#if autostartError}
-        <div class="setting-error">{autostartError}</div>
-      {/if}
-      <div class="autostart-row">
-        <span class="status-label">Show in Dock</span>
-        <label class="toggle-switch">
-          <input
-            type="checkbox"
-            checked={showInDock}
-            disabled={dockLoading}
-            onchange={handleDockToggle}
-          />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-    </section>
-  {/if}
-</div>
+    </div>
+  </section>
+{/if}
 
 <style>
-  .overview-pane {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-    padding: 24px 32px 48px 32px;
-    overflow-y: auto;
-    height: 100%;
-  }
-
   .loading {
     display: flex;
     align-items: center;
@@ -894,7 +858,7 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    font-size: 13px;
+    font-size: var(--text-sm);
     font-weight: 600;
   }
 
@@ -954,11 +918,11 @@
   }
 
   .optional-summary {
-    font-size: 11px;
+    font-size: var(--text-xs);
     font-weight: 600;
     color: var(--color-text-tertiary);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.5px;
     cursor: pointer;
     padding: 8px 0;
     list-style: none;
@@ -986,16 +950,16 @@
   }
 
   .progress-bar {
-    height: 4px;
+    height: 6px;
     background: var(--color-bg-tertiary);
-    border-radius: 2px;
+    border-radius: var(--radius-full);
     overflow: hidden;
   }
 
   .progress-fill {
     height: 100%;
     background: var(--color-accent);
-    border-radius: 2px;
+    border-radius: var(--radius-full);
     transition: width 0.3s ease;
   }
 
@@ -1020,15 +984,15 @@
     font-size: var(--text-sm);
     font-weight: 500;
     background: var(--color-accent);
-    color: #000;
+    color: white;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     cursor: pointer;
-    transition: opacity var(--transition-fast);
+    transition: background var(--transition-fast);
   }
 
   .btn-setup:hover {
-    opacity: 0.85;
+    background: var(--color-accent-hover);
   }
 
   .btn-setup-alt {
@@ -1043,21 +1007,6 @@
 
   .btn-setup-alt:hover {
     color: var(--color-text-primary);
-  }
-
-  /* Sections */
-  .section {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .section-title {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--color-text-tertiary);
-    margin: 0 0 10px 0;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
   }
 
   /* Summary cards */
@@ -1090,73 +1039,11 @@
     margin-top: 4px;
   }
 
-  /* Model performance */
-  .model-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .model-row {
-    padding: 10px 14px;
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-md);
-  }
-
-  .model-name {
-    font-size: var(--text-sm);
-    font-weight: 500;
-    color: var(--color-text-primary);
-    margin-bottom: 6px;
-    font-family: var(--font-mono, monospace);
-  }
-
-  .model-metrics {
-    display: flex;
-    gap: var(--spacing-lg);
-    flex-wrap: wrap;
-  }
-
-  .metric {
-    display: flex;
-    align-items: baseline;
-    gap: 4px;
-  }
-
-  .metric-value {
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--color-accent);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .metric-label {
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
-  }
-
   /* Truncation */
   .truncate {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  /* Link button */
-  .link-btn {
-    background: none;
-    border: none;
-    padding: 6px 0;
-    font-size: var(--text-xs);
-    color: var(--color-accent);
-    cursor: pointer;
-    text-align: left;
-    font-weight: 500;
-  }
-
-  .link-btn:hover {
-    text-decoration: underline;
   }
 
   /* System status */
@@ -1218,7 +1105,7 @@
 
   .permission-hint {
     margin: -2px 0 4px 18px;
-    font-size: 11px;
+    font-size: var(--text-xs);
     color: var(--color-text-tertiary);
     line-height: 1.3;
   }
@@ -1233,17 +1120,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 14px;
-    margin-top: 8px;
+    padding: 6px 0;
   }
 
-  @keyframes pulse {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.4;
-    }
-  }
 </style>

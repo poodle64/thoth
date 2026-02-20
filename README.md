@@ -1,10 +1,5 @@
 <div align="center">
 
-[![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8D8?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
-[![Rust](https://img.shields.io/badge/Rust-1.75+-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=flat-square&logo=svelte&logoColor=white)](https://svelte.dev/)
-[![Licence](https://img.shields.io/badge/Licence-MIT-blue?style=flat-square)](LICENCE)
-
 <img src="src-tauri/icons/icon.png" width="180" alt="Thoth app icon" />
 
 # Thoth
@@ -13,29 +8,26 @@
 
 **Press a key. Speak. Text appears.**
 
-[Download](#download) · [Getting Started](#getting-started) · [Features](#features) · [Build](#building-from-source) · [Architecture](docs/architecture/) · [Product Docs](docs/product/)
+**[Download for macOS](https://github.com/poodle64/thoth/releases/latest)**
 
----
+[![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8D8?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
+[![Rust](https://img.shields.io/badge/Rust-1.75+-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=flat-square&logo=svelte&logoColor=white)](https://svelte.dev/)
+[![Licence](https://img.shields.io/badge/Licence-MIT-blue?style=flat-square)](LICENCE)
+
+[Getting Started](#getting-started) · [Features](#features) · [Build](#building-from-source) · [Docs](docs/product/)
 
 </div>
 
-## The Problem
+![Thoth in action](docs/screenshots/hero.gif)
 
-Voice input on macOS is either cloud-dependent or requires complex setup. Apple
-Dictation sends your audio to Apple. Third-party tools want subscriptions. And
-nothing handles technical jargon without mangling it.
-
-## The Solution
-
-Thoth runs speech-to-text locally using whisper.cpp with Metal GPU acceleration.
-Nothing leaves the machine. Press a hotkey, speak, and text appears at your
-cursor. No windows. No configuration. No cloud.
+Voice input on macOS is either cloud-dependent or requires complex setup. Thoth
+runs speech-to-text **locally** using whisper.cpp with Metal GPU acceleration.
+Nothing leaves the machine. No subscription. No cloud. No internet required.
 
 ---
 
-## Download
-
-**[Download the latest release](https://github.com/poodle64/thoth/releases/latest)** for macOS (Apple Silicon).
+## Getting Started
 
 > After installing, Thoth checks for updates automatically and installs them in-app.
 
@@ -48,8 +40,6 @@ Store. This is normal and only happens once.
 2. **Right-click** (or Control-click) the app and choose **Open**
 3. Click **Open** in the dialogue that appears
 
-That's it. macOS remembers your choice and won't ask again.
-
 <details>
 <summary>Alternative: remove the block from Terminal</summary>
 
@@ -59,11 +49,9 @@ xattr -dr com.apple.quarantine /Applications/Thoth.app
 
 </details>
 
----
+### Setup
 
-## Getting Started
-
-Once Thoth is open, the app walks you through setup:
+The app walks you through three quick steps:
 
 1. **Download a speech model.** Click "Download Recommended Model" on the
    Overview tab (~1.5 GB, runs locally).
@@ -116,18 +104,6 @@ Once Thoth is open, the app walks you through setup:
 </td>
 <td width="50%">
 
-**Cross-Platform**
-
-- macOS native (menu bar app)
-- Linux support planned
-- Global keyboard shortcuts
-- Recording indicator near cursor
-
-</td>
-</tr>
-<tr>
-<td width="50%">
-
 **Recording Options**
 
 - Push-to-talk or hands-free mode
@@ -136,6 +112,8 @@ Once Thoth is open, the app walks you through setup:
 - Sound feedback (optional)
 
 </td>
+</tr>
+<tr>
 <td width="50%">
 
 **History & Export**
@@ -144,6 +122,16 @@ Once Thoth is open, the app walks you through setup:
 - JSON/CSV/TXT export
 - SQLite database
 - Configurable retention
+
+</td>
+<td width="50%">
+
+**Menu Bar App**
+
+- macOS native (Apple Silicon)
+- Global keyboard shortcuts
+- Recording indicator near cursor
+- Linux support planned
 
 </td>
 </tr>
@@ -194,34 +182,25 @@ pnpm tauri build  # Production build
 
 ## Acknowledgements
 
-<details>
-<summary><strong>Core Technology</strong></summary>
+<strong>Core Technology</strong>
 
 - [whisper.cpp](https://github.com/ggerganov/whisper.cpp). High-performance speech recognition with Metal GPU acceleration
 - [whisper-rs](https://github.com/tazz4843/whisper-rs). Rust bindings for whisper.cpp
 - [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx). Fallback speech recognition inference
 - [NVIDIA Parakeet](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/parakeet-tdt-1.1b). Speech-to-text models
 
-</details>
-
-<details>
-<summary><strong>Dependencies</strong></summary>
+<strong>Dependencies</strong>
 
 - [Tauri](https://tauri.app/). Desktop application framework
 - [cpal](https://github.com/RustAudio/cpal). Cross-platform audio
 - [rubato](https://github.com/HEnquist/rubato). Audio resampling
 - [enigo](https://github.com/enigo-rs/enigo). Cross-platform input simulation
 
-</details>
-
-<details>
-<summary><strong>Inspiration</strong></summary>
+<strong>Inspiration</strong>
 
 - [MacWhisper](https://goodsnooze.gumroad.com/l/macwhisper). Proved that local Whisper transcription on macOS could be fast and practical
 - [VoiceInk](https://voiceink.app/). Demonstrated seamless hotkey-to-cursor voice input
 - [Spokenly](https://www.spokenly.app/). Showed how clean and minimal a dictation app could be
-
-</details>
 
 ---
 
