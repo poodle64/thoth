@@ -2,13 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
   import { invoke } from '@tauri-apps/api/core';
-  import {
-    getCurrentWindow,
-    PhysicalPosition,
-    LogicalPosition,
-    Window,
-    monitorFromPoint
-  } from '@tauri-apps/api/window';
+
 
   // Helper to emit logs to main window (since this window's console is separate)
   function indicatorLog(...args: unknown[]) {
@@ -43,9 +37,6 @@
   const ICON_RADIUS = 9; // rounded square corner radius
   const ICON_X = (WIDTH - ICON_SIZE) / 2;
   const ICON_Y = (HEIGHT - ICON_SIZE) / 2;
-  // Padding from bottom - accounts for dock (~70px) plus margin
-  const BOTTOM_PADDING = 100;
-
   // Accent colour (Scribe's Amber)
   const ACCENT = { r: 208, g: 139, b: 62 }; // #D08B3E
 
@@ -57,13 +48,6 @@
     ctx = canvas.getContext('2d');
     setupCanvas();
     animate();
-
-    // Listen for show event to position the window
-    const showUnlisten = await listen('recording-indicator-show', async () => {
-      await positionWindow();
-    });
-    unlisteners.push(showUnlisten);
-    indicatorLog('Show event listener registered');
 
     // Listen for the test event from backend
     const shownUnlisten = await listen('indicator-shown', (event) => {
@@ -130,45 +114,6 @@
       unlisten();
     }
   });
-
-  /**
-   * Position the window at the bottom centre of the main window's monitor.
-   */
-  async function positionWindow() {
-    try {
-      const indicatorWindow = getCurrentWindow();
-      const mainWindow = await Window.getByLabel('main');
-
-      if (!mainWindow) {
-        console.error('[Indicator] Could not find main window');
-        return;
-      }
-
-      const mainPosition = await mainWindow.outerPosition();
-      const mainSize = await mainWindow.outerSize();
-      const centerX = mainPosition.x + Math.floor(mainSize.width / 2);
-      const centerY = mainPosition.y + Math.floor(mainSize.height / 2);
-
-      const monitor = await monitorFromPoint(centerX, centerY);
-
-      if (monitor) {
-        const scaleFactor = monitor.scaleFactor;
-        const monitorX = monitor.position.x / scaleFactor;
-        const monitorY = monitor.position.y / scaleFactor;
-        const monitorWidth = monitor.size.width / scaleFactor;
-        const monitorHeight = monitor.size.height / scaleFactor;
-
-        const x = monitorX + (monitorWidth / 2) - (WIDTH / 2);
-        const y = monitorY + monitorHeight - HEIGHT - BOTTOM_PADDING - 70;
-
-        await indicatorWindow.setPosition(new LogicalPosition(x, y));
-      } else {
-        console.error('[Indicator] Could not determine monitor for main window');
-      }
-    } catch (error) {
-      console.error('[Indicator] Failed to position window:', error);
-    }
-  }
 
   function setupCanvas() {
     const dpr = window.devicePixelRatio || 1;
