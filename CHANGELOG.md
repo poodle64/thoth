@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.2.5] - 2026-02-20
+
+### Added
+
+- **Linux GPU acceleration**: CUDA (NVIDIA), HIP/ROCm (AMD), and Vulkan backend support via configurable Cargo features
+- **Linux platform support**: GPU detection (`nvidia-smi`, `rocm-smi`, `hipconfig`, `vulkaninfo`), Wayland keyboard capture fallback, `wtype` text insertion for Sway/Hyprland, recording indicator positioning
+- **Audio file import**: Drag-and-drop or file picker to transcribe existing audio files via symphonia decoder
+- **Toast notification system**: Centralised, non-blocking toast notifications replacing alert dialogues
+- **Redesigned history pane**: Select-all, inline search, clear-all, and improved layout
+- **First-run onboarding**: Stepped checklist with permission explanations, guided setup state, and model download card
+- **Release CI for Linux**: Ubuntu 22.04 added to release build matrix with CUDA dependencies
+
+### Changed
+
+- Visual consistency enforced across all settings panes
+- Tray menu shortcuts and overview pane layout updated
+- Release workflow: fixed pnpm cache mechanism, platform-conditional CFLAGS, removed signing key env vars
+- GPU info displayed in Settings Overview pane
+
+### Fixed
+
+- Transcriptions no longer auto-copied to clipboard by default
+- Mouse tracking reliability improved for recording indicator
+- Recording blocked when no transcription model is available
+
 ## [2026.2.2] - 2026-02-16
 
 ### Added
