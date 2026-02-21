@@ -18,7 +18,7 @@ CalVer is SemVer-compatible for the Tauri updater plugin (major.minor.patch).
 
 - All changes committed and pushed to `main` branch
 - All tests passing
-- CI workflow configured (`.github/workflows/release.yml`)
+- CI workflow configured (`.github/workflows/release.yaml`)
 - Signing key configured as `TAURI_SIGNING_PRIVATE_KEY` secret
 - Clean working directory (`git status` shows no uncommitted changes)
 
@@ -198,7 +198,7 @@ To delete:
 
 ## Reference
 
-- GitHub Actions workflow: `.github/workflows/release.yml`
+- GitHub Actions workflow: `.github/workflows/release.yaml`
 - Deployment docs: `docs/DEPLOYMENT.md`
 - Version bump script: `scripts/bump-version.sh`
 - Tauri updater plugin: https://v2.tauri.app/plugin/updater/
