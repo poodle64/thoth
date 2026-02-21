@@ -46,23 +46,18 @@ impl TranscriptionService {
 
         tracing::info!("Loading Parakeet model from {}", model_dir.display());
 
-        // Use CoreML on macOS for GPU acceleration, CPU on other platforms
-        #[cfg(target_os = "macos")]
-        let provider = Some("coreml".to_string());
-        #[cfg(not(target_os = "macos"))]
-        let provider = None;
+        let encoder_str = encoder.to_string_lossy().to_string();
+        let decoder_str = decoder.to_string_lossy().to_string();
+        let joiner_str = joiner.to_string_lossy().to_string();
+        let tokens_str = tokens.to_string_lossy().to_string();
+        let num_threads = num_cpus::get().min(8) as i32;
 
-        #[cfg(target_os = "macos")]
-        tracing::info!("Using CoreML provider for GPU acceleration");
-        #[cfg(not(target_os = "macos"))]
-        tracing::info!("Using CPU provider");
-
-        let config = TransducerConfig {
-            encoder: encoder.to_string_lossy().to_string(),
-            decoder: decoder.to_string_lossy().to_string(),
-            joiner: joiner.to_string_lossy().to_string(),
-            tokens: tokens.to_string_lossy().to_string(),
-            num_threads: num_cpus::get().min(8) as i32, // Allow more threads for better parallelism
+        let build_config = |provider: Option<String>| TransducerConfig {
+            encoder: encoder_str.clone(),
+            decoder: decoder_str.clone(),
+            joiner: joiner_str.clone(),
+            tokens: tokens_str.clone(),
+            num_threads,
             sample_rate: 16000,
             feature_dim: 80,
             model_type: "nemo_transducer".to_string(),
@@ -70,8 +65,29 @@ impl TranscriptionService {
             ..Default::default()
         };
 
-        let recognizer = TransducerRecognizer::new(config)
-            .map_err(|e| anyhow!("Failed to create recognizer: {}", e))?;
+        // Try CoreML on macOS for GPU acceleration, fall back to CPU if it fails
+        #[cfg(target_os = "macos")]
+        let recognizer = {
+            tracing::info!("Attempting CoreML provider for GPU acceleration");
+            match TransducerRecognizer::new(build_config(Some("coreml".to_string()))) {
+                Ok(r) => {
+                    tracing::info!("CoreML provider initialised successfully");
+                    r
+                }
+                Err(e) => {
+                    tracing::warn!("CoreML provider failed ({}), falling back to CPU", e);
+                    TransducerRecognizer::new(build_config(None))
+                        .map_err(|e| anyhow!("Failed to create recognizer with CPU: {}", e))?
+                }
+            }
+        };
+
+        #[cfg(not(target_os = "macos"))]
+        let recognizer = {
+            tracing::info!("Using CPU provider");
+            TransducerRecognizer::new(build_config(None))
+                .map_err(|e| anyhow!("Failed to create recognizer: {}", e))?
+        };
 
         tracing::info!("Parakeet model loaded successfully");
         Ok(Self { recognizer })

@@ -84,6 +84,12 @@ pub struct ModelInfo {
     pub languages: Vec<String>,
     /// Whether an update is available
     pub update_available: bool,
+    /// Whether this is the currently selected model
+    pub selected: bool,
+    /// Model type (e.g., "whisper_ggml", "nemo_transducer")
+    pub model_type: String,
+    /// Whether this model's backend is available in the current build
+    pub backend_available: bool,
 }
 
 /// Cached manifest with timestamp
@@ -295,14 +301,27 @@ pub fn get_model_disk_size(model: &RemoteModelInfo) -> Option<u64> {
         .reduce(|a, b| a + b)
 }
 
+/// Check if the backend for a given model type is available in this build
+pub fn is_backend_available(model_type: &str) -> bool {
+    match model_type {
+        "whisper_ggml" => true,
+        "nemo_transducer" => cfg!(feature = "parakeet"),
+        _ => false,
+    }
+}
+
 /// Convert remote model info to frontend model info
-pub fn to_model_info(remote: &RemoteModelInfo) -> ModelInfo {
+pub fn to_model_info(remote: &RemoteModelInfo, selected_id: Option<&str>) -> ModelInfo {
     let downloaded = is_model_downloaded(remote);
     let disk_size = if downloaded {
         get_model_disk_size(remote)
     } else {
         None
     };
+
+    let selected = selected_id
+        .map(|id| id == remote.id)
+        .unwrap_or(remote.recommended);
 
     ModelInfo {
         id: remote.id.clone(),
@@ -318,21 +337,54 @@ pub fn to_model_info(remote: &RemoteModelInfo) -> ModelInfo {
         recommended: remote.recommended,
         languages: remote.languages.clone(),
         update_available: false, // TODO: Implement version comparison
+        selected,
+        model_type: remote.model_type.clone(),
+        backend_available: is_backend_available(&remote.model_type),
     }
 }
 
 /// Tauri command: Fetch model manifest
+///
+/// Uses the higher-versioned manifest between remote and bundled, so that
+/// new models added in app updates are visible even before the remote
+/// manifest on GitHub is updated.
 #[tauri::command]
 pub async fn fetch_model_manifest(force_refresh: bool) -> Result<Vec<ModelInfo>, String> {
-    let manifest = match fetch_manifest(force_refresh).await {
-        Ok(m) => m,
+    let remote_manifest = match fetch_manifest(force_refresh).await {
+        Ok(m) => Some(m),
         Err(e) => {
-            tracing::warn!("Failed to fetch remote manifest: {}. Using fallback.", e);
-            get_fallback_manifest()
+            tracing::warn!("Failed to fetch remote manifest: {}", e);
+            None
         }
     };
 
-    let models: Vec<ModelInfo> = manifest.models.iter().map(to_model_info).collect();
+    let bundled = get_fallback_manifest();
+
+    let manifest = match remote_manifest {
+        Some(remote) if remote.version >= bundled.version => remote,
+        Some(remote) => {
+            tracing::info!(
+                "Bundled manifest v{} is newer than remote v{}, using bundled",
+                bundled.version,
+                remote.version
+            );
+            bundled
+        }
+        None => {
+            tracing::info!("Using bundled manifest v{}", bundled.version);
+            bundled
+        }
+    };
+
+    let selected_id = crate::config::get_config()
+        .ok()
+        .and_then(|c| c.transcription.model_id.clone());
+
+    let models: Vec<ModelInfo> = manifest
+        .models
+        .iter()
+        .map(|m| to_model_info(m, selected_id.as_deref()))
+        .collect();
 
     Ok(models)
 }
@@ -360,12 +412,31 @@ mod tests {
     #[test]
     fn test_fallback_manifest() {
         let manifest = get_fallback_manifest();
-        assert_eq!(manifest.version, 6);
-        assert!(!manifest.models.is_empty());
+        assert_eq!(manifest.version, 7);
+        assert_eq!(manifest.models.len(), 5);
 
         let model = &manifest.models[0];
         assert_eq!(model.id, "ggml-large-v3-turbo");
         assert!(model.recommended);
+    }
+
+    #[test]
+    fn test_parakeet_models_in_manifest() {
+        let manifest = get_fallback_manifest();
+        let parakeet_models: Vec<_> = manifest
+            .models
+            .iter()
+            .filter(|m| m.model_type == "nemo_transducer")
+            .collect();
+        assert_eq!(parakeet_models.len(), 2);
+        assert!(parakeet_models.iter().any(|m| m.id == "parakeet-tdt-0.6b-v2-int8"));
+        assert!(parakeet_models.iter().any(|m| m.id == "parakeet-tdt-0.6b-v3-int8"));
+    }
+
+    #[test]
+    fn test_backend_availability() {
+        assert!(is_backend_available("whisper_ggml"));
+        assert!(!is_backend_available("unknown_type"));
     }
 
     #[test]
@@ -394,9 +465,15 @@ mod tests {
             min_app_version: None,
         };
 
-        let info = to_model_info(&remote);
+        let info = to_model_info(&remote, None);
         assert_eq!(info.id, "test-model");
         assert_eq!(info.size_mb, 100);
         assert!(!info.downloaded);
+        assert!(!info.selected);
+        assert_eq!(info.model_type, "test");
+        assert!(!info.backend_available);
+
+        let info_selected = to_model_info(&remote, Some("test-model"));
+        assert!(info_selected.selected);
     }
 }

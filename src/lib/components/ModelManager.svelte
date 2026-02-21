@@ -15,6 +15,9 @@
     recommended: boolean;
     languages: string[];
     update_available: boolean;
+    selected: boolean;
+    model_type: string;
+    backend_available: boolean;
   }
 
   interface DownloadProgress {
@@ -59,11 +62,22 @@
       progress = event.payload;
     });
 
-    unlistenComplete = await listen<string>('model-download-complete', (event) => {
+    unlistenComplete = await listen<string>('model-download-complete', async (event) => {
       downloadState = 'Completed';
       progress = null;
+      const completedModelId = downloadingModelId;
       downloadingModelId = null;
-      loadModels(false);
+      await loadModels(false);
+
+      // Auto-initialise transcription engine with the downloaded model
+      if (completedModelId) {
+        try {
+          const modelDir = await invoke<string>('get_model_directory');
+          await invoke('init_transcription', { modelPath: modelDir });
+        } catch (e) {
+          console.warn('[ModelManager] Failed to initialise transcription after download:', e);
+        }
+      }
     });
 
     unlistenError = await listen<string>('model-download-error', (event) => {
@@ -131,7 +145,7 @@
     try {
       downloadState = 'Downloading';
       downloadingModelId = model.id;
-      await invoke('download_model', { model_id: model.id });
+      await invoke('download_model', { modelId: model.id });
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
       downloadState = { Failed: error };
@@ -149,7 +163,7 @@
 
     error = null;
     try {
-      await invoke('delete_model', { model_id: modelToDelete.id });
+      await invoke('delete_model', { modelId: modelToDelete.id });
       showDeleteConfirm = false;
       modelToDelete = null;
       await loadModels(false);
@@ -165,6 +179,19 @@
       downloadState = 'Idle';
       progress = null;
       downloadingModelId = null;
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function selectModel(model: ModelInfo) {
+    error = null;
+    try {
+      await invoke('set_selected_model_id', { modelId: model.id });
+      // Re-initialise transcription with the newly selected model
+      const modelDir = await invoke<string>('get_model_directory');
+      await invoke('init_transcription', { modelPath: modelDir });
+      await loadModels(false);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
@@ -246,15 +273,23 @@
         class="model-card"
         class:downloaded={model.downloaded}
         class:recommended={model.recommended}
+        class:selected={model.selected}
       >
         <div class="model-info">
           <div class="model-header">
             <span class="model-name">{model.name}</span>
             <div class="badges">
+              {#if model.model_type === 'nemo_transducer'}
+                <span class="status-badge backend-parakeet">Parakeet</span>
+              {:else}
+                <span class="status-badge backend-whisper">Whisper</span>
+              {/if}
               {#if model.recommended}
                 <span class="status-badge recommended">Recommended</span>
               {/if}
-              {#if model.downloaded}
+              {#if model.selected}
+                <span class="status-badge selected">Selected</span>
+              {:else if model.downloaded}
                 <span class="status-badge downloaded">Downloaded</span>
               {:else}
                 <span class="status-badge not-downloaded">Not Downloaded</span>
@@ -265,6 +300,12 @@
             </div>
           </div>
           <p class="model-description">{model.description}</p>
+          {#if !model.backend_available}
+            <p class="backend-warning">
+              This model requires the Parakeet backend which is not included in this build.
+              Build with <code>--features parakeet</code> to enable.
+            </p>
+          {/if}
           <div class="model-details">
             <span class="detail">Version: {model.version}</span>
             <span class="detail">Languages: {formatLanguages(model.languages)}</span>
@@ -301,7 +342,7 @@
               <span class="failed-text">Download failed: {getFailedMessage()}</span>
               <button class="retry-btn" onclick={() => resetState()}>Reset</button>
             </div>
-          {:else if model.downloaded}
+          {:else if model.downloaded && model.selected}
             <button
               class="delete-btn"
               onclick={() => confirmDelete(model)}
@@ -309,13 +350,28 @@
             >
               Delete Model
             </button>
+          {:else if model.downloaded}
+            <button
+              class="select-btn"
+              onclick={() => selectModel(model)}
+              disabled={isDownloading() || !model.backend_available}
+            >
+              {model.backend_available ? 'Use Model' : 'Backend Unavailable'}
+            </button>
+            <button
+              class="delete-btn"
+              onclick={() => confirmDelete(model)}
+              disabled={isDownloading()}
+            >
+              Delete
+            </button>
           {:else}
             <button
               class="download-btn primary"
               onclick={() => downloadModel(model)}
-              disabled={isDownloading()}
+              disabled={isDownloading() || !model.backend_available}
             >
-              Download Model
+              {model.backend_available ? 'Download Model' : 'Backend Unavailable'}
             </button>
           {/if}
         </div>
@@ -423,8 +479,12 @@
     transition: border-color var(--transition-fast);
   }
 
-  .model-card.downloaded {
-    border-color: var(--color-success);
+  .model-card.selected {
+    border-color: var(--color-accent);
+  }
+
+  .model-card.downloaded:not(.selected) {
+    border-color: var(--color-border);
   }
 
   .model-card.recommended:not(.downloaded) {
@@ -463,6 +523,11 @@
     border-radius: var(--radius-full);
   }
 
+  .status-badge.selected {
+    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+    color: var(--color-accent);
+  }
+
   .status-badge.downloaded {
     background: color-mix(in srgb, var(--color-success) 15%, transparent);
     color: var(--color-success);
@@ -483,11 +548,38 @@
     color: var(--color-warning);
   }
 
+  .status-badge.backend-whisper {
+    background: color-mix(in srgb, var(--color-text-secondary) 10%, transparent);
+    color: var(--color-text-tertiary);
+  }
+
+  .status-badge.backend-parakeet {
+    background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+    color: var(--color-warning);
+  }
+
   .model-description {
     margin: 0;
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
     line-height: 1.4;
+  }
+
+  .backend-warning {
+    margin: 4px 0 0;
+    padding: 6px 10px;
+    font-size: var(--text-xs);
+    color: var(--color-warning);
+    background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+    border-radius: var(--radius-sm);
+    line-height: 1.4;
+  }
+
+  .backend-warning code {
+    font-size: var(--text-xs);
+    background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+    padding: 1px 4px;
+    border-radius: 2px;
   }
 
   .model-details {
@@ -510,6 +602,7 @@
   }
 
   .download-btn,
+  .select-btn,
   .delete-btn,
   .retry-btn {
     padding: 8px 16px;
@@ -519,16 +612,19 @@
     transition: all var(--transition-fast);
   }
 
-  .download-btn {
+  .download-btn,
+  .select-btn {
     background: var(--color-accent);
     color: white;
   }
 
-  .download-btn:hover:not(:disabled) {
+  .download-btn:hover:not(:disabled),
+  .select-btn:hover:not(:disabled) {
     background: var(--color-accent-hover);
   }
 
-  .download-btn:disabled {
+  .download-btn:disabled,
+  .select-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }

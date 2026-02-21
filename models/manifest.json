@@ -1,6 +1,6 @@
 {
-  "version": 6,
-  "updated": "2026-02-14T04:30:00Z",
+  "version": 7,
+  "updated": "2026-02-21T10:00:00Z",
   "models": [
     {
       "id": "ggml-large-v3-turbo",
@@ -47,6 +47,38 @@
       "archive_directory": null,
       "languages": ["en"],
       "model_type": "whisper_ggml",
+      "recommended": false,
+      "min_app_version": null
+    },
+    {
+      "id": "parakeet-tdt-0.6b-v2-int8",
+      "name": "Parakeet TDT 0.6B V2 (English)",
+      "description": "Best English accuracy (6.05% WER). NVIDIA NeMo Transducer via Sherpa-ONNX. Requires Parakeet feature.",
+      "version": "2.0.0",
+      "download_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2",
+      "download_size": 482468385,
+      "extracted_size": 661190513,
+      "sha256": null,
+      "required_files": ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"],
+      "archive_directory": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
+      "languages": ["en"],
+      "model_type": "nemo_transducer",
+      "recommended": false,
+      "min_app_version": null
+    },
+    {
+      "id": "parakeet-tdt-0.6b-v3-int8",
+      "name": "Parakeet TDT 0.6B V3 (Multilingual)",
+      "description": "25 European languages with auto-detection (6.34% English WER). NVIDIA NeMo Transducer via Sherpa-ONNX. Requires Parakeet feature.",
+      "version": "3.0.0",
+      "download_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
+      "download_size": 487170055,
+      "extracted_size": 671088640,
+      "sha256": null,
+      "required_files": ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"],
+      "archive_directory": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+      "languages": ["en", "bg", "hr", "cs", "da", "nl", "et", "fi", "fr", "de", "el", "hu", "it", "lv", "lt", "mt", "pl", "pt", "ro", "ru", "sk", "sl", "es", "sv", "uk"],
+      "model_type": "nemo_transducer",
       "recommended": false,
       "min_app_version": null
     }
