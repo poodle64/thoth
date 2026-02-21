@@ -400,6 +400,14 @@ pub fn set_config(mut config: Config) -> Result<(), String> {
             config.audio.device_id = current.audio.device_id.clone();
         }
 
+        if config.transcription.model_id.is_none() && current.transcription.model_id.is_some() {
+            tracing::debug!(
+                "Preserving model_id={:?} (incoming config had None)",
+                current.transcription.model_id
+            );
+            config.transcription.model_id = current.transcription.model_id.clone();
+        }
+
         let default_prompt_id = EnhancementConfig::default().prompt_id;
         if config.enhancement.prompt_id == default_prompt_id
             && current.enhancement.prompt_id != default_prompt_id
