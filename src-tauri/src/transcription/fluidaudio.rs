@@ -54,17 +54,25 @@ impl TranscriptionService {
 
     /// Transcribe audio from a WAV file
     ///
-    /// Returns the transcribed text. FluidAudio handles format conversion
-    /// internally and supports WAV, M4A, MP3, etc.
+    /// Appends 1 second of trailing silence so the model can finalise the last
+    /// word, then passes the padded WAV to FluidAudio for transcription.
     pub fn transcribe(&self, audio_path: &Path) -> Result<String> {
+        let padded_path = append_trailing_silence(audio_path)?;
+        let transcribe_path = padded_path.as_deref().unwrap_or(audio_path);
+
         let start = std::time::Instant::now();
 
         let result = self
             .audio
-            .transcribe_file(audio_path)
+            .transcribe_file(transcribe_path)
             .map_err(|e| anyhow!("FluidAudio transcription failed: {}", e))?;
 
         let duration = start.elapsed();
+
+        // Clean up temp file
+        if let Some(ref tmp) = padded_path {
+            let _ = std::fs::remove_file(tmp);
+        }
 
         tracing::info!(
             "FluidAudio transcribed {:.2}s audio in {:.3}s (RTFx: {:.0}, confidence: {:.1}%)",
@@ -76,6 +84,60 @@ impl TranscriptionService {
 
         Ok(result.text)
     }
+}
+
+/// Append 1 second of silence to a WAV file and write a temporary copy.
+///
+/// Returns `Ok(Some(path))` with the padded temp file, or `Ok(None)` if the
+/// original file couldn't be read (in which case FluidAudio gets the original).
+fn append_trailing_silence(audio_path: &Path) -> Result<Option<PathBuf>> {
+    let mut reader = match hound::WavReader::open(audio_path) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("Could not read WAV for padding: {}, using original", e);
+            return Ok(None);
+        }
+    };
+
+    let spec = reader.spec();
+    let sample_rate = spec.sample_rate;
+    let silence_samples = sample_rate as usize; // 1 second
+
+    // Build temp path next to the original
+    let tmp_path = audio_path.with_extension("padded.wav");
+
+    let mut writer = hound::WavWriter::create(&tmp_path, spec)?;
+
+    // Copy all existing samples
+    match spec.sample_format {
+        hound::SampleFormat::Int => {
+            for sample in reader.samples::<i16>() {
+                writer.write_sample(sample?)?;
+            }
+            // Append silence (per channel)
+            for _ in 0..silence_samples * spec.channels as usize {
+                writer.write_sample(0i16)?;
+            }
+        }
+        hound::SampleFormat::Float => {
+            for sample in reader.samples::<f32>() {
+                writer.write_sample(sample?)?;
+            }
+            for _ in 0..silence_samples * spec.channels as usize {
+                writer.write_sample(0.0f32)?;
+            }
+        }
+    }
+
+    writer.finalize()?;
+
+    tracing::info!(
+        "Padded WAV with {:.1}s trailing silence: {}",
+        silence_samples as f32 / sample_rate as f32,
+        tmp_path.display()
+    );
+
+    Ok(Some(tmp_path))
 }
 
 /// Check if FluidAudio model cache has content (models already compiled)
