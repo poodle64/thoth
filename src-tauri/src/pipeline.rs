@@ -483,7 +483,17 @@ async fn process_audio(
 
     // 4. Output (clipboard/paste)
     // Apply paragraph formatting for output only (not stored in database)
-    let output_text = transcription::filter::format_paragraphs(&text);
+    let mut output_text = transcription::filter::format_paragraphs(&text);
+
+    // Append a trailing space after terminal punctuation so consecutive
+    // transcriptions don't run together when inserted at the cursor.
+    if output_text
+        .as_bytes()
+        .last()
+        .is_some_and(|&b| matches!(b, b'.' | b'?' | b'!' | b',' | b';' | b':'))
+    {
+        output_text.push(' ');
+    }
 
     tracing::info!(
         "Pipeline: Starting output (copy={}, paste={})",
