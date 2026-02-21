@@ -76,7 +76,7 @@ pub fn check_model_downloaded(model_id: Option<String>) -> bool {
     });
 
     let model = manifest.models.iter().find(|m| m.id == model_id);
-    let required_files: Vec<&str> = match model {
+    let required_files: Vec<&str> = match &model {
         Some(m) => m.required_files.iter().map(|s| s.as_str()).collect(),
         None => vec![
             "encoder.int8.onnx",
@@ -85,6 +85,12 @@ pub fn check_model_downloaded(model_id: Option<String>) -> bool {
             "tokens.txt",
         ],
     };
+
+    // For direct downloads (single file), we can verify against the expected size
+    let expected_size = model
+        .as_ref()
+        .filter(|m| m.model_type == "whisper_ggml" && m.required_files.len() == 1)
+        .map(|m| m.download_size);
 
     let model_dir = get_model_directory(&model_id);
 
@@ -95,12 +101,27 @@ pub fn check_model_downloaded(model_id: Option<String>) -> bool {
             return false;
         }
 
-        // Verify file has content (not empty)
+        // Verify file has content (not empty) and correct size
         match std::fs::metadata(&path) {
             Ok(metadata) => {
                 if metadata.len() == 0 {
                     tracing::warn!("Model file is empty: {}", path.display());
                     return false;
+                }
+
+                // For direct downloads, verify file is at least 90% of expected size
+                // (exact size may differ slightly from manifest estimate)
+                if let Some(expected) = expected_size {
+                    let min_size = expected * 9 / 10;
+                    if metadata.len() < min_size {
+                        tracing::warn!(
+                            "Model file appears incomplete: {} bytes, expected ~{} bytes ({})",
+                            metadata.len(),
+                            expected,
+                            path.display()
+                        );
+                        return false;
+                    }
                 }
             }
             Err(e) => {
@@ -145,7 +166,7 @@ pub async fn download_model(app: AppHandle, model_id: Option<String>) -> Result<
             .find(|m| m.recommended)
             .or_else(|| manifest.models.first())
             .map(|m| m.id.clone())
-            .unwrap_or_else(|| "parakeet-tdt-0.6b-v3-int8".to_string())
+            .unwrap_or_else(|| "ggml-large-v3-turbo".to_string())
     });
 
     let model = manifest
@@ -334,52 +355,188 @@ async fn download_and_extract_model(app: &AppHandle, model: &RemoteModelInfo) ->
     Ok(())
 }
 
-/// Download a file with progress reporting
+/// Maximum number of resume attempts before giving up
+const MAX_DOWNLOAD_RETRIES: u32 = 3;
+
+/// Build a reqwest client with appropriate timeouts for large file downloads
+fn build_download_client() -> Result<Client> {
+    Client::builder()
+        .user_agent("Thoth/1.0")
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .read_timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| anyhow!("Failed to build HTTP client: {}", e))
+}
+
+/// Download a file with progress reporting, resume support, and size verification
 async fn download_file_with_progress(
     app: &AppHandle,
     url: &str,
     dest_path: &PathBuf,
     model_name: &str,
 ) -> Result<()> {
-    let client = Client::builder().user_agent("Thoth/1.0").build()?;
+    let client = build_download_client()?;
 
-    let response = client.get(url).send().await?;
+    // Check for existing partial download to resume
+    let mut downloaded: u64 = if dest_path.exists() {
+        let metadata = tokio::fs::metadata(dest_path).await?;
+        let existing = metadata.len();
+        if existing > 0 {
+            tracing::info!("Found partial download: {} bytes, attempting resume", existing);
+            existing
+        } else {
+            0
+        }
+    } else {
+        0
+    };
 
-    if !response.status().is_success() {
-        return Err(anyhow!("Failed to download: HTTP {}", response.status()));
+    let mut retries = 0;
+
+    loop {
+        let result = download_with_resume(
+            &client,
+            app,
+            url,
+            dest_path,
+            model_name,
+            &mut downloaded,
+        )
+        .await;
+
+        match result {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                retries += 1;
+                if retries > MAX_DOWNLOAD_RETRIES {
+                    // Clean up partial file on final failure
+                    if dest_path.exists() {
+                        if let Err(cleanup_err) = tokio::fs::remove_file(dest_path).await {
+                            tracing::warn!("Failed to clean up partial download: {}", cleanup_err);
+                        }
+                    }
+                    return Err(anyhow!(
+                        "Download failed after {} attempts: {}",
+                        MAX_DOWNLOAD_RETRIES,
+                        e
+                    ));
+                }
+
+                tracing::warn!(
+                    "Download interrupted (attempt {}/{}): {}. Resuming from {} bytes...",
+                    retries,
+                    MAX_DOWNLOAD_RETRIES,
+                    e,
+                    downloaded
+                );
+
+                emit_progress(
+                    app,
+                    DownloadProgress {
+                        current_file: model_name.to_string(),
+                        bytes_downloaded: downloaded,
+                        total_bytes: None,
+                        percentage: 0.0,
+                        status: format!(
+                            "Connection lost, resuming download (attempt {}/{})...",
+                            retries + 1,
+                            MAX_DOWNLOAD_RETRIES + 1
+                        ),
+                    },
+                );
+
+                // Brief pause before retry
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        }
+    }
+}
+
+/// Perform a single download attempt, resuming from the given offset
+async fn download_with_resume(
+    client: &Client,
+    app: &AppHandle,
+    url: &str,
+    dest_path: &PathBuf,
+    model_name: &str,
+    downloaded: &mut u64,
+) -> Result<()> {
+    use futures_util::StreamExt;
+
+    let mut request = client.get(url);
+
+    // Add Range header if resuming
+    if *downloaded > 0 {
+        request = request.header("Range", format!("bytes={}-", downloaded));
     }
 
-    let total_size = response.content_length();
+    let response = request.send().await?;
+
+    let status = response.status();
+    if !status.is_success() && status != reqwest::StatusCode::PARTIAL_CONTENT {
+        // If server returns 416 (Range Not Satisfiable), the file may be complete
+        if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+            tracing::info!("Server returned 416 — file may already be fully downloaded");
+            return Ok(());
+        }
+        return Err(anyhow!("Failed to download: HTTP {}", status));
+    }
+
+    // Determine total size from Content-Range or Content-Length
+    let total_size = if status == reqwest::StatusCode::PARTIAL_CONTENT {
+        // Parse Content-Range: bytes 12345-67890/total
+        response
+            .headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.rsplit('/').next())
+            .and_then(|s| s.parse::<u64>().ok())
+    } else {
+        // Fresh download — server doesn't support Range, start over
+        if *downloaded > 0 {
+            tracing::info!("Server doesn't support Range requests, restarting download");
+            *downloaded = 0;
+        }
+        response.content_length()
+    };
+
     tracing::info!(
-        "Starting download: {} bytes",
-        total_size.map_or("unknown".to_string(), |s| s.to_string())
+        "Starting download: {} bytes total, resuming from {} bytes",
+        total_size.map_or("unknown".to_string(), |s| s.to_string()),
+        downloaded
     );
 
-    let mut file = tokio::fs::File::create(dest_path).await?;
-    let mut downloaded: u64 = 0;
-    let mut stream = response.bytes_stream();
+    // Open file for writing — append if resuming, create if fresh
+    let mut file = if *downloaded > 0 && status == reqwest::StatusCode::PARTIAL_CONTENT {
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(dest_path)
+            .await?
+    } else {
+        tokio::fs::File::create(dest_path).await?
+    };
 
-    use futures_util::StreamExt;
+    let mut stream = response.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
         file.write_all(&chunk).await?;
-        downloaded += chunk.len() as u64;
+        *downloaded += chunk.len() as u64;
 
         let percentage = total_size
-            .map(|total| (downloaded as f32 / total as f32) * 100.0)
+            .map(|total| (*downloaded as f32 / total as f32) * 100.0)
             .unwrap_or(0.0);
 
         emit_progress(
             app,
             DownloadProgress {
                 current_file: model_name.to_string(),
-                bytes_downloaded: downloaded,
+                bytes_downloaded: *downloaded,
                 total_bytes: total_size,
                 percentage,
                 status: format!(
                     "Downloading: {:.1} MB / {:.1} MB",
-                    downloaded as f32 / 1_048_576.0,
+                    *downloaded as f32 / 1_048_576.0,
                     total_size.unwrap_or(0) as f32 / 1_048_576.0
                 ),
             },
@@ -387,8 +544,19 @@ async fn download_file_with_progress(
     }
 
     file.flush().await?;
-    tracing::info!("Download complete: {} bytes", downloaded);
 
+    // Verify downloaded size matches expected total
+    if let Some(total) = total_size {
+        if *downloaded != total {
+            return Err(anyhow!(
+                "Download incomplete: got {} bytes, expected {} bytes",
+                downloaded,
+                total
+            ));
+        }
+    }
+
+    tracing::info!("Download complete: {} bytes", downloaded);
     Ok(())
 }
 
@@ -512,10 +680,14 @@ fn emit_progress(app: &AppHandle, progress: DownloadProgress) {
 #[tauri::command]
 pub fn get_model_info() -> Vec<super::manifest::ModelInfo> {
     let manifest = get_fallback_manifest();
+    let selected_id = crate::config::get_config()
+        .ok()
+        .and_then(|c| c.transcription.model_id.clone());
+
     manifest
         .models
         .iter()
-        .map(super::manifest::to_model_info)
+        .map(|m| super::manifest::to_model_info(m, selected_id.as_deref()))
         .collect()
 }
 
@@ -531,7 +703,7 @@ pub fn delete_model(model_id: Option<String>) -> Result<(), String> {
             .find(|m| m.recommended)
             .or_else(|| manifest.models.first())
             .map(|m| m.id.clone())
-            .unwrap_or_else(|| "parakeet-tdt-0.6b-v3-int8".to_string())
+            .unwrap_or_else(|| "ggml-large-v3-turbo".to_string())
     });
 
     let model = manifest
