@@ -389,6 +389,8 @@ pub fn register_wake_observer() {
                 // Brief delay to let the system stabilise after wake
                 std::thread::sleep(std::time::Duration::from_secs(3));
                 crate::transcription::warmup_transcription();
+                // Invalidate mouse tracker's cached monitor bounds
+                crate::mouse_tracker::notify_wake();
             }
 
             last_check = now;

@@ -38,8 +38,18 @@ const SMOOTHING_FACTOR: f64 = 0.45;
 /// Re-query monitor bounds when cursor is within this margin of cached edges
 const MONITOR_REFRESH_MARGIN: f64 = 100.0;
 
-/// Minimum interval between monitor bounds refreshes (milliseconds)
-const MONITOR_REFRESH_COOLDOWN_MS: u64 = 500;
+/// Minimum interval between edge-triggered monitor bounds refreshes (milliseconds)
+const MONITOR_REFRESH_COOLDOWN_MS: u64 = 100;
+
+/// Maximum age of cached monitor bounds before forced refresh (milliseconds).
+/// Only triggers if the cursor has actually moved since the last refresh.
+const MONITOR_CACHE_TTL_MS: u64 = 2000;
+
+/// Hide the indicator after this many consecutive position failures.
+/// At 16ms poll interval, 90 failures = ~1.4s. This avoids false triggers
+/// during display reconfiguration events (which can cause CG failures
+/// for 500ms-2s).
+const FAILURE_HIDE_THRESHOLD: u32 = 90;
 
 /// Recording indicator window label (must match tauri.conf.json)
 const INDICATOR_WINDOW_LABEL: &str = "recording-indicator";
@@ -56,6 +66,11 @@ struct TrackerState {
     is_running: AtomicBool,
     /// Counter for consecutive mouse position failures (for rate-limited logging)
     consecutive_failures: AtomicU32,
+    /// Set by the wake observer to invalidate caches
+    wake_detected: AtomicBool,
+    /// Incremented each time a tracking thread starts. Allows detection
+    /// of stale threads from a previous generation.
+    generation: AtomicU32,
 }
 
 impl Default for TrackerState {
@@ -63,6 +78,8 @@ impl Default for TrackerState {
         Self {
             is_running: AtomicBool::new(false),
             consecutive_failures: AtomicU32::new(0),
+            wake_detected: AtomicBool::new(false),
+            generation: AtomicU32::new(0),
         }
     }
 }
@@ -85,6 +102,18 @@ pub fn init(app: &AppHandle) {
     // Eagerly initialise tracker state
     let _ = get_tracker();
     tracing::info!("Mouse tracker initialised");
+}
+
+/// Notify the tracker that the system has woken from sleep.
+///
+/// Invalidates cached monitor bounds so they are refreshed on the next
+/// poll cycle. Also discards the smoothed position so the indicator
+/// snaps to the actual cursor location rather than lerping from the
+/// stale pre-sleep position.
+pub fn notify_wake() {
+    let tracker = get_tracker();
+    tracker.read().wake_detected.store(true, Ordering::SeqCst);
+    tracing::info!("Mouse tracker notified of system wake");
 }
 
 /// Get the current mouse cursor position using Core Graphics.
@@ -153,12 +182,14 @@ fn get_mouse_position() -> Option<(f64, f64)> {
 /// Get the initial indicator position based on the current cursor location.
 ///
 /// Returns the offset position `(x, y)` ready for `set_position()`, or `None`
-/// if the mouse position cannot be determined.
+/// if the mouse position cannot be determined. Coordinates may be negative
+/// on multi-monitor setups where a secondary monitor is above or to the
+/// left of the primary display.
 pub fn get_initial_position() -> Option<(f64, f64)> {
     let (cx, cy) = get_mouse_position()?;
     let x = cx + CURSOR_OFFSET_X;
     let y = cy + CURSOR_OFFSET_Y;
-    Some((x.max(0.0), y.max(0.0)))
+    Some((x, y))
 }
 
 /// Check if the cursor is near the edge of cached monitor bounds.
@@ -167,6 +198,17 @@ fn needs_monitor_refresh(cursor_x: f64, cursor_y: f64, monitor: &CachedMonitor) 
         || cursor_x > monitor.x + monitor.width - MONITOR_REFRESH_MARGIN
         || cursor_y < monitor.y + MONITOR_REFRESH_MARGIN
         || cursor_y > monitor.y + monitor.height - MONITOR_REFRESH_MARGIN
+}
+
+/// Check if the cursor is within the cached monitor bounds.
+///
+/// Uses the same boundary convention as `find_monitor_for_point()`:
+/// inclusive min (`>=`), exclusive max (`<`).
+fn is_within_monitor(cursor_x: f64, cursor_y: f64, monitor: &CachedMonitor) -> bool {
+    cursor_x >= monitor.x
+        && cursor_x < monitor.x + monitor.width
+        && cursor_y >= monitor.y
+        && cursor_y < monitor.y + monitor.height
 }
 
 /// Refresh cached monitor bounds for the given cursor position.
@@ -214,11 +256,15 @@ pub fn start_tracking() {
         return;
     }
 
-    // Reset failure counter on fresh start
+    // Bump generation so any lingering old thread knows to exit
+    let generation = tracker.read().generation.fetch_add(1, Ordering::SeqCst) + 1;
+
+    // Reset counters and clear stale wake flag
     tracker
         .read()
         .consecutive_failures
         .store(0, Ordering::SeqCst);
+    tracker.read().wake_detected.store(false, Ordering::SeqCst);
 
     let Some(app) = APP_HANDLE.get().cloned() else {
         tracing::warn!("Mouse tracker not initialised, cannot start tracking");
@@ -236,11 +282,52 @@ pub fn start_tracking() {
     // Make indicator window click-through
     if let Err(e) = window.set_ignore_cursor_events(true) {
         tracing::warn!("Failed to set ignore cursor events: {}", e);
+        // Non-fatal: continue tracking even if click-through fails
     }
 
-    tracing::info!("Starting mouse cursor tracking for recording indicator");
+    tracing::info!(
+        "Starting mouse cursor tracking for recording indicator (generation {})",
+        generation
+    );
 
-    thread::spawn(move || {
+    let builder = thread::Builder::new().name("mouse-tracker".to_string());
+    if let Err(e) = builder.spawn(move || {
+        // Drop guard ensures is_running resets even on panic or early return.
+        // Only resets if this generation still owns the flag.
+        let guard_window = window.clone();
+        struct TrackingGuard {
+            generation: u32,
+            window: tauri::WebviewWindow,
+        }
+        impl Drop for TrackingGuard {
+            fn drop(&mut self) {
+                let tracker = get_tracker();
+                let current_gen = tracker.read().generation.load(Ordering::SeqCst);
+                if current_gen == self.generation {
+                    // We still own the flag; reset it
+                    tracker.read().is_running.store(false, Ordering::SeqCst);
+                    // Restore cursor events
+                    if let Err(e) = self.window.set_ignore_cursor_events(false) {
+                        tracing::warn!("Failed to restore cursor events in guard: {}", e);
+                    }
+                    tracing::info!(
+                        "Mouse tracking thread exited (generation {}, guard dropped)",
+                        self.generation
+                    );
+                } else {
+                    tracing::info!(
+                        "Mouse tracking thread exited (generation {} superseded by {})",
+                        self.generation,
+                        current_gen
+                    );
+                }
+            }
+        }
+        let _guard = TrackingGuard {
+            generation,
+            window: guard_window,
+        };
+
         let mut last_x: f64 = f64::NAN;
         let mut last_y: f64 = f64::NAN;
         // Smoothed position (what's actually set on the window)
@@ -248,8 +335,44 @@ pub fn start_tracking() {
         let mut smooth_y: f64 = f64::NAN;
         let mut cached_monitor: Option<CachedMonitor> = None;
         let mut last_monitor_refresh: Option<Instant> = None;
+        // Track cursor position at last TTL refresh to avoid pointless refreshes
+        // when the cursor is stationary
+        let mut last_refresh_cx: f64 = f64::NAN;
+        let mut last_refresh_cy: f64 = f64::NAN;
 
         while get_tracker().read().is_running.load(Ordering::SeqCst) {
+            // Check generation: if a newer thread was started, exit this one
+            let current_gen = get_tracker().read().generation.load(Ordering::SeqCst);
+            if current_gen != generation {
+                tracing::info!(
+                    "Tracking thread generation {} superseded by {}, exiting",
+                    generation,
+                    current_gen
+                );
+                break;
+            }
+
+            // Check for wake event: invalidate all caches
+            if get_tracker()
+                .read()
+                .wake_detected
+                .swap(false, Ordering::SeqCst)
+            {
+                tracing::info!("Wake detected in tracking loop, invalidating monitor cache");
+                cached_monitor = None;
+                last_monitor_refresh = None;
+                last_refresh_cx = f64::NAN;
+                last_refresh_cy = f64::NAN;
+                // Reset smoothed position so we snap to actual cursor
+                smooth_x = f64::NAN;
+                smooth_y = f64::NAN;
+                last_x = f64::NAN;
+                last_y = f64::NAN;
+                // Brief pause for CG to stabilise after wake
+                thread::sleep(Duration::from_millis(200));
+                continue;
+            }
+
             if let Some((cx, cy)) = get_mouse_position() {
                 // Reset failure counter on success
                 let failures = get_tracker()
@@ -271,20 +394,50 @@ pub fn start_tracking() {
                     last_x = cx;
                     last_y = cy;
 
-                    // Refresh monitor bounds if cursor near edge or no cache,
-                    // but throttle to avoid expensive IPC every frame
-                    let should_refresh = cached_monitor.is_none()
-                        || cached_monitor
-                            .as_ref()
-                            .is_some_and(|m| needs_monitor_refresh(cx, cy, m));
+                    // Determine if monitor cache needs refreshing
+                    let cache_expired = last_monitor_refresh
+                        .map(|t| t.elapsed().as_millis() >= MONITOR_CACHE_TTL_MS as u128)
+                        .unwrap_or(true);
+
+                    let cursor_outside_cached = cached_monitor
+                        .as_ref()
+                        .is_some_and(|m| !is_within_monitor(cx, cy, m));
+
+                    let near_edge = cached_monitor
+                        .as_ref()
+                        .is_some_and(|m| needs_monitor_refresh(cx, cy, m));
 
                     let cooldown_elapsed = last_monitor_refresh
                         .map(|t| t.elapsed().as_millis() >= MONITOR_REFRESH_COOLDOWN_MS as u128)
                         .unwrap_or(true);
 
-                    if should_refresh && cooldown_elapsed {
-                        cached_monitor = refresh_monitor_bounds(&app, cx, cy);
+                    // Has the cursor moved since we last refreshed? (for TTL)
+                    let cursor_moved_since_refresh = last_refresh_cx.is_nan()
+                        || (cx - last_refresh_cx).abs() > MOVE_THRESHOLD
+                        || (cy - last_refresh_cy).abs() > MOVE_THRESHOLD;
+
+                    // Refresh if:
+                    // 1. No cache at all, OR
+                    // 2. Cursor is outside cached bounds (immediate, bypass cooldown), OR
+                    // 3. Cache TTL expired AND cursor has moved since last refresh, OR
+                    // 4. Near edge AND cooldown elapsed
+                    let should_refresh = cached_monitor.is_none()
+                        || cursor_outside_cached
+                        || (cache_expired && cursor_moved_since_refresh)
+                        || (near_edge && cooldown_elapsed);
+
+                    if should_refresh {
+                        if let Some(new_monitor) = refresh_monitor_bounds(&app, cx, cy) {
+                            cached_monitor = Some(new_monitor);
+                        } else if cursor_outside_cached {
+                            // Cursor is outside all known monitors (can happen during
+                            // sleep/wake transitions). Clear cache so we don't clamp
+                            // to wrong bounds.
+                            cached_monitor = None;
+                        }
                         last_monitor_refresh = Some(Instant::now());
+                        last_refresh_cx = cx;
+                        last_refresh_cy = cy;
                     }
 
                     // Calculate indicator position (centred above cursor)
@@ -313,7 +466,7 @@ pub fn start_tracking() {
                     )));
                 }
             } else {
-                // Mouse position unavailable — log once, then rate-limit
+                // Mouse position unavailable: log once, then rate-limit
                 let count = get_tracker()
                     .read()
                     .consecutive_failures
@@ -323,13 +476,40 @@ pub fn start_tracking() {
                 } else if count == 100 {
                     tracing::warn!("Mouse position polling has failed 100 consecutive times");
                 }
+
+                // After sustained failures, move indicator off-screen to avoid
+                // it being stuck in a stale position
+                if count == FAILURE_HIDE_THRESHOLD {
+                    tracing::warn!(
+                        "Mouse position unavailable for {} polls, moving indicator off-screen",
+                        FAILURE_HIDE_THRESHOLD
+                    );
+                    let _ = window.set_position(tauri::Position::Logical(LogicalPosition::new(
+                        -10000.0, -10000.0,
+                    )));
+                }
             }
 
             thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
         }
 
-        tracing::info!("Mouse cursor tracking stopped");
-    });
+        // _guard drops here, resetting is_running if generation still matches
+    }) {
+        // thread::spawn failed: reset is_running so future calls can try again
+        tracing::error!("Failed to spawn mouse tracking thread: {}", e);
+        tracker.read().is_running.store(false, Ordering::SeqCst);
+        // Restore cursor events since we set click-through before spawn
+        if let Some(app_handle) = APP_HANDLE.get() {
+            if let Some(window) = app_handle.get_webview_window(INDICATOR_WINDOW_LABEL) {
+                if let Err(e2) = window.set_ignore_cursor_events(false) {
+                    tracing::warn!(
+                        "Failed to restore cursor events after spawn failure: {}",
+                        e2
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Stop tracking the mouse cursor.
@@ -421,18 +601,61 @@ mod tests {
         assert!(needs_monitor_refresh(960.0, 1030.0, &monitor));
     }
 
+    #[test]
+    fn test_is_within_monitor() {
+        let monitor = CachedMonitor {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+        };
+
+        // Centre: within
+        assert!(is_within_monitor(960.0, 540.0, &monitor));
+
+        // Origin: within (inclusive min)
+        assert!(is_within_monitor(0.0, 0.0, &monitor));
+
+        // Just outside right edge (exclusive max)
+        assert!(!is_within_monitor(1920.0, 540.0, &monitor));
+
+        // Just outside bottom edge
+        assert!(!is_within_monitor(960.0, 1080.0, &monitor));
+
+        // Negative coordinates (outside)
+        assert!(!is_within_monitor(-1.0, 540.0, &monitor));
+
+        // Secondary monitor with negative origin
+        let secondary = CachedMonitor {
+            x: -1920.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+        };
+        assert!(is_within_monitor(-960.0, 540.0, &secondary));
+        assert!(!is_within_monitor(0.0, 540.0, &secondary)); // exclusive max
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn test_get_mouse_position_returns_some() {
-        // On macOS, this should succeed (no special permissions needed for CGEvent)
+        // Skip in headless/CI environments where no GUI session exists.
+        // CGEvent requires an active HID session (WindowServer).
+        if std::env::var("CI").is_ok() || std::env::var("GITHUB_ACTIONS").is_ok() {
+            eprintln!("Skipping test_get_mouse_position_returns_some in CI (no GUI session)");
+            return;
+        }
+
         let pos = get_mouse_position();
         assert!(
             pos.is_some(),
-            "get_mouse_position should return a position on macOS"
+            "get_mouse_position should return a position on macOS with an active GUI session"
         );
         let (x, y) = pos.unwrap();
-        assert!(x >= 0.0, "x should be non-negative");
-        assert!(y >= 0.0, "y should be non-negative");
+        // On multi-monitor setups, cursor position can be negative when
+        // a secondary monitor is above or to the left of the primary.
+        assert!(x.is_finite(), "x should be finite, got {}", x);
+        assert!(y.is_finite(), "y should be finite, got {}", y);
     }
 
     #[cfg(target_os = "linux")]
@@ -447,8 +670,8 @@ mod tests {
                 "get_mouse_position should return a position on Linux X11"
             );
             let (x, y) = pos.unwrap();
-            assert!(x >= 0.0, "x should be non-negative");
-            assert!(y >= 0.0, "y should be non-negative");
+            assert!(x.is_finite(), "x should be finite, got {}", x);
+            assert!(y.is_finite(), "y should be finite, got {}", y);
         }
     }
 }
