@@ -40,6 +40,8 @@
   let checking = $state(false);
   let lastChecked = $state<string | null>(null);
   let downloadingModelId = $state<string | null>(null);
+  /** Model currently being initialised (loading into memory / compiling) */
+  let initialisingModelId = $state<string | null>(null);
 
   let unlistenProgress: UnlistenFn | null = null;
   let unlistenComplete: UnlistenFn | null = null;
@@ -192,6 +194,7 @@
 
   async function selectModel(model: ModelInfo) {
     error = null;
+    initialisingModelId = model.id;
     try {
       await invoke('set_selected_model_id', { modelId: model.id });
       // Re-initialise transcription with the newly selected model
@@ -204,6 +207,8 @@
       await loadModels(false);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
+    } finally {
+      initialisingModelId = null;
     }
   }
 
@@ -357,11 +362,22 @@
               <span class="failed-text">Download failed: {getFailedMessage()}</span>
               <button class="retry-btn" onclick={() => resetState()}>Reset</button>
             </div>
+          {:else if initialisingModelId === model.id}
+            <div class="progress-section">
+              <div class="progress-bar">
+                <div class="progress-fill extracting"></div>
+              </div>
+              <span class="progress-text">
+                {model.model_type === 'fluidaudio_coreml'
+                  ? 'Compiling Neural Engine model... this may take a minute'
+                  : 'Loading model...'}
+              </span>
+            </div>
           {:else if model.downloaded && model.selected}
             <button
               class="delete-btn"
               onclick={() => confirmDelete(model)}
-              disabled={isDownloading()}
+              disabled={isDownloading() || initialisingModelId !== null}
             >
               Delete Model
             </button>
@@ -369,14 +385,14 @@
             <button
               class="select-btn"
               onclick={() => selectModel(model)}
-              disabled={isDownloading() || !model.backend_available}
+              disabled={isDownloading() || initialisingModelId !== null || !model.backend_available}
             >
               {model.backend_available ? 'Use Model' : 'Backend Unavailable'}
             </button>
             <button
               class="delete-btn"
               onclick={() => confirmDelete(model)}
-              disabled={isDownloading()}
+              disabled={isDownloading() || initialisingModelId !== null}
             >
               Delete
             </button>
