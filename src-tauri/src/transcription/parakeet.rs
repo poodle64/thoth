@@ -131,6 +131,21 @@ impl TranscriptionService {
             );
         }
 
+        // Append 1 second of silence so the model can finalise punctuation
+        // at the end of the utterance. Only pad if the result stays under the
+        // single-chunk limit (15 s / 240 000 samples).
+        let samples = {
+            const TRAILING_SILENCE: usize = 16_000; // 1 s at 16 kHz
+            const MAX_SINGLE_CHUNK: usize = 240_000; // 15 s at 16 kHz
+            if samples.len() + TRAILING_SILENCE <= MAX_SINGLE_CHUNK {
+                let mut padded = samples;
+                padded.extend(std::iter::repeat(0.0f32).take(TRAILING_SILENCE));
+                padded
+            } else {
+                samples
+            }
+        };
+
         let start = std::time::Instant::now();
         let text = self.recognizer.transcribe(sample_rate, &samples);
         let duration = start.elapsed();

@@ -365,6 +365,39 @@ pub fn get_caret_position() -> Option<CaretPosition> {
     }
 }
 
+/// Register a listener for system wake-from-sleep events.
+///
+/// When the Mac wakes up, the CoreML/ONNX compilation cache may have been
+/// evicted. We re-warm the transcription model in the background so the
+/// first recording after wake isn't penalised.
+pub fn register_wake_observer() {
+    std::thread::spawn(|| {
+        let mut last_check = std::time::Instant::now();
+
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            let now = std::time::Instant::now();
+            let elapsed = now.duration_since(last_check);
+
+            // If more than 30 seconds have passed in what should be ~5 seconds,
+            // the system was asleep.
+            if elapsed > std::time::Duration::from_secs(30) {
+                tracing::info!(
+                    "Detected wake from sleep ({:.0}s gap), re-warming transcription model",
+                    elapsed.as_secs_f64()
+                );
+                // Brief delay to let the system stabilise after wake
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                crate::transcription::warmup_transcription();
+            }
+
+            last_check = now;
+        }
+    });
+
+    tracing::info!("Registered wake-from-sleep observer for model re-warming");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
