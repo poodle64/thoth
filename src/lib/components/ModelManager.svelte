@@ -243,6 +243,37 @@
       .map((l) => l.toUpperCase())
       .join(', ')} +${languages.length - 3} more`;
   }
+
+  /** Sort models: selected first, then recommended, then downloaded, then by name */
+  function sortedModels(list: ModelInfo[]): ModelInfo[] {
+    return [...list].sort((a, b) => {
+      // Selected always first
+      if (a.selected && !b.selected) return -1;
+      if (!a.selected && b.selected) return 1;
+      // Recommended next
+      if (a.recommended && !b.recommended) return -1;
+      if (!a.recommended && b.recommended) return 1;
+      // Downloaded before not-downloaded
+      if (a.downloaded && !b.downloaded) return -1;
+      if (!a.downloaded && b.downloaded) return 1;
+      // Alphabetical within the same tier
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  /** Friendly backend label for the detail row */
+  function backendLabel(modelType: string): string {
+    switch (modelType) {
+      case 'fluidaudio_coreml':
+        return 'Apple Neural Engine';
+      case 'nemo_transducer':
+        return 'Sherpa-ONNX (CPU)';
+      case 'whisper_ggml':
+        return 'whisper.cpp (Metal GPU)';
+      default:
+        return modelType;
+    }
+  }
 </script>
 
 <div class="model-manager">
@@ -283,60 +314,58 @@
   {/if}
 
   <div class="model-list">
-    {#each models as model (model.id)}
+    {#each sortedModels(models) as model (model.id)}
       <div
         class="model-card"
         class:downloaded={model.downloaded}
-        class:recommended={model.recommended}
         class:selected={model.selected}
+        class:unavailable={!model.backend_available}
       >
-        <div class="model-info">
-          <div class="model-header">
+        <!-- Top row: name + primary badge -->
+        <div class="model-header">
+          <div class="model-title-row">
             <span class="model-name">{model.name}</span>
-            <div class="badges">
-              {#if model.model_type === 'fluidaudio_coreml'}
-                <span class="status-badge backend-fluidaudio">Neural Engine</span>
-              {:else if model.model_type === 'nemo_transducer'}
-                <span class="status-badge backend-parakeet">Parakeet</span>
-              {:else}
-                <span class="status-badge backend-whisper">Whisper</span>
-              {/if}
-              {#if model.recommended}
-                <span class="status-badge recommended">Recommended</span>
-              {/if}
-              {#if model.selected}
-                <span class="status-badge selected">Selected</span>
-              {:else if model.downloaded}
-                <span class="status-badge downloaded">Downloaded</span>
-              {:else}
-                <span class="status-badge not-downloaded">Not Downloaded</span>
-              {/if}
-              {#if model.update_available}
-                <span class="status-badge update">Update Available</span>
-              {/if}
-            </div>
-          </div>
-          <p class="model-description">{model.description}</p>
-          {#if !model.backend_available}
-            <p class="backend-warning">
-              {#if model.model_type === 'fluidaudio_coreml'}
-                Requires macOS with Apple Silicon (M1 or later).
-              {:else}
-                This model requires the Parakeet backend which is not available in this build.
-              {/if}
-            </p>
-          {/if}
-          <div class="model-details">
-            <span class="detail">Version: {model.version}</span>
-            <span class="detail">Languages: {formatLanguages(model.languages)}</span>
-            {#if model.downloaded && model.disk_size}
-              <span class="detail">Size on disk: {formatBytes(model.disk_size)}</span>
-            {:else}
-              <span class="detail">Download size: ~{model.size_mb} MB</span>
+            {#if model.selected}
+              <span class="badge badge-active">Active</span>
+            {:else if model.recommended}
+              <span class="badge badge-recommended">Recommended</span>
             {/if}
           </div>
+          {#if model.update_available}
+            <span class="badge badge-update">Update</span>
+          {/if}
         </div>
 
+        <!-- Description -->
+        <p class="model-description">{model.description}</p>
+
+        <!-- Metadata row -->
+        <div class="model-meta">
+          <span class="meta-item">{backendLabel(model.model_type)}</span>
+          <span class="meta-sep"></span>
+          <span class="meta-item">{formatLanguages(model.languages)}</span>
+          <span class="meta-sep"></span>
+          {#if model.downloaded && model.disk_size}
+            <span class="meta-item">{formatBytes(model.disk_size)}</span>
+          {:else}
+            <span class="meta-item">~{model.size_mb} MB</span>
+          {/if}
+        </div>
+
+        <!-- Backend warning -->
+        {#if !model.backend_available}
+          <p class="backend-warning">
+            {#if model.model_type === 'fluidaudio_coreml'}
+              Requires macOS with Apple Silicon (M1 or later).
+            {:else if model.model_type === 'nemo_transducer'}
+              Requires the Parakeet backend (not available in this build).
+            {:else}
+              Backend not available in this build.
+            {/if}
+          </p>
+        {/if}
+
+        <!-- Actions -->
         <div class="model-actions">
           {#if isDownloading(model.id)}
             <div class="progress-section">
@@ -369,28 +398,28 @@
               </div>
               <span class="progress-text">
                 {model.model_type === 'fluidaudio_coreml'
-                  ? 'Compiling Neural Engine model... this may take a minute'
-                  : 'Loading model...'}
+                  ? 'Compiling for Neural Engine\u2026 this may take a minute'
+                  : 'Loading model\u2026'}
               </span>
             </div>
           {:else if model.downloaded && model.selected}
             <button
-              class="delete-btn"
+              class="btn-outline btn-danger"
               onclick={() => confirmDelete(model)}
               disabled={isDownloading() || initialisingModelId !== null}
             >
-              Delete Model
+              Delete
             </button>
           {:else if model.downloaded}
             <button
-              class="select-btn"
+              class="btn-primary"
               onclick={() => selectModel(model)}
               disabled={isDownloading() || initialisingModelId !== null || !model.backend_available}
             >
-              {model.backend_available ? 'Use Model' : 'Backend Unavailable'}
+              {model.backend_available ? 'Use Model' : 'Unavailable'}
             </button>
             <button
-              class="delete-btn"
+              class="btn-outline btn-danger"
               onclick={() => confirmDelete(model)}
               disabled={isDownloading() || initialisingModelId !== null}
             >
@@ -398,16 +427,16 @@
             </button>
           {:else}
             <button
-              class="download-btn primary"
+              class="btn-primary"
               onclick={() => downloadModel(model)}
               disabled={isDownloading() || !model.backend_available}
             >
               {#if !model.backend_available}
-                Backend Unavailable
+                Unavailable
               {:else if model.model_type === 'fluidaudio_coreml'}
-                Initialise Model
+                Initialise
               {:else}
-                Download Model
+                Download
               {/if}
             </button>
           {/if}
@@ -505,11 +534,12 @@
     gap: 12px;
   }
 
+  /* ── Card ───────────────────────────────────────────────────────── */
   .model-card {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 16px;
+    gap: 8px;
+    padding: 14px 16px;
     background: var(--color-bg-secondary);
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-md);
@@ -518,97 +548,98 @@
 
   .model-card.selected {
     border-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 4%, var(--color-bg-secondary));
   }
 
   .model-card.downloaded:not(.selected) {
     border-color: var(--color-border);
   }
 
-  .model-card.recommended:not(.downloaded) {
-    border-color: var(--color-accent);
+  .model-card.unavailable {
+    opacity: 0.55;
   }
 
-  .model-info {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
+  /* ── Header ────────────────────────────────────────────────────── */
   .model-header {
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .model-title-row {
+    display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
   }
 
   .model-name {
-    font-size: var(--text-lg);
+    font-size: var(--text-base);
     font-weight: 600;
     color: var(--color-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .badges {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .status-badge {
-    padding: 2px 8px;
-    font-size: var(--text-xs);
-    font-weight: 500;
+  /* ── Badges ────────────────────────────────────────────────────── */
+  .badge {
+    flex-shrink: 0;
+    padding: 1px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
     border-radius: var(--radius-full);
+    white-space: nowrap;
   }
 
-  .status-badge.selected {
+  .badge-active {
+    background: var(--color-accent);
+    color: white;
+  }
+
+  .badge-recommended {
     background: color-mix(in srgb, var(--color-accent) 15%, transparent);
     color: var(--color-accent);
   }
 
-  .status-badge.downloaded {
-    background: color-mix(in srgb, var(--color-success) 15%, transparent);
-    color: var(--color-success);
-  }
-
-  .status-badge.not-downloaded {
-    background: color-mix(in srgb, var(--color-text-secondary) 15%, transparent);
-    color: var(--color-text-secondary);
-  }
-
-  .status-badge.recommended {
-    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
-    color: var(--color-accent);
-  }
-
-  .status-badge.update {
+  .badge-update {
     background: color-mix(in srgb, var(--color-warning) 15%, transparent);
     color: var(--color-warning);
   }
 
-  .status-badge.backend-whisper {
-    background: color-mix(in srgb, var(--color-text-secondary) 10%, transparent);
-    color: var(--color-text-tertiary);
-  }
-
-  .status-badge.backend-parakeet {
-    background: color-mix(in srgb, var(--color-warning) 10%, transparent);
-    color: var(--color-warning);
-  }
-
-  .status-badge.backend-fluidaudio {
-    background: color-mix(in srgb, var(--color-success) 15%, transparent);
-    color: var(--color-success);
-  }
-
+  /* ── Description ───────────────────────────────────────────────── */
   .model-description {
     margin: 0;
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
-    line-height: 1.4;
+    line-height: 1.45;
   }
 
+  /* ── Metadata row ──────────────────────────────────────────────── */
+  .model-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
+  }
+
+  .meta-item {
+    white-space: nowrap;
+  }
+
+  .meta-sep::after {
+    content: '\00b7';
+    padding: 0 6px;
+    opacity: 0.4;
+  }
+
+  /* ── Backend warning ───────────────────────────────────────────── */
   .backend-warning {
-    margin: 4px 0 0;
+    margin: 2px 0 0;
     padding: 6px 10px;
     font-size: var(--text-xs);
     color: var(--color-warning);
@@ -617,77 +648,69 @@
     line-height: 1.4;
   }
 
-  .backend-warning code {
-    font-size: var(--text-xs);
-    background: color-mix(in srgb, var(--color-warning) 15%, transparent);
-    padding: 1px 4px;
-    border-radius: 2px;
-  }
-
-  .model-details {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-  }
-
-  .detail {
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
-  }
-
+  /* ── Actions ───────────────────────────────────────────────────── */
   .model-actions {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     padding-top: 8px;
-    border-top: 1px solid var(--color-border-subtle);
   }
 
-  .download-btn,
-  .select-btn,
-  .delete-btn,
+  .btn-primary,
+  .btn-outline,
   .retry-btn {
-    padding: 8px 16px;
+    padding: 6px 14px;
     font-size: var(--text-sm);
     font-weight: 500;
     border-radius: var(--radius-md);
     transition: all var(--transition-fast);
+    cursor: pointer;
   }
 
-  .download-btn,
-  .select-btn {
+  .btn-primary {
     background: var(--color-accent);
     color: white;
+    border: none;
   }
 
-  .download-btn:hover:not(:disabled),
-  .select-btn:hover:not(:disabled) {
+  .btn-primary:hover:not(:disabled) {
     background: var(--color-accent-hover);
   }
 
-  .download-btn:disabled,
-  .select-btn:disabled {
-    opacity: 0.5;
+  .btn-primary:disabled {
+    opacity: 0.45;
     cursor: not-allowed;
   }
 
-  .delete-btn {
+  .btn-outline {
     background: transparent;
-    border: 1px solid var(--color-error);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-secondary);
+  }
+
+  .btn-outline:hover:not(:disabled) {
+    border-color: var(--color-text-tertiary);
+  }
+
+  .btn-outline.btn-danger {
+    border-color: color-mix(in srgb, var(--color-error) 40%, transparent);
     color: var(--color-error);
   }
 
-  .delete-btn:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--color-error) 10%, transparent);
+  .btn-outline.btn-danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-error) 8%, transparent);
+    border-color: var(--color-error);
   }
 
-  .delete-btn:disabled {
-    opacity: 0.5;
+  .btn-outline:disabled,
+  .btn-outline.btn-danger:disabled {
+    opacity: 0.45;
     cursor: not-allowed;
   }
 
   .retry-btn {
     background: var(--color-bg-tertiary);
+    border: none;
   }
 
   .progress-section {
