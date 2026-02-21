@@ -13,17 +13,22 @@
   const AUDIO_REGEX = /\.(wav|mp3|m4a|ogg|flac)$/i;
 
   const isProcessing = $derived(
-    pipelineStore.state === 'converting' ||
-      pipelineStore.state === 'transcribing' ||
-      pipelineStore.state === 'filtering' ||
-      pipelineStore.state === 'enhancing'
+    importedFileName !== null &&
+      (pipelineStore.state === 'converting' ||
+        pipelineStore.state === 'transcribing' ||
+        pipelineStore.state === 'filtering' ||
+        pipelineStore.state === 'enhancing')
   );
 
   const hasResult = $derived(
-    pipelineStore.state === 'completed' && pipelineStore.lastResult !== null
+    importedFileName !== null &&
+      pipelineStore.state === 'completed' &&
+      pipelineStore.lastResult !== null
   );
 
-  const hasError = $derived(pipelineStore.state === 'failed' && pipelineStore.error !== null);
+  const hasError = $derived(
+    importedFileName !== null && pipelineStore.state === 'failed' && pipelineStore.error !== null
+  );
 
   async function handleFilePicker() {
     if (isProcessing) return;
