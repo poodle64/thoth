@@ -1,6 +1,6 @@
 {
-  "version": 7,
-  "updated": "2026-02-21T10:00:00Z",
+  "version": 8,
+  "updated": "2026-02-21T12:00:00Z",
   "models": [
     {
       "id": "ggml-large-v3-turbo",
@@ -79,6 +79,22 @@
       "archive_directory": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
       "languages": ["en", "bg", "hr", "cs", "da", "nl", "et", "fi", "fr", "de", "el", "hu", "it", "lv", "lt", "mt", "pl", "pt", "ro", "ru", "sk", "sl", "es", "sv", "uk"],
       "model_type": "nemo_transducer",
+      "recommended": false,
+      "min_app_version": null
+    },
+    {
+      "id": "fluidaudio-parakeet-tdt-coreml",
+      "name": "Parakeet TDT (Neural Engine)",
+      "description": "Fastest on Apple Silicon (~210x real-time). Uses Apple Neural Engine via CoreML. Models managed by FluidAudio (~500 MB on first use).",
+      "version": "1.0.0",
+      "download_url": "",
+      "download_size": 500000000,
+      "extracted_size": 500000000,
+      "sha256": null,
+      "required_files": [".fluidaudio_ready"],
+      "archive_directory": null,
+      "languages": ["en"],
+      "model_type": "fluidaudio_coreml",
       "recommended": false,
       "min_app_version": null
     }

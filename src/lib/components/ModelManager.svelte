@@ -72,8 +72,14 @@
       // Auto-initialise transcription engine with the downloaded model
       if (completedModelId) {
         try {
-          const modelDir = await invoke<string>('get_model_directory');
-          await invoke('init_transcription', { modelPath: modelDir });
+          const completedModel = models.find((m) => m.id === completedModelId);
+          if (completedModel?.model_type === 'fluidaudio_coreml') {
+            // FluidAudio already initialised during download; just set selected
+            await invoke('set_selected_model_id', { modelId: completedModelId });
+          } else {
+            const modelDir = await invoke<string>('get_model_directory');
+            await invoke('init_transcription', { modelPath: modelDir });
+          }
         } catch (e) {
           console.warn('[ModelManager] Failed to initialise transcription after download:', e);
         }
@@ -189,8 +195,12 @@
     try {
       await invoke('set_selected_model_id', { modelId: model.id });
       // Re-initialise transcription with the newly selected model
-      const modelDir = await invoke<string>('get_model_directory');
-      await invoke('init_transcription', { modelPath: modelDir });
+      if (model.model_type === 'fluidaudio_coreml') {
+        await invoke('init_fluidaudio_transcription');
+      } else {
+        const modelDir = await invoke<string>('get_model_directory');
+        await invoke('init_transcription', { modelPath: modelDir });
+      }
       await loadModels(false);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -279,7 +289,9 @@
           <div class="model-header">
             <span class="model-name">{model.name}</span>
             <div class="badges">
-              {#if model.model_type === 'nemo_transducer'}
+              {#if model.model_type === 'fluidaudio_coreml'}
+                <span class="status-badge backend-fluidaudio">Neural Engine</span>
+              {:else if model.model_type === 'nemo_transducer'}
                 <span class="status-badge backend-parakeet">Parakeet</span>
               {:else}
                 <span class="status-badge backend-whisper">Whisper</span>
@@ -302,8 +314,12 @@
           <p class="model-description">{model.description}</p>
           {#if !model.backend_available}
             <p class="backend-warning">
-              This model requires the Parakeet backend which is not included in this build.
-              Build with <code>--features parakeet</code> to enable.
+              {#if model.model_type === 'fluidaudio_coreml'}
+                Requires Apple Silicon and the FluidAudio backend. Build with <code>--features fluidaudio</code> to enable.
+              {:else}
+                This model requires the Parakeet backend which is not included in this build.
+                Build with <code>--features parakeet</code> to enable.
+              {/if}
             </p>
           {/if}
           <div class="model-details">
@@ -371,7 +387,13 @@
               onclick={() => downloadModel(model)}
               disabled={isDownloading() || !model.backend_available}
             >
-              {model.backend_available ? 'Download Model' : 'Backend Unavailable'}
+              {#if !model.backend_available}
+                Backend Unavailable
+              {:else if model.model_type === 'fluidaudio_coreml'}
+                Initialise Model
+              {:else}
+                Download Model
+              {/if}
             </button>
           {/if}
         </div>
@@ -556,6 +578,11 @@
   .status-badge.backend-parakeet {
     background: color-mix(in srgb, var(--color-warning) 10%, transparent);
     color: var(--color-warning);
+  }
+
+  .status-badge.backend-fluidaudio {
+    background: color-mix(in srgb, var(--color-success) 15%, transparent);
+    color: var(--color-success);
   }
 
   .model-description {

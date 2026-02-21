@@ -36,6 +36,10 @@ symphonia = { version = "0.5", features = ["mp3", "aac", "ogg", "vorbis", "flac"
 # sherpa-rs: Backup for Parakeet models (no CoreML/Metal support)
 # Optional: enable with --features parakeet (not in CI due to dylib bundling issues)
 sherpa-rs = { version = "0.6", features = ["static", "download-binaries"], optional = true }
+# fluidaudio-rs: Apple Neural Engine backend via CoreML (macOS-only, Apple Silicon)
+# Optional: enable with --features fluidaudio
+# Uses forked version with platform guards so it compiles as a no-op on Linux/Windows
+fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", rev = "547b1b4", optional = true }
 
 # AI Enhancement and Model Downloads
 reqwest = { version = "0.12", features = ["json", "stream"] }
@@ -86,6 +90,7 @@ core-graphics = "0.24"
 [features]
 default = []
 parakeet = ["sherpa-rs"]
+fluidaudio = ["fluidaudio-rs"]
 # GPU acceleration for whisper.cpp (mutually exclusive, only use one)
 # Use: cargo build --features cuda      for NVIDIA GPUs
 # Use: cargo build --features hipblas   for AMD GPUs (ROCm/HIP)
