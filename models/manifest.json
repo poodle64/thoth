@@ -1,11 +1,11 @@
 {
-  "version": 8,
-  "updated": "2026-02-21T12:00:00Z",
+  "version": 9,
+  "updated": "2026-02-22T00:00:00Z",
   "models": [
     {
       "id": "ggml-large-v3-turbo",
       "name": "Whisper Large V3 Turbo",
-      "description": "RECOMMENDED - OpenAI's fastest large model. 809M params, 8x faster than large-v3. Best speed/accuracy balance.",
+      "description": "OpenAI's fastest large model. 809M params, 8x faster than large-v3. Best Whisper speed/accuracy balance. Multilingual.",
       "version": "3.0.0",
       "download_url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
       "download_size": 1620000000,
@@ -15,7 +15,7 @@
       "archive_directory": null,
       "languages": ["en", "multilingual"],
       "model_type": "whisper_ggml",
-      "recommended": true,
+      "recommended": false,
       "min_app_version": null
     },
     {
@@ -85,7 +85,7 @@
     {
       "id": "fluidaudio-parakeet-tdt-coreml",
       "name": "Parakeet TDT (Neural Engine)",
-      "description": "Fastest on Apple Silicon (~210x real-time). Uses Apple Neural Engine via CoreML. Models managed by FluidAudio (~500 MB on first use).",
+      "description": "RECOMMENDED - Fastest on Apple Silicon (~210x real-time). Uses Apple Neural Engine via CoreML. Models managed by FluidAudio (~500 MB on first use).",
       "version": "1.0.0",
       "download_url": "",
       "download_size": 500000000,
@@ -95,7 +95,7 @@
       "archive_directory": null,
       "languages": ["en"],
       "model_type": "fluidaudio_coreml",
-      "recommended": false,
+      "recommended": true,
       "min_app_version": null
     }
   ]

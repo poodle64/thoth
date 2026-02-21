@@ -482,7 +482,17 @@ pub fn report_key_event(
 // ---------------------------------------------------------------------------
 
 /// Ensure the polling thread is running. Spawns one if not.
+///
+/// On macOS, refuses to spawn the thread unless Input Monitoring
+/// permission is granted — `DeviceState::new()` calls IOKit which
+/// aborts the process if the TCC permission is missing.
 fn ensure_thread_running(app: AppHandle) {
+    #[cfg(target_os = "macos")]
+    if !crate::platform::check_input_monitoring_permission() {
+        tracing::warn!("Skipping keyboard service: Input Monitoring permission not granted");
+        return;
+    }
+
     if THREAD_RUNNING.swap(true, Ordering::SeqCst) {
         return; // Thread already running
     }

@@ -812,6 +812,17 @@ pub fn delete_model(model_id: Option<String>) -> Result<(), String> {
         }
     }
 
+    // Remove the model directory if it's now empty
+    if model_dir.exists() {
+        let is_empty = std::fs::read_dir(&model_dir)
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(false);
+        if is_empty {
+            let _ = std::fs::remove_dir(&model_dir);
+            tracing::info!("Removed empty model directory: {}", model_dir.display());
+        }
+    }
+
     // Reset download state
     {
         let mut state = get_download_state().lock();

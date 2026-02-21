@@ -228,26 +228,21 @@ pub fn get_fallback_manifest() -> ModelManifest {
             // Minimal fallback if bundled manifest is somehow corrupted
             let now = chrono::Utc::now().to_rfc3339();
             ModelManifest {
-                version: 3,
+                version: 9,
                 updated: now,
                 models: vec![RemoteModelInfo {
-                    id: "parakeet-tdt-0.6b-v2-int8".to_string(),
-                    name: "Parakeet TDT 0.6B V2 (int8)".to_string(),
-                    description: "Best English model - State-of-the-art 6.05% average WER.".to_string(),
-                    version: "2.0.0".to_string(),
-                    download_url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2".to_string(),
-                    download_size: 482_468_385,
-                    extracted_size: 661_190_513,
+                    id: "fluidaudio-parakeet-tdt-coreml".to_string(),
+                    name: "Parakeet TDT (Neural Engine)".to_string(),
+                    description: "Fastest on Apple Silicon (~210x real-time). Uses Apple Neural Engine via CoreML.".to_string(),
+                    version: "1.0.0".to_string(),
+                    download_url: String::new(),
+                    download_size: 500_000_000,
+                    extracted_size: 500_000_000,
                     sha256: None,
-                    required_files: vec![
-                        "encoder.int8.onnx".to_string(),
-                        "decoder.int8.onnx".to_string(),
-                        "joiner.int8.onnx".to_string(),
-                        "tokens.txt".to_string(),
-                    ],
-                    archive_directory: Some("sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8".to_string()),
+                    required_files: vec![".fluidaudio_ready".to_string()],
+                    archive_directory: None,
                     languages: vec!["en".to_string()],
-                    model_type: "nemo_transducer".to_string(),
+                    model_type: "fluidaudio_coreml".to_string(),
                     recommended: true,
                     min_app_version: None,
                 }],
@@ -465,12 +460,13 @@ mod tests {
     #[test]
     fn test_fallback_manifest() {
         let manifest = get_fallback_manifest();
-        assert_eq!(manifest.version, 8);
+        assert_eq!(manifest.version, 9);
         assert_eq!(manifest.models.len(), 6);
 
-        let model = &manifest.models[0];
-        assert_eq!(model.id, "ggml-large-v3-turbo");
-        assert!(model.recommended);
+        // FluidAudio is the recommended model
+        let recommended = manifest.models.iter().find(|m| m.recommended);
+        assert!(recommended.is_some(), "Manifest should have a recommended model");
+        assert_eq!(recommended.unwrap().id, "fluidaudio-parakeet-tdt-coreml");
     }
 
     #[test]
@@ -497,7 +493,7 @@ mod tests {
         let fa = fa_model.unwrap();
         assert_eq!(fa.id, "fluidaudio-parakeet-tdt-coreml");
         assert_eq!(fa.required_files, vec![".fluidaudio_ready"]);
-        assert!(!fa.recommended);
+        assert!(fa.recommended);
     }
 
     #[test]

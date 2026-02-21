@@ -317,102 +317,104 @@ pub fn warmup_transcription() {
         .ok()
         .and_then(|c| c.transcription.model_id.clone());
 
-    let fallback = manifest::get_fallback_manifest();
+    let manifest = manifest::get_fallback_manifest();
 
-    // Check if the selected model is FluidAudio
+    // Resolve model type for the selected model
     let selected_model_type = selected_id.as_ref().and_then(|id| {
-        fallback
+        manifest
             .models
             .iter()
             .find(|m| m.id == *id)
             .map(|m| m.model_type.as_str())
     });
 
-    // FluidAudio warmup: only attempt if backend available AND models are cached
-    if selected_model_type == Some("fluidaudio_coreml") {
-        #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
-        {
-            if fluidaudio::is_cached() {
-                match init_fluidaudio_transcription() {
-                    Ok(()) => {
-                        tracing::info!(
-                            "FluidAudio transcription model warmed up (Neural Engine)"
-                        );
-                        return;
-                    }
-                    Err(e) => {
-                        tracing::warn!("FluidAudio warmup failed: {}, falling back", e);
-                    }
-                }
-            } else {
-                tracing::info!(
-                    "FluidAudio models not yet cached, skipping warmup \
-                     (user must initialise via Model Manager first)"
-                );
+    // ── FluidAudio path ────────────────────────────────────────────────
+    // Try FluidAudio when explicitly selected OR when nothing is selected
+    // (it's the recommended default on Apple Silicon).
+    let should_try_fluidaudio = selected_model_type == Some("fluidaudio_coreml")
+        || selected_id.is_none();
+
+    if should_try_fluidaudio {
+        if try_warmup_fluidaudio() {
+            return;
+        }
+        // FluidAudio unavailable/not cached — fall through to Whisper
+    }
+
+    // ── Whisper/Parakeet path ──────────────────────────────────────────
+    if selected_id.is_some() && selected_model_type != Some("fluidaudio_coreml") {
+        // A specific non-FluidAudio model is selected — try to init it
+        let model_dir = get_model_directory();
+        if !download::check_model_downloaded(None) {
+            tracing::info!("Selected model not downloaded yet, skipping warmup");
+            return;
+        }
+        match init_transcription(model_dir) {
+            Ok(()) => {
+                tracing::info!("Transcription model warmed up");
+                return;
             }
-        }
-
-        #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
-        {
-            tracing::warn!(
-                "Selected model requires FluidAudio backend (not available), \
-                 falling back to recommended Whisper model"
-            );
-        }
-
-        // FluidAudio selected but init failed or not cached — fall back to Whisper
-        warmup_whisper_fallback(&fallback);
-        return;
-    }
-
-    let model_dir = get_model_directory();
-    if !download::check_model_downloaded(None) {
-        tracing::info!("No model downloaded yet, skipping warmup");
-        return;
-    }
-    match init_transcription(model_dir) {
-        Ok(()) => tracing::info!("Transcription model warmed up"),
-        Err(e) => {
-            tracing::warn!("Transcription warmup failed: {}", e);
-
-            // If the selected model's backend is unavailable (e.g. Parakeet without
-            // the feature enabled), fall back to the recommended Whisper model.
-            let is_unavailable_backend = selected_model_type
-                .map(|t| !manifest::is_backend_available(t))
-                .unwrap_or(false);
-
-            if is_unavailable_backend {
-                if let Some(ref id) = selected_id {
-                    tracing::warn!(
-                        "Selected model '{}' backend not available, \
-                         falling back to recommended Whisper model",
-                        id
-                    );
-                }
-                warmup_whisper_fallback(&fallback);
+            Err(e) => {
+                tracing::warn!("Transcription warmup failed: {}", e);
+                // Backend might be unavailable, fall through to Whisper fallback
             }
         }
     }
+
+    // ── Whisper fallback ───────────────────────────────────────────────
+    warmup_whisper_fallback(&manifest);
 }
 
-/// Fall back to the recommended Whisper model during warmup
+/// Attempt to warm up FluidAudio. Returns `true` if successful.
+fn try_warmup_fluidaudio() -> bool {
+    #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+    {
+        if fluidaudio::is_cached() {
+            match init_fluidaudio_transcription() {
+                Ok(()) => {
+                    tracing::info!(
+                        "FluidAudio transcription model warmed up (Neural Engine)"
+                    );
+                    return true;
+                }
+                Err(e) => {
+                    tracing::warn!("FluidAudio warmup failed: {}, falling back", e);
+                }
+            }
+        } else {
+            tracing::info!(
+                "FluidAudio models not yet cached, falling back to Whisper"
+            );
+        }
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
+    {
+        tracing::debug!("FluidAudio backend not available in this build");
+    }
+
+    false
+}
+
+/// Fall back to the best available downloaded Whisper model during warmup.
 fn warmup_whisper_fallback(manifest: &manifest::ModelManifest) {
+    // Try the largest/best downloaded Whisper model (manifest order = quality order)
     if let Some(whisper_model) = manifest
         .models
         .iter()
-        .find(|m| m.model_type == "whisper_ggml" && m.recommended)
+        .find(|m| m.model_type == "whisper_ggml" && manifest::is_model_downloaded(m))
     {
         let whisper_dir = manifest::get_model_directory(&whisper_model.id);
-        if manifest::is_model_downloaded(whisper_model) {
-            match init_transcription(whisper_dir.to_string_lossy().to_string()) {
-                Ok(()) => {
-                    tracing::info!("Fell back to Whisper model '{}'", whisper_model.id);
-                }
-                Err(e2) => {
-                    tracing::warn!("Whisper fallback also failed: {}", e2);
-                }
+        match init_transcription(whisper_dir.to_string_lossy().to_string()) {
+            Ok(()) => {
+                tracing::info!("Fell back to Whisper model '{}'", whisper_model.id);
+            }
+            Err(e) => {
+                tracing::warn!("Whisper fallback also failed: {}", e);
             }
         }
+    } else {
+        tracing::info!("No downloaded Whisper model available for fallback");
     }
 }
 

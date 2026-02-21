@@ -16,7 +16,7 @@
         "label": "main",
         "title": "Thoth",
         "width": 900,
-        "height": 900,
+        "height": 1000,
         "visible": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true
@@ -66,7 +66,9 @@
     },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEExOEY5RURGQUJBNkQzRjkKUldUNTA2YXIzNTZQb1lNSGQ3WVlkbDY3VVlUQlJYSzJzQW5ieUhhci9NVnVDUms5T0NJa21acnEK",
-      "endpoints": ["https://github.com/poodle64/thoth/releases/latest/download/latest.json"]
+      "endpoints": [
+        "https://github.com/poodle64/thoth/releases/latest/download/latest.json"
+      ]
     }
   },
   "bundle": {
@@ -106,7 +108,11 @@
         "bundleMediaFramework": true
       },
       "deb": {
-        "depends": ["libasound2", "libwebkit2gtk-4.1-0", "libgtk-3-0"],
+        "depends": [
+          "libasound2",
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ],
         "section": "sound",
         "priority": "optional",
         "desktopTemplate": "linux/thoth.desktop"

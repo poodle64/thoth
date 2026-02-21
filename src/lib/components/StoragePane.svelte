@@ -153,18 +153,11 @@
     <div class="section-content">
       <!-- Bar chart -->
       <div class="storage-bar">
-        {#if usage.modelsBytes > 0}
+        {#if usage.modelsBytes + usage.fluidaudioBytes > 0}
           <div
             class="bar-segment models"
-            style="width: {Math.max(pct(usage.modelsBytes), 1)}%"
-            title="Models: {formatBytes(usage.modelsBytes)}"
-          ></div>
-        {/if}
-        {#if usage.fluidaudioBytes > 0}
-          <div
-            class="bar-segment fluidaudio"
-            style="width: {Math.max(pct(usage.fluidaudioBytes), 1)}%"
-            title="FluidAudio cache: {formatBytes(usage.fluidaudioBytes)}"
+            style="width: {Math.max(pct(usage.modelsBytes + usage.fluidaudioBytes), 1)}%"
+            title="Models: {formatBytes(usage.modelsBytes + usage.fluidaudioBytes)}"
           ></div>
         {/if}
         {#if usage.recordingsBytes > 0}
@@ -202,15 +195,8 @@
         <div class="legend-item">
           <span class="legend-dot models"></span>
           <span class="legend-label">Models</span>
-          <span class="legend-value">{formatBytes(usage.modelsBytes)}</span>
+          <span class="legend-value">{formatBytes(usage.modelsBytes + usage.fluidaudioBytes)}</span>
         </div>
-        {#if usage.fluidaudioBytes > 0}
-          <div class="legend-item">
-            <span class="legend-dot fluidaudio"></span>
-            <span class="legend-label">Neural Engine cache</span>
-            <span class="legend-value">{formatBytes(usage.fluidaudioBytes)}</span>
-          </div>
-        {/if}
         <div class="legend-item">
           <span class="legend-dot recordings"></span>
           <span class="legend-label">Recordings</span>
