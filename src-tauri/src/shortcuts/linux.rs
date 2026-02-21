@@ -88,11 +88,7 @@ pub fn register<R: Runtime>(
 ) -> Result<(), String> {
     let display_server = get_display_server();
 
-    tracing::info!(
-        "Registering Linux shortcut '{}' on {}",
-        id,
-        display_server
-    );
+    tracing::info!("Registering Linux shortcut '{}' on {}", id, display_server);
 
     // Warn about Wayland limitations
     if display_server == DisplayServer::Wayland {

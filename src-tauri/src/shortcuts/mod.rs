@@ -14,12 +14,12 @@ pub mod manager;
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "linux")]
-pub use linux::{DisplayServer, get_display_server};
+pub use linux::{get_display_server, DisplayServer};
 
 pub use conflict::{RegistrationResult, ShortcutConflict};
 pub use manager::{shortcut_ids, ShortcutInfo};
 
-use crate::modifier_monitor;
+use crate::keyboard_service;
 use tauri::AppHandle;
 
 /// Register a global shortcut
@@ -39,14 +39,14 @@ pub fn register_shortcut(
     accelerator: String,
     description: String,
 ) -> Result<(), String> {
-    // Route modifier-only shortcuts to the modifier monitor
-    if modifier_monitor::is_modifier_shortcut(&accelerator) {
-        if modifier_monitor::register_modifier_shortcut(
+    // Route modifier-only shortcuts to the keyboard service
+    if keyboard_service::is_modifier_shortcut(&accelerator) {
+        if keyboard_service::register_modifier_shortcut(
             id.clone(),
             accelerator.clone(),
             description,
         ) {
-            modifier_monitor::restart_monitor(app)?;
+            keyboard_service::restart_monitoring(app);
             Ok(())
         } else {
             Err(format!(
@@ -78,8 +78,8 @@ pub fn register_shortcut(
 #[tauri::command]
 pub fn unregister_shortcut(app: AppHandle, id: String) -> Result<(), String> {
     // Try modifier monitor first, then regular shortcuts
-    if modifier_monitor::is_modifier_shortcut_registered(&id) {
-        modifier_monitor::unregister_modifier_shortcut(&id);
+    if keyboard_service::is_modifier_shortcut_registered(&id) {
+        keyboard_service::unregister_modifier_shortcut(&id);
         Ok(())
     } else {
         // Platform-specific unregistration
@@ -107,7 +107,7 @@ pub fn list_registered_shortcuts() -> Vec<ShortcutInfo> {
     let mut shortcuts = manager::list_registered();
 
     // Add modifier shortcuts
-    for (id, accelerator, description) in modifier_monitor::list_modifier_shortcuts() {
+    for (id, accelerator, description) in keyboard_service::list_modifier_shortcuts() {
         shortcuts.push(ShortcutInfo {
             id,
             accelerator,
@@ -185,13 +185,17 @@ pub fn register_default_shortcuts(app: AppHandle) -> Result<(), String> {
 
 /// Unregister all shortcuts
 ///
-/// Removes all registered global shortcuts.
+/// Removes all registered global shortcuts, including modifier-only shortcuts
+/// monitored by the modifier monitor.
 ///
 /// # Returns
 /// * `Ok(())` on success
 /// * `Err(String)` if unregistration fails
 #[tauri::command]
 pub fn unregister_all_shortcuts(app: AppHandle) -> Result<(), String> {
+    // Unregister all modifier shortcuts (thread stays alive for mode transitions)
+    keyboard_service::unregister_all_modifier_shortcuts();
+
     // Platform-specific unregistration
     #[cfg(target_os = "linux")]
     {
@@ -223,20 +227,13 @@ pub fn try_register_shortcut(
     description: String,
 ) -> RegistrationResult {
     // Handle modifier-only shortcuts separately
-    if modifier_monitor::is_modifier_shortcut(&accelerator) {
-        if modifier_monitor::register_modifier_shortcut(
+    if keyboard_service::is_modifier_shortcut(&accelerator) {
+        if keyboard_service::register_modifier_shortcut(
             id.clone(),
             accelerator.clone(),
             description,
         ) {
-            if let Err(e) = modifier_monitor::restart_monitor(app) {
-                return RegistrationResult::Conflict(conflict::ShortcutConflict {
-                    shortcut: accelerator,
-                    shortcut_id: id,
-                    reason: e,
-                    suggestions: vec![],
-                });
-            }
+            keyboard_service::restart_monitoring(app);
             return RegistrationResult::Success {
                 shortcut: accelerator,
                 shortcut_id: id,
@@ -291,9 +288,9 @@ pub fn try_register_shortcut(
 #[tauri::command]
 pub fn check_shortcut_available(app: AppHandle, accelerator: String) -> Result<bool, String> {
     // Modifier-only shortcuts are always "available" (we handle them ourselves)
-    if modifier_monitor::is_modifier_shortcut(&accelerator) {
+    if keyboard_service::is_modifier_shortcut(&accelerator) {
         // Check if already registered as a modifier shortcut
-        let modifier_shortcuts = modifier_monitor::list_modifier_shortcuts();
+        let modifier_shortcuts = keyboard_service::list_modifier_shortcuts();
         let in_use = modifier_shortcuts
             .iter()
             .any(|(_, acc, _)| acc == &accelerator);

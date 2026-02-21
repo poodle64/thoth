@@ -2,9 +2,11 @@
   /**
    * ShortcutInput - Key capture component for configuring keyboard shortcuts
    *
-   * Uses native Rust-based keyboard capture via device_query to capture keys
-   * at the system level, bypassing webview limitations that prevent capturing
-   * keys intercepted by macOS (like Cmd+letter combinations).
+   * Uses the unified keyboard_service in the Rust backend, which manages a
+   * single polling thread with modal capture/monitoring states. Entering
+   * capture mode is a single IPC call that atomically switches the mode,
+   * unregisters all shortcuts, and starts reporting key presses as capture
+   * events. Exiting capture mode re-registers everything from config.
    *
    * On Wayland, falls back to webview keyboard events since device_query
    * doesn't work there (X11-only).
@@ -13,12 +15,7 @@
   import { onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-  import {
-    formatForDisplay,
-    validateShortcut,
-    shortcutsStore,
-    type ShortcutInfo,
-  } from '../stores/shortcuts.svelte';
+  import { formatForDisplay, validateShortcut } from '../stores/shortcuts.svelte';
 
   /** Debug logging — only active in development builds */
   const debug = import.meta.env.DEV
@@ -59,9 +56,6 @@
   let validationError = $state<string | null>(null);
   let pendingKeys = $state<string[]>([]);
   let buttonRef = $state<HTMLButtonElement | null>(null);
-  let shortcutsPaused = $state(false);
-  /** Store shortcuts to restore after capture */
-  let savedShortcuts = $state<ShortcutInfo[]>([]);
   /** Event listeners to clean up */
   let unlisteners: UnlistenFn[] = [];
   /** Whether using webview mode (Wayland) */
@@ -82,7 +76,7 @@
   });
 
   /**
-   * Clean up event listeners and stop capture
+   * Clean up event listeners and exit capture mode if active
    */
   async function cleanup(): Promise<void> {
     for (const unlisten of unlisteners) {
@@ -92,7 +86,7 @@
 
     if (isCapturing) {
       try {
-        await invoke('stop_key_capture');
+        await invoke('exit_capture_mode');
       } catch {
         // Ignore errors during cleanup
       }
@@ -100,63 +94,15 @@
   }
 
   /**
-   * Pause global shortcuts so the captured keys can be used
-   */
-  async function pauseGlobalShortcuts(): Promise<void> {
-    if (shortcutsPaused) return;
-    try {
-      savedShortcuts = [...shortcutsStore.shortcuts];
-      await invoke('unregister_all_shortcuts');
-      shortcutsPaused = true;
-    } catch (e) {
-      console.error('Failed to pause shortcuts:', e);
-    }
-  }
-
-  /**
-   * Resume global shortcuts after capture
+   * Start capturing keyboard input
    *
-   * Re-registers shortcuts that were paused, EXCEPT for the one being edited
-   * (identified by shortcutId). The onchange handler will register the new
-   * shortcut for the one being edited.
-   */
-  async function resumeGlobalShortcuts(): Promise<void> {
-    if (!shortcutsPaused) return;
-    try {
-      // Re-register all shortcuts EXCEPT the one we're currently editing
-      // (the onchange handler will register that one with the new value)
-      for (const shortcut of savedShortcuts) {
-        // Skip the shortcut being edited - identified by shortcutId
-        // The onchange handler has already registered the new accelerator for this one
-        if (shortcutId && shortcut.id === shortcutId) {
-          continue;
-        }
-        if (shortcut.accelerator) {
-          await invoke('register_shortcut', {
-            id: shortcut.id,
-            accelerator: shortcut.accelerator,
-            description: shortcut.description,
-          });
-        }
-      }
-      shortcutsPaused = false;
-      savedShortcuts = [];
-      await shortcutsStore.loadRegistered();
-    } catch (e) {
-      console.error('Failed to resume shortcuts:', e);
-    }
-  }
-
-  /**
-   * Start capturing keyboard input using native capture
+   * A single IPC call to enter_capture_mode handles everything:
+   * switching the mode, unregistering shortcuts, and starting capture.
    */
   async function startCapture(): Promise<void> {
     if (disabled || isCapturing) return;
 
     debug('Starting capture...');
-
-    // Pause global shortcuts first
-    await pauseGlobalShortcuts();
 
     isCapturing = true;
     validationError = null;
@@ -172,7 +118,6 @@
 
           // Show validation error only if we have a non-modifier key and it's invalid
           if (event.payload.accelerator && !event.payload.isValid) {
-            // Only show error if there's a non-modifier key
             const hasNonModifier = event.payload.keys.some(
               (k) => !['Cmd', 'Ctrl', 'Alt', 'Shift', 'Super', 'Meta'].includes(k)
             );
@@ -194,14 +139,11 @@
           debug('Capture complete:', event.payload);
 
           if (event.payload.isValid) {
-            // Validate with our frontend validator as well
             const error = validateShortcut(event.payload.accelerator);
             if (error) {
               validationError = error;
             } else {
-              // Wait for onchange to complete before resuming shortcuts
-              // This ensures the new shortcut is registered before we
-              // re-register the other shortcuts
+              // onchange saves to config; exit_capture_mode re-registers from config
               await onchange?.(event.payload.accelerator);
               validationError = null;
             }
@@ -212,8 +154,8 @@
       );
       unlisteners.push(completeUnlisten);
 
-      // Start key capture - returns 'native' or 'webview' mode
-      const mode = await invoke<string>('start_key_capture');
+      // Enter capture mode — returns 'native' or 'webview'
+      const mode = await invoke<string>('enter_capture_mode');
       webviewMode = mode === 'webview';
       debug(`Capture started in ${mode} mode`);
 
@@ -223,10 +165,8 @@
       console.error('Failed to start capture:', e);
       const errorMsg = String(e);
 
-      // Check if it's a permission error
       if (errorMsg.includes('Input Monitoring')) {
         validationError = 'Input Monitoring permission required';
-        // Offer to open settings
         try {
           await invoke('request_input_monitoring');
         } catch {
@@ -240,7 +180,10 @@
   }
 
   /**
-   * Stop capturing and clean up
+   * Stop capturing and exit capture mode
+   *
+   * A single IPC call to exit_capture_mode handles everything:
+   * switching mode back, and re-registering all shortcuts from config.
    */
   async function stopCapture(): Promise<void> {
     if (!isCapturing) return;
@@ -256,13 +199,10 @@
     unlisteners = [];
 
     try {
-      await invoke('stop_key_capture');
+      await invoke('exit_capture_mode');
     } catch (e) {
-      console.error('Failed to stop key capture:', e);
+      console.error('Failed to exit capture mode:', e);
     }
-
-    // Resume global shortcuts
-    await resumeGlobalShortcuts();
   }
 
   /**
@@ -295,7 +235,6 @@
       // Ignore pure modifier keydowns (they're tracked separately)
       const isModifier = ['Control', 'Shift', 'Alt', 'Meta'].includes(event.key);
       if (isModifier) {
-        // Update pending display for modifiers
         const modNames: string[] = [];
         if (event.ctrlKey) modNames.push('Ctrl');
         if (event.shiftKey) modNames.push('Shift');
@@ -305,7 +244,6 @@
         return;
       }
 
-      // Report key event to backend
       try {
         await invoke('report_key_event', {
           key: event.key,
