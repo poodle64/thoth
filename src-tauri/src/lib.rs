@@ -275,6 +275,10 @@ pub fn run() {
                 transcription::warmup_transcription();
             });
 
+            // Re-warm the model after wake-from-sleep (CoreML cache eviction)
+            #[cfg(target_os = "macos")]
+            platform::macos::register_wake_observer();
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

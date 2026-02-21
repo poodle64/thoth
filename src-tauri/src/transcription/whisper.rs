@@ -36,11 +36,10 @@ impl WhisperTranscriptionService {
         })?;
 
         // Try GPU first, fall back to CPU if it fails
-        let ctx = Self::try_load_with_gpu(model_str)
-            .or_else(|e| {
-                tracing::warn!("GPU initialization failed: {:?}, trying CPU fallback", e);
-                Self::load_with_cpu(model_str)
-            })?;
+        let ctx = Self::try_load_with_gpu(model_str).or_else(|e| {
+            tracing::warn!("GPU initialization failed: {:?}, trying CPU fallback", e);
+            Self::load_with_cpu(model_str)
+        })?;
 
         Ok(Self { ctx })
     }
@@ -145,6 +144,21 @@ impl WhisperTranscriptionService {
             resample_audio(&samples, sample_rate, 16000)
         } else {
             samples
+        };
+
+        // Append 1 second of silence so the model can finalise punctuation
+        // at the end of the utterance. Only pad if the result stays under the
+        // single-chunk limit (15 s / 240 000 samples).
+        let samples = {
+            const TRAILING_SILENCE: usize = 16_000; // 1 s at 16 kHz
+            const MAX_SINGLE_CHUNK: usize = 240_000; // 15 s at 16 kHz
+            if samples.len() + TRAILING_SILENCE <= MAX_SINGLE_CHUNK {
+                let mut padded = samples;
+                padded.extend(std::iter::repeat(0.0f32).take(TRAILING_SILENCE));
+                padded
+            } else {
+                samples
+            }
         };
 
         self.transcribe_samples(&samples)

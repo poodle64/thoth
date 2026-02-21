@@ -161,16 +161,23 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
         return Err("Pipeline is already running".to_string());
     }
 
-    // Check transcription model is available before capturing audio
+    // If the transcription model isn't loaded yet, try to load it in the
+    // background while we record.  This avoids blocking the user — the model
+    // will (hopefully) be ready by the time they stop speaking.
     if !transcription::is_transcription_ready() {
-        PIPELINE_RUNNING.store(false, Ordering::SeqCst);
-        tracing::warn!("Pipeline: No transcription model available, blocking recording");
-        // Hide the recording indicator (shortcut handler may have shown it)
-        let _ = crate::recording_indicator::hide_recording_indicator(app.clone());
-        return Err(
-            "No transcription model downloaded. Open Settings \u{2192} Models to get started."
-                .to_string(),
-        );
+        if !transcription::download::check_model_downloaded(None) {
+            PIPELINE_RUNNING.store(false, Ordering::SeqCst);
+            tracing::warn!("Pipeline: No transcription model downloaded, blocking recording");
+            let _ = crate::recording_indicator::hide_recording_indicator(app.clone());
+            return Err(
+                "No transcription model downloaded. Open Settings \u{2192} Models to get started."
+                    .to_string(),
+            );
+        }
+        tracing::info!("Pipeline: Model not loaded yet, starting eager background load");
+        std::thread::spawn(|| {
+            transcription::warmup_transcription();
+        });
     }
 
     // Get device ID from config
@@ -376,7 +383,23 @@ async fn process_audio(
     let transcription_model_name = get_transcription_model_name();
 
     // 1. Transcribe (with timing)
+    // Wait for the model to finish loading if eager background load is in progress.
     tracing::info!("Pipeline: Starting transcription of {}", audio_path);
+    if !transcription::is_transcription_ready() {
+        emit_progress(
+            app,
+            PipelineState::Transcribing,
+            "Loading transcription model...",
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while !transcription::is_transcription_ready() {
+            if std::time::Instant::now() > deadline {
+                return Err("Transcription model failed to load within 60 seconds".to_string());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        tracing::info!("Pipeline: Model loaded, proceeding with transcription");
+    }
     emit_progress(app, PipelineState::Transcribing, "Transcribing audio...");
     let transcription_start = std::time::Instant::now();
     let raw_text = transcription::transcribe_file(audio_path.to_string())?;
@@ -663,12 +686,20 @@ pub async fn pipeline_transcribe_file(
     // RAII guard ensures PIPELINE_RUNNING is reset even on early return
     let _guard = PipelineGuard;
 
-    // Check transcription model is available
+    // If the model isn't loaded yet but is downloaded, start eager loading.
+    // The file decode step below takes time, so the model may be ready by
+    // the time we need it.
     if !transcription::is_transcription_ready() {
-        return Err(
-            "No transcription model downloaded. Open Settings \u{2192} Models to get started."
-                .to_string(),
-        );
+        if !transcription::download::check_model_downloaded(None) {
+            return Err(
+                "No transcription model downloaded. Open Settings \u{2192} Models to get started."
+                    .to_string(),
+            );
+        }
+        tracing::info!("Pipeline: Model not loaded yet, starting eager background load for import");
+        std::thread::spawn(|| {
+            transcription::warmup_transcription();
+        });
     }
 
     // Reset cancellation signal
