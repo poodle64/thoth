@@ -329,34 +329,38 @@ pub fn warmup_transcription() {
     });
 
     // FluidAudio warmup: only attempt if backend available AND models are cached
-    #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
     if selected_model_type == Some("fluidaudio_coreml") {
-        if fluidaudio::is_cached() {
-            match init_fluidaudio_transcription() {
-                Ok(()) => {
-                    tracing::info!("FluidAudio transcription model warmed up (Neural Engine)");
-                    return;
+        #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+        {
+            if fluidaudio::is_cached() {
+                match init_fluidaudio_transcription() {
+                    Ok(()) => {
+                        tracing::info!(
+                            "FluidAudio transcription model warmed up (Neural Engine)"
+                        );
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::warn!("FluidAudio warmup failed: {}, falling back", e);
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!("FluidAudio warmup failed: {}, falling back", e);
-                }
+            } else {
+                tracing::info!(
+                    "FluidAudio models not yet cached, skipping warmup \
+                     (user must initialise via Model Manager first)"
+                );
             }
-        } else {
-            tracing::info!(
-                "FluidAudio models not yet cached, skipping warmup \
-                 (user must initialise via Model Manager first)"
+        }
+
+        #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
+        {
+            tracing::warn!(
+                "Selected model requires FluidAudio backend (not available), \
+                 falling back to recommended Whisper model"
             );
         }
-        // Fall through to try Whisper fallback
-    }
 
-    // For FluidAudio without the feature, fall back to Whisper
-    #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
-    if selected_model_type == Some("fluidaudio_coreml") {
-        tracing::warn!(
-            "Selected model requires FluidAudio backend (not available), \
-             falling back to recommended Whisper model"
-        );
+        // FluidAudio selected but init failed or not cached — fall back to Whisper
         warmup_whisper_fallback(&fallback);
         return;
     }
