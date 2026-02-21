@@ -370,16 +370,28 @@ pub fn get_pipeline_state() -> PipelineState {
     }
 }
 
-/// Process audio through the transcription pipeline
-async fn process_audio(
+/// Output of the core transcription pipeline (transcribe + filter + enhance).
+///
+/// Shared by [`process_audio`] (recordings/imports) and [`pipeline_retranscribe`].
+struct TranscriptionPipelineOutput {
+    text: String,
+    raw_text: String,
+    is_enhanced: bool,
+    transcription_model_name: Option<String>,
+    transcription_duration_seconds: f64,
+    enhancement_model_name: Option<String>,
+    enhancement_duration_seconds: Option<f64>,
+}
+
+/// Core pipeline: wait for model, transcribe audio, apply filters, optionally enhance.
+///
+/// Does NOT handle output (clipboard/paste), saving to history, or tray updates;
+/// callers are responsible for those steps.
+async fn run_transcription_pipeline(
     app: &AppHandle,
     audio_path: &str,
     config: &PipelineConfig,
-) -> Result<PipelineResult, String> {
-    // Get audio duration (if available)
-    let duration_seconds = get_audio_duration(audio_path);
-
-    // Get transcription model name and backend
+) -> Result<TranscriptionPipelineOutput, String> {
     let transcription_model_name = get_transcription_model_name();
 
     // 1. Transcribe (with timing)
@@ -481,9 +493,31 @@ async fn process_audio(
         false
     };
 
+    Ok(TranscriptionPipelineOutput {
+        text,
+        raw_text,
+        is_enhanced,
+        transcription_model_name,
+        transcription_duration_seconds,
+        enhancement_model_name,
+        enhancement_duration_seconds,
+    })
+}
+
+/// Process audio through the transcription pipeline
+async fn process_audio(
+    app: &AppHandle,
+    audio_path: &str,
+    config: &PipelineConfig,
+) -> Result<PipelineResult, String> {
+    let duration_seconds = get_audio_duration(audio_path);
+
+    // Run core transcription pipeline (transcribe + filter + enhance)
+    let output = run_transcription_pipeline(app, audio_path, config).await?;
+
     // 4. Output (clipboard/paste)
     // Apply paragraph formatting for output only (not stored in database)
-    let mut output_text = transcription::filter::format_paragraphs(&text);
+    let mut output_text = transcription::filter::format_paragraphs(&output.text);
 
     // Append a trailing space after terminal punctuation so consecutive
     // transcriptions don't run together when inserted at the cursor.
@@ -505,7 +539,8 @@ async fn process_audio(
     if config.auto_copy {
         tracing::debug!("Pipeline: Copying to clipboard...");
         if let Err(e) =
-            clipboard::copy_transcription(app.clone(), output_text.clone(), is_enhanced).await
+            clipboard::copy_transcription(app.clone(), output_text.clone(), output.is_enhanced)
+                .await
         {
             tracing::warn!("Pipeline: Failed to copy to clipboard: {}", e);
         } else {
@@ -533,42 +568,42 @@ async fn process_audio(
     // 5. Save to history
     tracing::info!("Pipeline: Saving to history...");
     let transcription_id = save_to_history(
-        &text,
-        &raw_text,
+        &output.text,
+        &output.raw_text,
         duration_seconds,
         audio_path,
-        is_enhanced,
-        if is_enhanced {
+        output.is_enhanced,
+        if output.is_enhanced {
             Some(&config.enhancement_prompt)
         } else {
             None
         },
-        transcription_model_name.as_deref(),
-        Some(transcription_duration_seconds),
-        enhancement_model_name.as_deref(),
-        enhancement_duration_seconds,
+        output.transcription_model_name.as_deref(),
+        Some(output.transcription_duration_seconds),
+        output.enhancement_model_name.as_deref(),
+        output.enhancement_duration_seconds,
     );
     tracing::info!("Pipeline: Saved to history, id={:?}", transcription_id);
 
     // Update tray with latest transcription
-    tray::set_last_transcription(app, Some(text.clone()));
+    tray::set_last_transcription(app, Some(output.text.clone()));
 
     tracing::info!("Pipeline: Processing complete, emitting Completed state");
     emit_progress(app, PipelineState::Completed, "Done");
 
     Ok(PipelineResult {
         success: true,
-        text,
-        raw_text,
-        is_enhanced,
+        text: output.text,
+        raw_text: output.raw_text,
+        is_enhanced: output.is_enhanced,
         duration_seconds,
         audio_path: Some(audio_path.to_string()),
         error: None,
         transcription_id,
-        transcription_model_name,
-        transcription_duration_seconds: Some(transcription_duration_seconds),
-        enhancement_model_name,
-        enhancement_duration_seconds,
+        transcription_model_name: output.transcription_model_name,
+        transcription_duration_seconds: Some(output.transcription_duration_seconds),
+        enhancement_model_name: output.enhancement_model_name,
+        enhancement_duration_seconds: output.enhancement_duration_seconds,
     })
 }
 
@@ -774,6 +809,117 @@ pub async fn pipeline_transcribe_file(
     }
 
     result
+}
+
+/// Re-transcribe an existing history record using the current model.
+///
+/// Looks up the audio file from the DB record, re-runs the transcription
+/// pipeline, and updates the record in place. Does not copy/paste output.
+#[tauri::command]
+pub async fn pipeline_retranscribe(
+    app: AppHandle,
+    transcription_id: String,
+    config: Option<PipelineConfig>,
+) -> Result<PipelineResult, String> {
+    tracing::info!(
+        "Pipeline: retranscribe called for id={}",
+        transcription_id
+    );
+
+    // Look up the existing record from the database
+    let existing = database::transcription::get_transcription(&transcription_id)
+        .map_err(|e| format!("Failed to read transcription: {}", e))?
+        .ok_or_else(|| format!("Transcription '{}' not found", transcription_id))?;
+
+    let audio_path = existing
+        .audio_path
+        .as_deref()
+        .ok_or("This transcription has no associated audio file")?;
+
+    // Check the file still exists on disk
+    if !std::path::Path::new(audio_path).exists() {
+        return Err(
+            "Audio file no longer available. It may have been deleted via Storage cleanup."
+                .to_string(),
+        );
+    }
+
+    if PIPELINE_RUNNING.swap(true, Ordering::SeqCst) {
+        return Err("Pipeline is already running".to_string());
+    }
+
+    // RAII guard ensures PIPELINE_RUNNING is reset even on early return
+    let _guard = PipelineGuard;
+
+    // Ensure model is loaded
+    if !transcription::is_transcription_ready() {
+        if !transcription::download::check_model_downloaded(None) {
+            return Err(
+                "No transcription model downloaded. Open Settings \u{2192} Models to get started."
+                    .to_string(),
+            );
+        }
+        tracing::info!("Pipeline: Model not loaded, starting eager background load for retranscribe");
+        std::thread::spawn(|| {
+            transcription::warmup_transcription();
+        });
+    }
+
+    // Build config with output disabled (retranscribe from history, not at cursor)
+    let mut config = config.unwrap_or_default();
+    config.auto_copy = false;
+    config.auto_paste = false;
+
+    // Run the core transcription pipeline
+    let output = run_transcription_pipeline(&app, audio_path, &config).await?;
+
+    // Read-modify-write: update only the fields that changed
+    let mut updated = existing;
+    updated.text = output.text.clone();
+    updated.raw_text = if output.is_enhanced {
+        Some(output.raw_text.clone())
+    } else {
+        None
+    };
+    updated.is_enhanced = output.is_enhanced;
+    updated.enhancement_prompt = if output.is_enhanced {
+        Some(config.enhancement_prompt.clone())
+    } else {
+        None
+    };
+    updated.transcription_model_name = output.transcription_model_name.clone();
+    updated.transcription_duration_seconds = Some(output.transcription_duration_seconds);
+    updated.enhancement_model_name = output.enhancement_model_name.clone();
+    updated.enhancement_duration_seconds = output.enhancement_duration_seconds;
+
+    // Persist to database
+    database::transcription::update_transcription(&updated)
+        .map_err(|e| format!("Failed to update transcription: {}", e))?;
+
+    tracing::info!("Pipeline: Retranscribed and updated id={}", updated.id);
+
+    emit_progress(&app, PipelineState::Completed, "Done");
+
+    let result = PipelineResult {
+        success: true,
+        text: output.text,
+        raw_text: output.raw_text,
+        is_enhanced: output.is_enhanced,
+        duration_seconds: updated.duration_seconds,
+        audio_path: updated.audio_path,
+        error: None,
+        transcription_id: Some(updated.id),
+        transcription_model_name: output.transcription_model_name,
+        transcription_duration_seconds: Some(output.transcription_duration_seconds),
+        enhancement_model_name: output.enhancement_model_name,
+        enhancement_duration_seconds: output.enhancement_duration_seconds,
+    };
+
+    if let Err(e) = app.emit("pipeline-complete", &result) {
+        tracing::error!("Pipeline: Failed to emit pipeline-complete: {}", e);
+    }
+
+    Ok(result)
 }
 
 /// Emit a pipeline progress event
