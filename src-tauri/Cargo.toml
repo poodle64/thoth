@@ -39,7 +39,7 @@ sherpa-rs = { version = "0.6", features = ["static", "download-binaries"], optio
 # fluidaudio-rs: Apple Neural Engine backend via CoreML (macOS-only, Apple Silicon)
 # Optional: enable with --features fluidaudio
 # Uses forked version with platform guards so it compiles as a no-op on Linux/Windows
-fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", rev = "547b1b4", optional = true }
+fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", rev = "97aaf88", optional = true }
 
 # AI Enhancement and Model Downloads
 reqwest = { version = "0.12", features = ["json", "stream"] }
