@@ -103,40 +103,35 @@
   }
 
   async function handleShortcutChange(shortcut: ShortcutInfo, newAccelerator: string) {
-    const result = await shortcutsStore.update(shortcut.id, newAccelerator);
-    if (!result.success) {
-      console.error('Failed to update shortcut:', result.error);
-      return;
-    }
-    // Persist to config
+    // Update in-memory config, then save directly via set_shortcut_config
+    // which bypasses the preservation logic in set_config. This ensures
+    // the shortcut value is saved even when it matches the default.
+    // exit_capture_mode (called by ShortcutInput.stopCapture) will then
+    // re-register all shortcuts from the saved config.
     updateShortcutConfig(shortcut.id, newAccelerator);
-    await configStore.save();
+    await saveShortcutConfig();
+
+    // Reload registered shortcuts after the capture cycle completes.
+    // onchange fires before stopCapture/exit_capture_mode, so we defer
+    // the reload to run after the full async chain finishes.
+    setTimeout(() => shortcutsStore.loadRegistered(), 100);
   }
 
   async function handleShortcutClear(shortcut: ShortcutInfo) {
-    if (shortcut.isEnabled) {
-      const result = await shortcutsStore.unregister(shortcut.id);
-      if (!result.success) {
-        console.error('Failed to unregister shortcut:', result.error);
-        return;
-      }
-    }
-    // Clear from config
+    // Clear from config using bypass, then re-register all shortcuts
     updateShortcutConfig(shortcut.id, null);
-    await configStore.save();
+    await saveShortcutConfig();
+    await reRegisterShortcuts();
   }
 
   async function handleShortcutReset(shortcut: ShortcutInfo) {
-    const result = await shortcutsStore.resetToDefault(shortcut.id);
-    if (!result.success) {
-      console.error('Failed to reset shortcut:', result.error);
-      return;
-    }
-    // Persist default to config
+    // Reset to default value using bypass (important: preservation logic in
+    // set_config would block this since the incoming value matches the default)
     const defaultAcc = getDefaultAccelerator(shortcut.id);
     if (defaultAcc) {
       updateShortcutConfig(shortcut.id, defaultAcc);
-      await configStore.save();
+      await saveShortcutConfig();
+      await reRegisterShortcuts();
     }
   }
 
@@ -155,13 +150,46 @@
     }
   }
 
+  /**
+   * Save shortcut config directly via the bypass IPC command.
+   * This avoids the preservation logic in set_config that would prevent
+   * resetting shortcuts back to their default values.
+   */
+  async function saveShortcutConfig(): Promise<void> {
+    try {
+      await invoke('set_shortcut_config', {
+        shortcuts: {
+          toggle_recording: configStore.shortcuts.toggleRecording,
+          toggle_recording_alt: configStore.shortcuts.toggleRecordingAlt,
+          copy_last: configStore.shortcuts.copyLast,
+          recording_mode: configStore.shortcuts.recordingMode,
+        },
+      });
+    } catch (e) {
+      console.error('Failed to save shortcut config:', e);
+    }
+  }
+
+  /**
+   * Unregister all shortcuts and re-register from saved config.
+   * Used after clear/reset operations that change config outside of capture mode.
+   */
+  async function reRegisterShortcuts(): Promise<void> {
+    try {
+      await invoke('reregister_shortcuts');
+      await shortcutsStore.loadRegistered();
+    } catch (e) {
+      console.error('Failed to re-register shortcuts:', e);
+    }
+  }
+
   function handleFilterChange(_options: FilterOptions) {
     // Filter change handler - options are passed to HistoryList component
   }
 
   async function handleRecordingModeChange(mode: RecordingMode) {
     configStore.updateShortcuts('recordingMode', mode);
-    await configStore.save();
+    await saveShortcutConfig();
 
     const isPttEnabled = mode === 'push_to_talk';
     try {

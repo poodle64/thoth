@@ -130,7 +130,7 @@ impl Default for ShortcutConfig {
     fn default() -> Self {
         Self {
             toggle_recording: "F13".to_string(),
-            toggle_recording_alt: Some("CommandOrControl+Shift+Space".to_string()),
+            toggle_recording_alt: Some("ShiftRight".to_string()),
             copy_last: Some("F14".to_string()),
             recording_mode: RecordingMode::default(),
         }
@@ -301,8 +301,9 @@ fn save_to_disk(config: &Config) -> Result<(), String> {
     fs::write(&path, contents).map_err(|e| format!("Failed to write config file: {}", e))?;
 
     tracing::info!(
-        "Config saved to disk: device_id={:?}",
-        config.audio.device_id
+        "Config saved to disk: device_id={:?}, toggle_recording_alt={:?}",
+        config.audio.device_id,
+        config.shortcuts.toggle_recording_alt
     );
     Ok(())
 }
@@ -351,8 +352,9 @@ fn get_config_instance() -> &'static RwLock<Config> {
             Config::default()
         });
         tracing::info!(
-            "Config loaded from disk: device_id={:?}",
-            config.audio.device_id
+            "Config loaded from disk: device_id={:?}, toggle_recording_alt={:?}",
+            config.audio.device_id,
+            config.shortcuts.toggle_recording_alt
         );
         RwLock::new(config)
     })
@@ -408,6 +410,20 @@ pub fn set_config(mut config: Config) -> Result<(), String> {
             );
             config.enhancement.prompt_id = current.enhancement.prompt_id.clone();
         }
+
+        // Preserve toggle_recording_alt if the incoming config has the default but
+        // the cached config has a user-chosen value (e.g. "ShiftRight"). This prevents
+        // unrelated config saves from overwriting the user's shortcut preference.
+        let default_shortcuts = ShortcutConfig::default();
+        if config.shortcuts.toggle_recording_alt == default_shortcuts.toggle_recording_alt
+            && current.shortcuts.toggle_recording_alt != default_shortcuts.toggle_recording_alt
+        {
+            tracing::debug!(
+                "Preserving toggle_recording_alt={:?} (incoming config had default)",
+                current.shortcuts.toggle_recording_alt
+            );
+            config.shortcuts.toggle_recording_alt = current.shortcuts.toggle_recording_alt.clone();
+        }
     }
 
     // Save to disk first
@@ -418,8 +434,9 @@ pub fn set_config(mut config: Config) -> Result<(), String> {
     *cached = config;
 
     tracing::info!(
-        "Configuration updated (device_id: {:?})",
-        cached.audio.device_id
+        "Configuration updated (device_id: {:?}, toggle_recording_alt: {:?})",
+        cached.audio.device_id,
+        cached.shortcuts.toggle_recording_alt
     );
     Ok(())
 }
@@ -453,6 +470,24 @@ pub fn set_prompt_config(prompt_id: String) -> Result<(), String> {
     tracing::info!(
         "Prompt config updated (prompt_id: {:?})",
         cached.enhancement.prompt_id
+    );
+    Ok(())
+}
+
+/// Set shortcut config directly, bypassing set_config's preservation logic.
+///
+/// Used by the Settings UI when intentionally changing shortcuts. The
+/// preservation logic in `set_config` prevents unrelated config saves from
+/// overwriting shortcuts, but would also block intentional changes (e.g.
+/// resetting a shortcut back to its default value).
+#[tauri::command]
+pub fn set_shortcut_config(shortcuts: ShortcutConfig) -> Result<(), String> {
+    let mut cached = get_config_instance().write();
+    cached.shortcuts = shortcuts;
+    save_to_disk(&cached)?;
+    tracing::info!(
+        "Shortcut config updated directly (toggle_recording_alt: {:?})",
+        cached.shortcuts.toggle_recording_alt
     );
     Ok(())
 }
@@ -535,7 +570,7 @@ mod tests {
         assert_eq!(shortcuts.toggle_recording, "F13");
         assert_eq!(
             shortcuts.toggle_recording_alt,
-            Some("CommandOrControl+Shift+Space".to_string())
+            Some("ShiftRight".to_string())
         );
         assert_eq!(shortcuts.copy_last, Some("F14".to_string()));
         assert_eq!(shortcuts.recording_mode, RecordingMode::Toggle);
