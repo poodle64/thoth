@@ -5,6 +5,8 @@
 
 pub mod download;
 pub mod filter;
+#[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+pub mod fluidaudio;
 pub mod manifest;
 #[cfg(feature = "parakeet")]
 pub mod parakeet;
@@ -24,6 +26,8 @@ pub enum TranscriptionBackend {
     Whisper,
     /// Sherpa-ONNX with Parakeet models (fallback)
     Parakeet,
+    /// FluidAudio with Apple Neural Engine via CoreML (fastest on Apple Silicon)
+    FluidAudio,
 }
 
 impl Default for TranscriptionBackend {
@@ -38,6 +42,8 @@ pub enum TranscriptionService {
     Whisper(whisper::WhisperTranscriptionService),
     #[cfg(feature = "parakeet")]
     Parakeet(parakeet::TranscriptionService),
+    #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+    FluidAudio(fluidaudio::TranscriptionService),
 }
 
 impl TranscriptionService {
@@ -54,12 +60,21 @@ impl TranscriptionService {
         Ok(Self::Parakeet(service))
     }
 
+    /// Create a new transcription service with the FluidAudio backend (Apple Neural Engine)
+    #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+    pub fn new_fluidaudio() -> anyhow::Result<Self> {
+        let service = fluidaudio::TranscriptionService::new()?;
+        Ok(Self::FluidAudio(service))
+    }
+
     /// Transcribe audio from a WAV file
     pub fn transcribe(&mut self, audio_path: &std::path::Path) -> anyhow::Result<String> {
         match self {
             Self::Whisper(service) => service.transcribe(audio_path),
             #[cfg(feature = "parakeet")]
             Self::Parakeet(service) => service.transcribe(audio_path),
+            #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+            Self::FluidAudio(service) => service.transcribe(audio_path),
         }
     }
 
@@ -69,6 +84,8 @@ impl TranscriptionService {
             Self::Whisper(_) => TranscriptionBackend::Whisper,
             #[cfg(feature = "parakeet")]
             Self::Parakeet(_) => TranscriptionBackend::Parakeet,
+            #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+            Self::FluidAudio(_) => TranscriptionBackend::FluidAudio,
         }
     }
 }
@@ -110,6 +127,30 @@ pub fn init_parakeet_transcription(_model_dir: String) -> Result<(), String> {
 
     #[cfg(not(feature = "parakeet"))]
     Err("Parakeet backend not available in this build".to_string())
+}
+
+/// Initialise the transcription service with FluidAudio backend (Apple Neural Engine)
+#[tauri::command]
+pub fn init_fluidaudio_transcription() -> Result<(), String> {
+    #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+    {
+        let service =
+            TranscriptionService::new_fluidaudio().map_err(|e| e.to_string())?;
+
+        let mut guard = get_service().lock();
+        *guard = Some(service);
+
+        // Write sentinel marker so check_model_downloaded() returns true
+        if let Err(e) = fluidaudio::write_ready_marker() {
+            tracing::warn!("Failed to write FluidAudio ready marker: {}", e);
+        }
+
+        tracing::info!("FluidAudio transcription service initialised (Neural Engine)");
+        return Ok(());
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
+    Err("FluidAudio backend not available in this build".to_string())
 }
 
 /// Initialise the transcription service (auto-detect best backend)
@@ -272,6 +313,54 @@ fn audio_has_speech(path: &std::path::Path) -> Result<bool, String> {
 /// Eagerly initialise the transcription model in the background.
 /// Triggers Metal shader compilation so the first recording is instant.
 pub fn warmup_transcription() {
+    let selected_id = crate::config::get_config()
+        .ok()
+        .and_then(|c| c.transcription.model_id.clone());
+
+    let fallback = manifest::get_fallback_manifest();
+
+    // Check if the selected model is FluidAudio
+    let selected_model_type = selected_id.as_ref().and_then(|id| {
+        fallback
+            .models
+            .iter()
+            .find(|m| m.id == *id)
+            .map(|m| m.model_type.as_str())
+    });
+
+    // FluidAudio warmup: only attempt if backend available AND models are cached
+    #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+    if selected_model_type == Some("fluidaudio_coreml") {
+        if fluidaudio::is_cached() {
+            match init_fluidaudio_transcription() {
+                Ok(()) => {
+                    tracing::info!("FluidAudio transcription model warmed up (Neural Engine)");
+                    return;
+                }
+                Err(e) => {
+                    tracing::warn!("FluidAudio warmup failed: {}, falling back", e);
+                }
+            }
+        } else {
+            tracing::info!(
+                "FluidAudio models not yet cached, skipping warmup \
+                 (user must initialise via Model Manager first)"
+            );
+        }
+        // Fall through to try Whisper fallback
+    }
+
+    // For FluidAudio without the feature, fall back to Whisper
+    #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
+    if selected_model_type == Some("fluidaudio_coreml") {
+        tracing::warn!(
+            "Selected model requires FluidAudio backend (not available), \
+             falling back to recommended Whisper model"
+        );
+        warmup_whisper_fallback(&fallback);
+        return;
+    }
+
     let model_dir = get_model_directory();
     if !download::check_model_downloaded(None) {
         tracing::info!("No model downloaded yet, skipping warmup");
@@ -284,45 +373,39 @@ pub fn warmup_transcription() {
 
             // If the selected model's backend is unavailable (e.g. Parakeet without
             // the feature enabled), fall back to the recommended Whisper model.
-            let selected_id = crate::config::get_config()
-                .ok()
-                .and_then(|c| c.transcription.model_id.clone());
+            let is_unavailable_backend = selected_model_type
+                .map(|t| !manifest::is_backend_available(t))
+                .unwrap_or(false);
 
-            if let Some(ref id) = selected_id {
-                let fallback = manifest::get_fallback_manifest();
-                let is_parakeet = fallback
-                    .models
-                    .iter()
-                    .find(|m| m.id == *id)
-                    .map(|m| m.model_type == "nemo_transducer")
-                    .unwrap_or(false);
-
-                if is_parakeet && !manifest::is_backend_available("nemo_transducer") {
+            if is_unavailable_backend {
+                if let Some(ref id) = selected_id {
                     tracing::warn!(
-                        "Selected model '{}' requires Parakeet backend (not available), \
+                        "Selected model '{}' backend not available, \
                          falling back to recommended Whisper model",
                         id
                     );
+                }
+                warmup_whisper_fallback(&fallback);
+            }
+        }
+    }
+}
 
-                    // Find the recommended whisper model and try that instead
-                    if let Some(whisper_model) = fallback.models.iter().find(|m| {
-                        m.model_type == "whisper_ggml" && m.recommended
-                    }) {
-                        let whisper_dir = manifest::get_model_directory(&whisper_model.id);
-                        if manifest::is_model_downloaded(whisper_model) {
-                            match init_transcription(whisper_dir.to_string_lossy().to_string()) {
-                                Ok(()) => {
-                                    tracing::info!(
-                                        "Fell back to Whisper model '{}'",
-                                        whisper_model.id
-                                    );
-                                }
-                                Err(e2) => {
-                                    tracing::warn!("Whisper fallback also failed: {}", e2);
-                                }
-                            }
-                        }
-                    }
+/// Fall back to the recommended Whisper model during warmup
+fn warmup_whisper_fallback(manifest: &manifest::ModelManifest) {
+    if let Some(whisper_model) = manifest
+        .models
+        .iter()
+        .find(|m| m.model_type == "whisper_ggml" && m.recommended)
+    {
+        let whisper_dir = manifest::get_model_directory(&whisper_model.id);
+        if manifest::is_model_downloaded(whisper_model) {
+            match init_transcription(whisper_dir.to_string_lossy().to_string()) {
+                Ok(()) => {
+                    tracing::info!("Fell back to Whisper model '{}'", whisper_model.id);
+                }
+                Err(e2) => {
+                    tracing::warn!("Whisper fallback also failed: {}", e2);
                 }
             }
         }
@@ -341,6 +424,7 @@ pub fn get_transcription_backend() -> Option<String> {
     get_service().lock().as_ref().map(|s| match s.backend() {
         TranscriptionBackend::Whisper => "whisper".to_string(),
         TranscriptionBackend::Parakeet => "parakeet".to_string(),
+        TranscriptionBackend::FluidAudio => "fluidaudio".to_string(),
     })
 }
 
@@ -414,4 +498,21 @@ pub fn set_selected_model_id(model_id: Option<String>) -> Result<(), String> {
 #[tauri::command]
 pub fn is_parakeet_available() -> bool {
     cfg!(feature = "parakeet")
+}
+
+/// Check if the FluidAudio (Apple Neural Engine) backend is available in this build
+#[tauri::command]
+pub fn is_fluidaudio_available() -> bool {
+    cfg!(all(target_os = "macos", feature = "fluidaudio"))
+}
+
+/// Check if FluidAudio models are cached (fast init possible)
+#[tauri::command]
+pub fn is_fluidaudio_cached() -> bool {
+    #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+    {
+        return fluidaudio::is_cached();
+    }
+    #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
+    false
 }

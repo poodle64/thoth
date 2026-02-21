@@ -306,6 +306,7 @@ pub fn is_backend_available(model_type: &str) -> bool {
     match model_type {
         "whisper_ggml" => true,
         "nemo_transducer" => cfg!(feature = "parakeet"),
+        "fluidaudio_coreml" => cfg!(all(target_os = "macos", feature = "fluidaudio")),
         _ => false,
     }
 }
@@ -323,6 +324,26 @@ pub fn to_model_info(remote: &RemoteModelInfo, selected_id: Option<&str>) -> Mod
         .map(|id| id == remote.id)
         .unwrap_or(remote.recommended);
 
+    // For FluidAudio models, show the actual cache directory
+    let path = if remote.model_type == "fluidaudio_coreml" {
+        #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+        {
+            super::fluidaudio::model_cache_directory()
+                .to_string_lossy()
+                .to_string()
+        }
+        #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
+        {
+            get_model_directory(&remote.id)
+                .to_string_lossy()
+                .to_string()
+        }
+    } else {
+        get_model_directory(&remote.id)
+            .to_string_lossy()
+            .to_string()
+    };
+
     ModelInfo {
         id: remote.id.clone(),
         name: remote.name.clone(),
@@ -330,9 +351,7 @@ pub fn to_model_info(remote: &RemoteModelInfo, selected_id: Option<&str>) -> Mod
         version: remote.version.clone(),
         size_mb: (remote.download_size / (1024 * 1024)) as u32,
         downloaded,
-        path: get_model_directory(&remote.id)
-            .to_string_lossy()
-            .to_string(),
+        path,
         disk_size,
         recommended: remote.recommended,
         languages: remote.languages.clone(),
@@ -412,8 +431,8 @@ mod tests {
     #[test]
     fn test_fallback_manifest() {
         let manifest = get_fallback_manifest();
-        assert_eq!(manifest.version, 7);
-        assert_eq!(manifest.models.len(), 5);
+        assert_eq!(manifest.version, 8);
+        assert_eq!(manifest.models.len(), 6);
 
         let model = &manifest.models[0];
         assert_eq!(model.id, "ggml-large-v3-turbo");
@@ -431,6 +450,20 @@ mod tests {
         assert_eq!(parakeet_models.len(), 2);
         assert!(parakeet_models.iter().any(|m| m.id == "parakeet-tdt-0.6b-v2-int8"));
         assert!(parakeet_models.iter().any(|m| m.id == "parakeet-tdt-0.6b-v3-int8"));
+    }
+
+    #[test]
+    fn test_fluidaudio_model_in_manifest() {
+        let manifest = get_fallback_manifest();
+        let fa_model = manifest
+            .models
+            .iter()
+            .find(|m| m.model_type == "fluidaudio_coreml");
+        assert!(fa_model.is_some(), "FluidAudio model should be in manifest");
+        let fa = fa_model.unwrap();
+        assert_eq!(fa.id, "fluidaudio-parakeet-tdt-coreml");
+        assert_eq!(fa.required_files, vec![".fluidaudio_ready"]);
+        assert!(!fa.recommended);
     }
 
     #[test]

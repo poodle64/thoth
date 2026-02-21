@@ -176,6 +176,54 @@ pub async fn download_model(app: AppHandle, model_id: Option<String>) -> Result<
         .cloned()
         .ok_or_else(|| format!("Model not found: {}", model_id))?;
 
+    // FluidAudio models: init_asr() handles download + CoreML compilation
+    if model.model_type == "fluidaudio_coreml" {
+        {
+            let mut state = get_download_state().lock();
+            *state = DownloadState::Downloading;
+        }
+
+        emit_progress(
+            &app,
+            DownloadProgress {
+                current_file: model.name.clone(),
+                bytes_downloaded: 0,
+                total_bytes: Some(model.download_size),
+                percentage: 0.0,
+                status: "Initialising FluidAudio (downloading CoreML models on first run)..."
+                    .to_string(),
+            },
+        );
+
+        let result = tokio::task::spawn_blocking(|| {
+            super::init_fluidaudio_transcription()
+        })
+        .await
+        .map_err(|e| format!("FluidAudio init task panicked: {}", e))?;
+
+        match result {
+            Ok(()) => {
+                {
+                    let mut state = get_download_state().lock();
+                    *state = DownloadState::Completed;
+                }
+                app.emit("model-download-complete", &model_id)
+                    .map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                {
+                    let mut state = get_download_state().lock();
+                    *state = DownloadState::Failed(error_msg.clone());
+                }
+                app.emit("model-download-error", &error_msg)
+                    .map_err(|e| e.to_string())?;
+                return Err(error_msg);
+            }
+        }
+    }
+
     // Update state to downloading
     {
         let mut state = get_download_state().lock();
@@ -711,6 +759,37 @@ pub fn delete_model(model_id: Option<String>) -> Result<(), String> {
         .iter()
         .find(|m| m.id == model_id)
         .ok_or_else(|| format!("Model not found: {}", model_id))?;
+
+    // FluidAudio: remove the sentinel marker (actual models live in FluidAudio's cache)
+    if model.model_type == "fluidaudio_coreml" {
+        #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+        {
+            super::fluidaudio::remove_ready_marker()
+                .map_err(|e| format!("Failed to remove FluidAudio marker: {}", e))?;
+        }
+        #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
+        {
+            // Without the feature, just remove the marker file directly
+            let marker = get_model_directory(&model_id).join(".fluidaudio_ready");
+            if marker.exists() {
+                std::fs::remove_file(&marker)
+                    .map_err(|e| format!("Failed to remove marker: {}", e))?;
+            }
+        }
+
+        // Reset download state
+        {
+            let mut state = get_download_state().lock();
+            *state = DownloadState::Idle;
+        }
+
+        tracing::info!(
+            "FluidAudio marker removed. CoreML cache remains at \
+             ~/Library/Application Support/FluidAudio/Models/ — \
+             delete manually to reclaim ~500 MB."
+        );
+        return Ok(());
+    }
 
     let model_dir = get_model_directory(&model_id);
 
