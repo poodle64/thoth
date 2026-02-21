@@ -124,6 +124,10 @@ impl TranscriptionService {
             );
         }
 
+        // Trim leading/trailing silence for long recordings
+        let (trim_start, trim_end) = crate::audio::vad::trim_silence(&samples, sample_rate);
+        let samples = samples[trim_start..trim_end].to_vec();
+
         if sample_rate != 16000 {
             tracing::warn!(
                 "Audio sample rate is {}Hz, expected 16000Hz. Results may be affected.",

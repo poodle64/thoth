@@ -436,6 +436,125 @@ impl VoiceActivityDetector {
     }
 }
 
+/// Minimum recording duration (in samples) before silence trimming is applied.
+/// For shorter recordings the VAD overhead isn't worth it.
+/// 20 seconds × 16 000 Hz = 320 000 samples.
+const TRIM_MIN_SAMPLES_16KHZ: usize = 320_000;
+
+/// Safety margin (in seconds) kept around detected speech boundaries so we
+/// don't clip into the start or end of an utterance.
+const TRIM_MARGIN_SECS: f32 = 0.2;
+
+/// Trim leading and trailing silence from audio samples using VAD.
+///
+/// For recordings shorter than ~20 seconds (at the given sample rate) the
+/// original slice is returned unchanged because the VAD overhead is not worth
+/// the saving.
+///
+/// The function runs a single-pass VAD scan over the audio, locates the first
+/// and last speech frames, and returns a sub-slice that keeps a small margin
+/// (200 ms) around the detected speech boundaries.
+///
+/// # Arguments
+/// * `samples` — mono f32 audio samples normalised to [-1.0, 1.0]
+/// * `sample_rate` — sample rate in Hz (typically 16 000)
+///
+/// # Returns
+/// A `(start, end)` range into `samples`. Callers should use `samples[start..end]`.
+/// If no speech is detected the full range `(0, samples.len())` is returned so
+/// the downstream silence check can decide what to do.
+pub fn trim_silence(samples: &[f32], sample_rate: u32) -> (usize, usize) {
+    let total = samples.len();
+
+    // Scale threshold proportionally for non-16 kHz audio
+    let threshold = (TRIM_MIN_SAMPLES_16KHZ as f64 * sample_rate as f64 / 16_000.0) as usize;
+    if total < threshold {
+        return (0, total);
+    }
+
+    // Use a lightweight VAD config (30 ms frames, aggressive mode, minimal
+    // start/end thresholds so we detect the *outermost* speech edges).
+    let frame_dur = VadFrameDuration::Ms30;
+    let frame_size = frame_dur.samples_at_16khz();
+
+    // If the audio isn't 16 kHz the frame size needs scaling.
+    let actual_frame_size = (frame_size as u64 * sample_rate as u64 / 16_000) as usize;
+    if actual_frame_size == 0 {
+        return (0, total);
+    }
+
+    // webrtc-vad only accepts 16 kHz sample rate, so we need to work with
+    // 16 kHz-sized frames.  When the input is already 16 kHz we can use the
+    // frames directly; otherwise we do a cheap decimation/interpolation per
+    // frame.  For the purpose of *detecting* speech boundaries a rough
+    // resample is perfectly adequate.
+    let need_resample = sample_rate != 16_000;
+
+    let mut vad = Vad::new_with_rate_and_mode(SampleRate::Rate16kHz, VadMode::Aggressive);
+
+    let mut first_speech_frame: Option<usize> = None;
+    let mut last_speech_frame: Option<usize> = None;
+
+    let mut frame_idx: usize = 0;
+    let mut pos: usize = 0;
+
+    while pos + actual_frame_size <= total {
+        let frame_i16: Vec<i16> = if need_resample {
+            // Cheap linear resample of this frame to 16 kHz
+            (0..frame_size)
+                .map(|i| {
+                    let src = pos as f64 + i as f64 * actual_frame_size as f64 / frame_size as f64;
+                    let idx = src as usize;
+                    let s = if idx < total { samples[idx] } else { 0.0 };
+                    (s * 32767.0).clamp(-32768.0, 32767.0) as i16
+                })
+                .collect()
+        } else {
+            samples[pos..pos + frame_size]
+                .iter()
+                .map(|&s| (s * 32767.0).clamp(-32768.0, 32767.0) as i16)
+                .collect()
+        };
+
+        if let Ok(is_speech) = vad.is_voice_segment(&frame_i16) {
+            if is_speech {
+                if first_speech_frame.is_none() {
+                    first_speech_frame = Some(frame_idx);
+                }
+                last_speech_frame = Some(frame_idx);
+            }
+        }
+
+        frame_idx += 1;
+        pos += actual_frame_size;
+    }
+
+    // No speech found — return the full range so downstream silence detection
+    // can handle it (returning an empty range would silently discard audio).
+    let (first, last) = match (first_speech_frame, last_speech_frame) {
+        (Some(f), Some(l)) => (f, l),
+        _ => return (0, total),
+    };
+
+    let margin_samples = (TRIM_MARGIN_SECS * sample_rate as f32) as usize;
+
+    let start = (first * actual_frame_size).saturating_sub(margin_samples);
+    // End is one frame *past* the last speech frame, plus margin
+    let end = ((last + 1) * actual_frame_size + margin_samples).min(total);
+
+    let trimmed_duration = (end - start) as f32 / sample_rate as f32;
+    let original_duration = total as f32 / sample_rate as f32;
+    tracing::info!(
+        "VAD silence trim: {:.1}s → {:.1}s (removed {:.1}s leading + {:.1}s trailing)",
+        original_duration,
+        trimmed_duration,
+        start as f32 / sample_rate as f32,
+        (total - end) as f32 / sample_rate as f32,
+    );
+
+    (start, end)
+}
+
 /// Errors that can occur during VAD processing
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum VadError {
@@ -575,5 +694,73 @@ mod tests {
 
         assert!(status.enabled);
         assert_eq!(status.state, VadSpeechState::Silence);
+    }
+
+    #[test]
+    fn test_trim_silence_short_recording_unchanged() {
+        // 10 seconds at 16 kHz — below the 20-second threshold
+        let samples = vec![0.0f32; 160_000];
+        let (start, end) = trim_silence(&samples, 16_000);
+        assert_eq!(start, 0);
+        assert_eq!(end, samples.len());
+    }
+
+    #[test]
+    fn test_trim_silence_all_silence_returns_full_range() {
+        // 30 seconds of silence at 16 kHz — above threshold but no speech
+        let samples = vec![0.0f32; 480_000];
+        let (start, end) = trim_silence(&samples, 16_000);
+        // No speech detected → returns full range
+        assert_eq!(start, 0);
+        assert_eq!(end, samples.len());
+    }
+
+    #[test]
+    fn test_trim_silence_trims_leading_and_trailing() {
+        // 30 seconds at 16 kHz: silence, then speech-like noise, then silence
+        let sample_rate = 16_000u32;
+        let total_samples = 30 * sample_rate as usize; // 480_000
+        let mut samples = vec![0.0f32; total_samples];
+
+        // Put loud noise (simulating speech) from 10s to 20s
+        let speech_start = 10 * sample_rate as usize; // 160_000
+        let speech_end = 20 * sample_rate as usize; // 320_000
+        for i in speech_start..speech_end {
+            // Generate a tone that VAD will detect as speech
+            let t = i as f32 / sample_rate as f32;
+            samples[i] = (t * 440.0 * 2.0 * std::f32::consts::PI).sin() * 0.5;
+        }
+
+        let (start, end) = trim_silence(&samples, sample_rate);
+
+        // The trimmed region should be smaller than the original
+        assert!(start > 0, "Should trim leading silence");
+        assert!(end < total_samples, "Should trim trailing silence");
+
+        // The speech region (10s-20s) should be fully contained
+        let margin = (TRIM_MARGIN_SECS * sample_rate as f32) as usize;
+        assert!(
+            start <= speech_start + margin,
+            "Trim start ({start}) should be at or before speech start + margin ({})",
+            speech_start + margin
+        );
+        assert!(
+            end >= speech_end.saturating_sub(margin),
+            "Trim end ({end}) should be at or after speech end - margin ({})",
+            speech_end.saturating_sub(margin)
+        );
+    }
+
+    #[test]
+    fn test_trim_silence_non_16khz() {
+        // 30 seconds at 48 kHz — tests the proportional threshold scaling
+        let sample_rate = 48_000u32;
+        let total_samples = 30 * sample_rate as usize;
+        let samples = vec![0.0f32; total_samples];
+
+        // Should not panic and should return full range (all silence)
+        let (start, end) = trim_silence(&samples, sample_rate);
+        assert_eq!(start, 0);
+        assert_eq!(end, samples.len());
     }
 }

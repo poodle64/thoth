@@ -138,6 +138,10 @@ impl WhisperTranscriptionService {
             );
         }
 
+        // Trim leading/trailing silence for long recordings
+        let (trim_start, trim_end) = crate::audio::vad::trim_silence(&samples, sample_rate);
+        let samples = samples[trim_start..trim_end].to_vec();
+
         // Resample if needed
         let samples = if sample_rate != 16000 {
             tracing::info!("Resampling from {}Hz to 16000Hz", sample_rate);
