@@ -53,7 +53,7 @@ jobs:
           owner: ${{ github.repository_owner }}
           ai_review_label: 'unlabelled'
           prompts_directory: '.github/prompts'
-          labels_to_prompts_mapping: 'unlabelled,issue-classification.prompt.yml'
+          labels_to_prompts_mapping: 'unlabelled,issue-classification.prompt.yaml'
           model: openai/gpt-4o-mini
           max_tokens: 200
           suppress_comments: 'true'
