@@ -799,7 +799,11 @@ fn handle_select_audio_device(app: &AppHandle, device_id: Option<String>) {
     rebuild_tray_menu(app);
 }
 
-/// Handle transcription model selection from the tray submenu
+/// Handle transcription model selection from the tray submenu.
+///
+/// Saves config and updates the tray tick immediately, then initialises the
+/// transcription backend on a background thread so the menu doesn't freeze
+/// (FluidAudio CoreML compilation can take 30-40 s on first use).
 fn handle_select_model(app: &AppHandle, model_id: String) {
     // Save selected model to config
     if let Err(e) = transcription::set_selected_model_id(Some(model_id.clone())) {
@@ -807,27 +811,36 @@ fn handle_select_model(app: &AppHandle, model_id: String) {
         return;
     }
 
-    // Re-initialise transcription backend with the new model
-    let manifest = transcription::manifest::get_fallback_manifest();
-    if let Some(model) = manifest.models.iter().find(|m| m.id == model_id) {
-        let init_result = if model.model_type == "fluidaudio_coreml" {
-            transcription::init_fluidaudio_transcription()
-        } else {
-            let model_dir = transcription::manifest::get_model_directory(&model_id);
-            transcription::init_transcription(model_dir.to_string_lossy().to_string())
-        };
-
-        match init_result {
-            Ok(()) => tracing::info!("Switched transcription model to: {}", model_id),
-            Err(e) => tracing::error!("Failed to initialise model '{}': {}", model_id, e),
-        }
-    }
-
     // Notify frontend so the Settings/Model Manager UI stays in sync
     let _ = app.emit("model-changed", &model_id);
 
-    // Rebuild tray menu to update checkmarks
+    // Rebuild tray menu immediately to show the new tick
     rebuild_tray_menu(app);
+
+    // Re-initialise transcription backend on a background thread
+    let app_handle = app.clone();
+    std::thread::spawn(move || {
+        let manifest = transcription::manifest::get_fallback_manifest();
+        if let Some(model) = manifest.models.iter().find(|m| m.id == model_id) {
+            let init_result = if model.model_type == "fluidaudio_coreml" {
+                transcription::init_fluidaudio_transcription()
+            } else {
+                let model_dir = transcription::manifest::get_model_directory(&model_id);
+                transcription::init_transcription(model_dir.to_string_lossy().to_string())
+            };
+
+            match init_result {
+                Ok(()) => {
+                    tracing::info!("Switched transcription model to: {}", model_id);
+                    let _ = app_handle.emit("model-ready", &model_id);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to initialise model '{}': {}", model_id, e);
+                    let _ = app_handle.emit("model-init-failed", &model_id);
+                }
+            }
+        }
+    });
 }
 
 /// Handle AI enhancement toggle from the tray submenu
