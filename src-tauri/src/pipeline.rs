@@ -482,6 +482,9 @@ async fn process_audio(
     };
 
     // 4. Output (clipboard/paste)
+    // Apply paragraph formatting for output only (not stored in database)
+    let output_text = transcription::filter::format_paragraphs(&text);
+
     tracing::info!(
         "Pipeline: Starting output (copy={}, paste={})",
         config.auto_copy,
@@ -491,7 +494,8 @@ async fn process_audio(
 
     if config.auto_copy {
         tracing::debug!("Pipeline: Copying to clipboard...");
-        if let Err(e) = clipboard::copy_transcription(app.clone(), text.clone(), is_enhanced).await
+        if let Err(e) =
+            clipboard::copy_transcription(app.clone(), output_text.clone(), is_enhanced).await
         {
             tracing::warn!("Pipeline: Failed to copy to clipboard: {}", e);
         } else {
@@ -504,9 +508,9 @@ async fn process_audio(
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         let insert_result = if config.insertion_method == "typing" {
-            crate::text_insert::insert_text_by_typing(text.clone(), None, None)
+            crate::text_insert::insert_text_by_typing(output_text.clone(), None, None)
         } else {
-            crate::text_insert::insert_text_by_paste(text.clone(), None)
+            crate::text_insert::insert_text_by_paste(output_text.clone(), None)
         };
 
         if let Err(e) = insert_result {

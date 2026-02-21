@@ -147,6 +147,52 @@ pub fn cleanup_punctuation(text: &str) -> String {
         .to_string()
 }
 
+/// Approximate word count threshold before paragraph breaks are inserted.
+const PARAGRAPH_WORD_THRESHOLD: usize = 50;
+
+/// Format long text into paragraphs by inserting double-newline breaks at
+/// sentence boundaries approximately every ~50 words.
+///
+/// Short texts (fewer than ~50 words) are returned unchanged.
+pub fn format_paragraphs(text: &str) -> String {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.len() < PARAGRAPH_WORD_THRESHOLD {
+        return text.to_string();
+    }
+
+    // Rebuild the text, inserting paragraph breaks at sentence-ending
+    // punctuation nearest to each ~50-word boundary.
+    let mut result = String::with_capacity(text.len() + 32);
+    let mut word_count: usize = 0;
+    let mut looking_for_break = false;
+
+    for (i, word) in words.iter().enumerate() {
+        if i > 0 {
+            if looking_for_break && ends_sentence(words[i - 1]) {
+                result.push_str("\n\n");
+                looking_for_break = false;
+                word_count = 0;
+            } else {
+                result.push(' ');
+            }
+        }
+
+        result.push_str(word);
+        word_count += 1;
+
+        if word_count >= PARAGRAPH_WORD_THRESHOLD && !looking_for_break {
+            looking_for_break = true;
+        }
+    }
+
+    result
+}
+
+/// Check whether a word ends with sentence-terminating punctuation.
+fn ends_sentence(word: &str) -> bool {
+    matches!(word.as_bytes().last(), Some(b'.' | b'?' | b'!'))
+}
+
 /// Apply sentence case (capitalise first letter of each sentence)
 pub fn apply_sentence_case(text: &str) -> String {
     SENTENCE_START_PATTERN
@@ -409,6 +455,112 @@ mod tests {
             apply_dictionary: false,
         });
         assert_eq!(filter.filter(""), "");
+    }
+
+    // Paragraph formatting tests
+
+    #[test]
+    fn test_format_paragraphs_short_text_unchanged() {
+        let text = "This is a short sentence. It has fewer than fifty words.";
+        assert_eq!(format_paragraphs(text), text);
+    }
+
+    #[test]
+    fn test_format_paragraphs_empty_string() {
+        assert_eq!(format_paragraphs(""), "");
+    }
+
+    #[test]
+    fn test_format_paragraphs_exactly_at_threshold() {
+        // Build a text with exactly 49 words (below threshold)
+        let words: Vec<&str> = (0..49).map(|_| "word").collect();
+        let text = words.join(" ");
+        assert_eq!(format_paragraphs(&text), text);
+    }
+
+    #[test]
+    fn test_format_paragraphs_inserts_break_at_sentence_boundary() {
+        // Build text: 50+ words with a sentence ending around word 50
+        let mut parts = Vec::new();
+        // First ~52 words ending in a period
+        for i in 0..52 {
+            if i == 51 {
+                parts.push("end.");
+            } else {
+                parts.push("word");
+            }
+        }
+        // More words after
+        for _ in 0..10 {
+            parts.push("more");
+        }
+        let text = parts.join(" ");
+        let result = format_paragraphs(&text);
+
+        assert!(
+            result.contains("\n\n"),
+            "Should contain paragraph break, got: {result}"
+        );
+        // The break should come after "end."
+        let break_pos = result.find("\n\n").unwrap();
+        let before_break = &result[..break_pos];
+        assert!(
+            before_break.ends_with("end."),
+            "Break should come after sentence-ending punctuation, before: '{before_break}'"
+        );
+    }
+
+    #[test]
+    fn test_format_paragraphs_no_sentence_boundary_no_break() {
+        // 60+ words with NO sentence-ending punctuation at all
+        let words: Vec<&str> = (0..70).map(|_| "word").collect();
+        let text = words.join(" ");
+        let result = format_paragraphs(&text);
+        // No sentence boundary → no break inserted
+        assert!(
+            !result.contains("\n\n"),
+            "Should not insert break without sentence boundary"
+        );
+    }
+
+    #[test]
+    fn test_format_paragraphs_multiple_breaks() {
+        // ~150 words with sentence boundaries at ~50 and ~100
+        let mut parts = Vec::new();
+        for i in 0..150 {
+            if i == 51 || i == 102 {
+                parts.push("stop.");
+            } else {
+                parts.push("word");
+            }
+        }
+        let text = parts.join(" ");
+        let result = format_paragraphs(&text);
+
+        let break_count = result.matches("\n\n").count();
+        assert!(
+            break_count >= 2,
+            "Should have at least 2 paragraph breaks for ~150 words, got {break_count}"
+        );
+    }
+
+    #[test]
+    fn test_format_paragraphs_question_and_exclamation() {
+        // Verify ? and ! also trigger paragraph breaks
+        let mut parts = Vec::new();
+        for i in 0..110 {
+            if i == 51 {
+                parts.push("right?");
+            } else if i == 103 {
+                parts.push("great!");
+            } else {
+                parts.push("word");
+            }
+        }
+        let text = parts.join(" ");
+        let result = format_paragraphs(&text);
+
+        assert!(result.contains("\n\n"), "Should break at ? or ! boundaries");
     }
 
     #[test]
