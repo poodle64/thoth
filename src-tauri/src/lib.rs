@@ -441,6 +441,7 @@ pub fn run() {
             pipeline::pipeline_start_recording,
             pipeline::pipeline_stop_and_process,
             pipeline::pipeline_transcribe_file,
+            pipeline::pipeline_retranscribe,
             pipeline::pipeline_cancel,
             pipeline::is_pipeline_running,
             pipeline::get_pipeline_state,

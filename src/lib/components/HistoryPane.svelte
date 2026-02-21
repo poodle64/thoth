@@ -13,6 +13,7 @@
    */
 
   import { onMount } from 'svelte';
+  import { invoke } from '@tauri-apps/api/core';
   import type { TranscriptionRecord } from '../stores/history.svelte';
   import { historyStore } from '../stores/history.svelte';
   import { toastStore } from '../stores/toast.svelte';
@@ -43,6 +44,7 @@
   let bulkDeleteConfirm = $state(false);
   let clearAllConfirm = $state(false);
   let bulkExportIds = $state<string[]>([]);
+  let retranscribingId = $state<string | null>(null);
 
   /** Whether we're in bulk selection mode */
   const bulkMode = $derived(bulkSelectedIds.size > 0);
@@ -198,6 +200,48 @@
   function handleDeleteSelected() {
     if (historyStore.selectedRecord) {
       handleDeleteRequest(historyStore.selectedRecord);
+    }
+  }
+
+  /** Handle retranscribe from detail view */
+  async function handleRetranscribe() {
+    const selected = historyStore.selectedRecord;
+    if (!selected?.audioPath || retranscribingId) return;
+
+    const id = selected.id;
+    retranscribingId = id;
+
+    try {
+      const result = await invoke<{
+        success: boolean;
+        text: string;
+        rawText: string;
+        isEnhanced: boolean;
+        transcriptionModelName: string | null;
+        transcriptionDurationSeconds: number | null;
+        enhancementModelName: string | null;
+        enhancementDurationSeconds: number | null;
+        error: string | null;
+      }>('pipeline_retranscribe', { transcriptionId: id });
+
+      if (result.success) {
+        historyStore.updateRecord(id, {
+          text: result.text,
+          rawText: result.rawText || undefined,
+          enhanced: result.isEnhanced,
+          transcriptionModelName: result.transcriptionModelName ?? undefined,
+          transcriptionDurationSeconds: result.transcriptionDurationSeconds ?? undefined,
+          enhancementModelName: result.enhancementModelName ?? undefined,
+          enhancementDurationSeconds: result.enhancementDurationSeconds ?? undefined,
+        });
+        toastStore.success('Retranscription complete');
+      } else {
+        toastStore.error(result.error ?? 'Retranscription failed');
+      }
+    } catch (e) {
+      toastStore.error(`${e}`);
+    } finally {
+      retranscribingId = null;
     }
   }
 
@@ -721,6 +765,27 @@
                 <line x1="12" y1="8" x2="12.01" y2="8"></line>
               </svg>
               Info
+            </button>
+          {/if}
+          {#if selected.audioPath}
+            <button
+              class="btn"
+              onclick={handleRetranscribe}
+              disabled={retranscribingId !== null}
+              title="Re-run transcription with current model"
+              type="button"
+            >
+              <svg
+                class="btn-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+              </svg>
+              {retranscribingId ? 'Retranscribing...' : 'Retranscribe'}
             </button>
           {/if}
           <button class="btn danger" onclick={handleDeleteSelected} type="button">
