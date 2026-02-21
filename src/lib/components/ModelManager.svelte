@@ -315,10 +315,9 @@
           {#if !model.backend_available}
             <p class="backend-warning">
               {#if model.model_type === 'fluidaudio_coreml'}
-                Requires Apple Silicon and the FluidAudio backend. Build with <code>--features fluidaudio</code> to enable.
+                Requires macOS with Apple Silicon (M1 or later).
               {:else}
-                This model requires the Parakeet backend which is not included in this build.
-                Build with <code>--features parakeet</code> to enable.
+                This model requires the Parakeet backend which is not available in this build.
               {/if}
             </p>
           {/if}

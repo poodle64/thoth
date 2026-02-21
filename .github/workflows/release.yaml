@@ -14,12 +14,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS ARM64 (Metal GPU acceleration built-in)
+          # macOS ARM64 (all backends: Whisper Metal + Parakeet + FluidAudio Neural Engine)
           - platform: macos-14
             args: '--target aarch64-apple-darwin'
-          # Linux x86_64 (CUDA GPU acceleration for NVIDIA, CPU fallback)
+            rustflags: ''
+          # Linux x86_64 (Whisper + Parakeet; FluidAudio compiles as no-op)
           - platform: ubuntu-22.04
             args: ''
+            # sherpa-rs static linking on Linux requires this relocation model
+            rustflags: '-C relocation-model=dynamic-no-pic'
 
     runs-on: ${{ matrix.platform }}
 
@@ -82,6 +85,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           CFLAGS: ${{ matrix.platform == 'macos-14' && '-march=armv8-a' || '' }}
           CXXFLAGS: ${{ matrix.platform == 'macos-14' && '-march=armv8-a' || '' }}
+          RUSTFLAGS: ${{ matrix.rustflags }}
         with:
           tagName: v__VERSION__
           releaseName: 'Thoth v__VERSION__'

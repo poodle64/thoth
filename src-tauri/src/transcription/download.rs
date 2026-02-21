@@ -183,6 +183,18 @@ pub async fn download_model(app: AppHandle, model_id: Option<String>) -> Result<
             *state = DownloadState::Downloading;
         }
 
+        // Check if models are already cached to show accurate progress message
+        #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+        let cached = super::fluidaudio::is_cached();
+        #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
+        let cached = false;
+
+        let status_msg = if cached {
+            "Loading cached CoreML models for Neural Engine..."
+        } else {
+            "Downloading and compiling CoreML models (~500 MB, first run only)..."
+        };
+
         emit_progress(
             &app,
             DownloadProgress {
@@ -190,8 +202,7 @@ pub async fn download_model(app: AppHandle, model_id: Option<String>) -> Result<
                 bytes_downloaded: 0,
                 total_bytes: Some(model.download_size),
                 percentage: 0.0,
-                status: "Initialising FluidAudio (downloading CoreML models on first run)..."
-                    .to_string(),
+                status: status_msg.to_string(),
             },
         );
 
