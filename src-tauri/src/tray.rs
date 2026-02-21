@@ -65,6 +65,8 @@ mod menu_ids {
     pub const PROMPT_PREFIX: &str = "prompt::";
     /// Toggle AI enhancement on/off
     pub const AI_ENHANCEMENT_TOGGLE: &str = "ai_enhancement_toggle";
+    /// Prefix for transcription model menu items
+    pub const MODEL_PREFIX: &str = "model::";
 }
 
 // =============================================================================
@@ -172,6 +174,9 @@ fn build_tray_menu(
     // Input Source submenu with checkable device items
     let input_source_submenu = build_input_source_submenu(app, devices, selected_device_id)?;
 
+    // Model submenu (downloaded models with active tick)
+    let model_submenu = build_model_submenu(app)?;
+
     // AI Enhancement submenu (always visible)
     let ai_submenu = build_ai_submenu(app, enhancement_enabled, active_prompt_id)?;
 
@@ -231,6 +236,7 @@ fn build_tray_menu(
             &status,
             &separator1,
             &input_source_submenu,
+            &model_submenu,
             &ai_submenu,
             &separator_input,
             &toggle_recording,
@@ -300,6 +306,74 @@ fn build_input_source_submenu(
 
     for item in &device_items {
         submenu = submenu.item(item);
+    }
+
+    Ok(submenu.build()?)
+}
+
+/// Human-friendly label for a model type backend.
+fn backend_label(model_type: &str) -> &'static str {
+    match model_type {
+        "whisper_ggml" => "Whisper",
+        "nemo_transducer" => "Parakeet",
+        "fluidaudio_coreml" => "Neural Engine",
+        _ => "Unknown",
+    }
+}
+
+/// Build the "Model" submenu listing downloaded transcription models.
+///
+/// Only shows models that are downloaded **and** whose backend is available in
+/// this build, so users cannot select a model they cannot actually use.
+fn build_model_submenu(
+    app: &impl Manager<tauri::Wry>,
+) -> Result<tauri::menu::Submenu<tauri::Wry>, Box<dyn std::error::Error>> {
+    let manifest = transcription::manifest::get_fallback_manifest();
+
+    let selected_id = config::get_config()
+        .ok()
+        .and_then(|c| c.transcription.model_id.clone());
+
+    // Collect downloaded + backend-available models
+    let available: Vec<_> = manifest
+        .models
+        .iter()
+        .filter(|m| {
+            transcription::manifest::is_backend_available(&m.model_type)
+                && transcription::manifest::is_model_downloaded(m)
+        })
+        .collect();
+
+    let mut submenu = SubmenuBuilder::new(app, "Model");
+
+    if available.is_empty() {
+        let empty = MenuItemBuilder::with_id("model_none", "No Models Downloaded")
+            .enabled(false)
+            .build(app)?;
+        submenu = submenu.item(&empty);
+    } else {
+        let items: Vec<tauri::menu::MenuItem<tauri::Wry>> = available
+            .iter()
+            .map(|model| {
+                let is_selected = selected_id
+                    .as_deref()
+                    .map(|id| id == model.id)
+                    .unwrap_or(model.recommended);
+                let prefix = if is_selected { SELECTED_PREFIX } else { UNSELECTED_PREFIX };
+                let label = format!(
+                    "{}{} ({})",
+                    prefix,
+                    model.name,
+                    backend_label(&model.model_type)
+                );
+                let menu_id = format!("{}{}", menu_ids::MODEL_PREFIX, model.id);
+                MenuItemBuilder::with_id(menu_id, &label).build(app)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for item in &items {
+            submenu = submenu.item(item);
+        }
     }
 
     Ok(submenu.build()?)
@@ -605,6 +679,11 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             tracing::info!("AI enhancement toggle clicked");
             handle_toggle_enhancement(app);
         }
+        _ if id.starts_with(menu_ids::MODEL_PREFIX) => {
+            let model_id = &id[menu_ids::MODEL_PREFIX.len()..];
+            tracing::info!("Model selected from tray: {:?}", model_id);
+            handle_select_model(app, model_id.to_string());
+        }
         _ if id.starts_with(menu_ids::PROMPT_PREFIX) => {
             let prompt_id = &id[menu_ids::PROMPT_PREFIX.len()..];
             tracing::info!("Prompt selected from tray: {:?}", prompt_id);
@@ -715,6 +794,37 @@ fn handle_select_audio_device(app: &AppHandle, device_id: Option<String>) {
 
     // Notify frontend so the Settings UI stays in sync
     let _ = app.emit("audio-device-changed", &device_id);
+
+    // Rebuild tray menu to update checkmarks
+    rebuild_tray_menu(app);
+}
+
+/// Handle transcription model selection from the tray submenu
+fn handle_select_model(app: &AppHandle, model_id: String) {
+    // Save selected model to config
+    if let Err(e) = transcription::set_selected_model_id(Some(model_id.clone())) {
+        tracing::error!("Failed to save model selection: {}", e);
+        return;
+    }
+
+    // Re-initialise transcription backend with the new model
+    let manifest = transcription::manifest::get_fallback_manifest();
+    if let Some(model) = manifest.models.iter().find(|m| m.id == model_id) {
+        let init_result = if model.model_type == "fluidaudio_coreml" {
+            transcription::init_fluidaudio_transcription()
+        } else {
+            let model_dir = transcription::manifest::get_model_directory(&model_id);
+            transcription::init_transcription(model_dir.to_string_lossy().to_string())
+        };
+
+        match init_result {
+            Ok(()) => tracing::info!("Switched transcription model to: {}", model_id),
+            Err(e) => tracing::error!("Failed to initialise model '{}': {}", model_id, e),
+        }
+    }
+
+    // Notify frontend so the Settings/Model Manager UI stays in sync
+    let _ = app.emit("model-changed", &model_id);
 
     // Rebuild tray menu to update checkmarks
     rebuild_tray_menu(app);
