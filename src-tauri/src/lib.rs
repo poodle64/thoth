@@ -21,6 +21,7 @@ pub mod ptt;
 pub mod recording_indicator;
 pub mod shortcuts;
 pub mod sound;
+pub mod storage;
 pub mod text_insert;
 mod traffic_lights;
 pub mod transcription;
@@ -463,6 +464,12 @@ pub fn run() {
             tray::get_tray_state_cmd,
             tray::update_tray_recording_state,
             tray::refresh_tray_menu,
+            // Storage management
+            storage::get_storage_usage,
+            storage::delete_all_recordings,
+            storage::delete_all_logs,
+            storage::delete_fluidaudio_cache,
+            storage::delete_all_data,
             // Keyboard service (shortcut capture + modifier monitoring)
             keyboard_service::enter_capture_mode,
             keyboard_service::exit_capture_mode,

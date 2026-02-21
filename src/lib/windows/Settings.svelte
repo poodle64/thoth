@@ -19,12 +19,14 @@
     History,
     BookOpen,
     FileText,
+    HardDrive,
     Info,
   } from 'lucide-svelte';
   import AIEnhancementSettings from '../components/AIEnhancementSettings.svelte';
   import AudioDeviceSelector from '../components/AudioDeviceSelector.svelte';
   import DictionaryEditor from '../components/DictionaryEditor.svelte';
   import FilterSettings from '../components/FilterSettings.svelte';
+  import StoragePane from '../components/StoragePane.svelte';
   import HistoryPane from '../components/HistoryPane.svelte';
   import ModelManager from '../components/ModelManager.svelte';
   import TranscribePane from '../components/TranscribePane.svelte';
@@ -61,6 +63,7 @@
     { id: 'history', title: 'History', icon: History },
     { id: 'dictionary', title: 'Dictionary', icon: BookOpen },
     { id: 'transcribe', title: 'Transcribe', icon: FileText },
+    { id: 'storage', title: 'Storage', icon: HardDrive },
   ];
 
   let activePane = $state('overview');
@@ -477,6 +480,10 @@
               />
             </div>
           </section>
+        </div>
+      {:else if activePane === 'storage'}
+        <div class="pane">
+          <StoragePane />
         </div>
       {/if}
     </main>
