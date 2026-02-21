@@ -398,6 +398,7 @@ fn get_shortcut_hint() -> String {
 
 /// Pre-rendered 𓅝 ibis hieroglyph tray icons (Noto Sans Egyptian Hieroglyphs)
 static TRAY_IDLE_PNG: &[u8] = include_bytes!("../icons/tray-idle-44.png");
+#[cfg(target_os = "linux")]
 static TRAY_IDLE_LIGHT_PNG: &[u8] = include_bytes!("../icons/tray-idle-light-44.png");
 static TRAY_RECORDING_PNG: &[u8] = include_bytes!("../icons/tray-recording-44.png");
 
@@ -439,12 +440,6 @@ fn is_dark_theme() -> bool {
     }
 
     // Default to light theme assumption
-    false
-}
-
-#[cfg(not(target_os = "linux"))]
-fn is_dark_theme() -> bool {
-    // On macOS, template mode handles this automatically
     false
 }
 

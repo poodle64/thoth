@@ -131,6 +131,16 @@ pub fn register<R: Runtime>(
     // Register with the global shortcut plugin
     global_shortcut
         .on_shortcut(accelerator.as_str(), move |_app, shortcut, event| {
+            // Discard events during capture mode. Queued OS events may fire
+            // even after unregistration; this guard prevents phantom triggers.
+            if crate::keyboard_service::is_capture_active() {
+                tracing::debug!(
+                    "Discarding shortcut event for '{}' — capture mode active",
+                    shortcut_id
+                );
+                return;
+            }
+
             // Log at INFO level so it always shows
             tracing::info!(
                 ">>> Shortcut callback fired for '{}' (accelerator: '{}', shortcut: {:?})",

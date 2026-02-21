@@ -13,8 +13,7 @@ pub mod dictionary;
 pub mod enhancement;
 pub mod export;
 pub mod handsfree;
-pub mod keyboard_capture;
-pub mod modifier_monitor;
+pub mod keyboard_service;
 pub mod mouse_tracker;
 pub mod pipeline;
 pub mod platform;
@@ -33,7 +32,7 @@ const HEADER_HEIGHT: f64 = 52.0;
 /// Traffic light X position (left margin)
 const TRAFFIC_LIGHT_X: f64 = 13.0;
 
-/// Register a single shortcut, using modifier monitor for standalone modifiers
+/// Register a single shortcut, using keyboard_service for standalone modifiers
 fn register_single_shortcut(
     app: &tauri::AppHandle,
     id: &str,
@@ -41,15 +40,13 @@ fn register_single_shortcut(
     description: &str,
 ) -> Result<(), String> {
     // Check if this is a standalone modifier shortcut (e.g., ShiftRight)
-    if modifier_monitor::is_modifier_shortcut(accelerator) {
-        // Register with modifier monitor instead of global shortcut
-        if modifier_monitor::register_modifier_shortcut(
+    if keyboard_service::is_modifier_shortcut(accelerator) {
+        // Register with keyboard service
+        if keyboard_service::register_modifier_shortcut(
             id.to_string(),
             accelerator.to_string(),
             description.to_string(),
         ) {
-            // Restart the monitor to pick up the new shortcut
-            modifier_monitor::restart_monitor(app.clone())?;
             Ok(())
         } else {
             Err(format!(
@@ -66,6 +63,23 @@ fn register_single_shortcut(
             description.to_string(),
         )
     }
+}
+
+/// Re-register all shortcuts from saved config.
+///
+/// Unregisters everything first, then registers from the current config.
+/// Called by the frontend after clearing or resetting a shortcut.
+#[tauri::command]
+fn reregister_shortcuts(app: tauri::AppHandle) -> Result<(), String> {
+    // Unregister everything
+    shortcuts::unregister_all_shortcuts(app.clone())?;
+
+    // Re-register from config
+    let cfg = config::get_config().map_err(|e| format!("Failed to load config: {}", e))?;
+    register_shortcuts_from_config(&app, &cfg);
+
+    tracing::info!("Re-registered all shortcuts from config");
+    Ok(())
 }
 
 /// Register shortcuts from saved configuration
@@ -109,10 +123,8 @@ fn register_shortcuts_from_config(app: &tauri::AppHandle, cfg: &config::Config) 
         }
     }
 
-    // Start the modifier monitor if any modifier shortcuts were registered
-    if let Err(e) = modifier_monitor::start_monitor(app.clone()) {
-        tracing::warn!("Failed to start modifier monitor: {}", e);
-    }
+    // Start the keyboard service if any modifier shortcuts were registered
+    keyboard_service::start_monitoring(app.clone());
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -319,6 +331,7 @@ pub fn run() {
             transcription::filter_transcription,
             transcription::get_selected_model_id,
             transcription::set_selected_model_id,
+            transcription::is_parakeet_available,
             transcription::download::check_model_downloaded,
             transcription::download::get_download_progress,
             transcription::download::download_model,
@@ -360,6 +373,7 @@ pub fn run() {
             // Config
             config::get_config,
             config::set_config,
+            config::set_shortcut_config,
             config::reset_config,
             config::get_config_path_cmd,
             // Shortcuts
@@ -373,6 +387,7 @@ pub fn run() {
             shortcuts::check_shortcut_available,
             shortcuts::get_shortcut_suggestions,
             shortcuts::validate_shortcut,
+            reregister_shortcuts,
             // Dictionary
             dictionary::get_dictionary_entries,
             dictionary::add_dictionary_entry,
@@ -441,13 +456,13 @@ pub fn run() {
             tray::get_tray_state_cmd,
             tray::update_tray_recording_state,
             tray::refresh_tray_menu,
-            // Keyboard capture (for shortcut recording)
-            keyboard_capture::start_key_capture,
-            keyboard_capture::stop_key_capture,
-            keyboard_capture::is_key_capture_active,
-            keyboard_capture::check_input_monitoring,
-            keyboard_capture::request_input_monitoring,
-            keyboard_capture::report_key_event,
+            // Keyboard service (shortcut capture + modifier monitoring)
+            keyboard_service::enter_capture_mode,
+            keyboard_service::exit_capture_mode,
+            keyboard_service::is_capture_active_cmd,
+            keyboard_service::check_input_monitoring,
+            keyboard_service::request_input_monitoring,
+            keyboard_service::report_key_event,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
