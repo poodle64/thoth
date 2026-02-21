@@ -288,6 +288,21 @@ pub fn get_model_directory(model_id: &str) -> PathBuf {
 
 /// Get disk size for a downloaded model
 pub fn get_model_disk_size(model: &RemoteModelInfo) -> Option<u64> {
+    // FluidAudio models: the marker file is tiny (~99 bytes) but the actual
+    // CoreML compiled models live in ~/Library/Application Support/FluidAudio/Models/
+    if model.model_type == "fluidaudio_coreml" {
+        #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+        {
+            let cache_dir = super::fluidaudio::model_cache_directory();
+            let size = dir_size_recursive(&cache_dir);
+            return if size > 0 { Some(size) } else { None };
+        }
+        #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
+        {
+            return None;
+        }
+    }
+
     let model_dir = get_model_directory(&model.id);
 
     model
@@ -299,6 +314,25 @@ pub fn get_model_disk_size(model: &RemoteModelInfo) -> Option<u64> {
                 .map(|m| m.len())
         })
         .reduce(|a, b| a + b)
+}
+
+/// Recursively calculate directory size in bytes
+fn dir_size_recursive(path: &std::path::Path) -> u64 {
+    if !path.exists() {
+        return 0;
+    }
+    let mut total = 0;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                total += dir_size_recursive(&p);
+            } else if let Ok(meta) = p.metadata() {
+                total += meta.len();
+            }
+        }
+    }
+    total
 }
 
 /// Check if the backend for a given model type is available in this build
