@@ -34,7 +34,8 @@ symphonia = { version = "0.5", features = ["mp3", "aac", "ogg", "vorbis", "flac"
 
 # Transcription
 # sherpa-rs: Parakeet TDT models via Sherpa-ONNX (statically linked)
-sherpa-rs = { version = "0.6", features = ["static", "download-binaries"], optional = true }
+# NOTE: download-binaries is macOS-only (Linux archive lacks .a files); Linux builds from CMake source
+sherpa-rs = { version = "0.6", features = ["static"], optional = true }
 # fluidaudio-rs: Apple Neural Engine backend via CoreML (macOS-only, Apple Silicon)
 # Forked with platform guards: compiles as no-op on Linux/Windows
 fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", rev = "97aaf88", optional = true }
@@ -78,6 +79,8 @@ tauri-plugin-updater = "2.10"
 [target.'cfg(target_os = "macos")'.dependencies]
 # whisper-rs with Metal GPU acceleration on macOS
 whisper-rs = { version = "0.15", features = ["metal"] }
+# sherpa-rs: use pre-built binaries on macOS (Linux archive lacks static libs, builds from CMake source)
+sherpa-rs = { version = "0.6", features = ["download-binaries"], optional = true }
 cocoa = "0.26"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSGeometry"] }

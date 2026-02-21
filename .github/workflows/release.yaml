@@ -15,7 +15,8 @@ jobs:
       matrix:
         include:
           # macOS ARM64 (all backends: Whisper Metal + Parakeet + FluidAudio Neural Engine)
-          - platform: macos-14
+          # macos-15 required for Swift 6.0+ (FluidAudio dependency)
+          - platform: macos-15
             args: '--target aarch64-apple-darwin'
             rustflags: ''
           # Linux x86_64 (Whisper + Parakeet; FluidAudio compiles as no-op)
@@ -83,8 +84,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          CFLAGS: ${{ matrix.platform == 'macos-14' && '-march=armv8-a' || '' }}
-          CXXFLAGS: ${{ matrix.platform == 'macos-14' && '-march=armv8-a' || '' }}
+          CFLAGS: ${{ matrix.platform == 'macos-15' && '-march=armv8-a' || '' }}
+          CXXFLAGS: ${{ matrix.platform == 'macos-15' && '-march=armv8-a' || '' }}
           RUSTFLAGS: ${{ matrix.rustflags }}
         with:
           tagName: v__VERSION__
