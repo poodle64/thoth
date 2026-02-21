@@ -19,11 +19,11 @@ jobs:
           - platform: macos-15
             args: '--target aarch64-apple-darwin'
             rustflags: ''
-          # Linux x86_64 (Whisper + Parakeet; FluidAudio compiles as no-op)
+          # Linux x86_64 (Whisper only; Parakeet excluded — upstream sherpa-onnx
+          # Linux static archive lacks .a libs; FluidAudio is macOS-only)
           - platform: ubuntu-22.04
-            args: ''
-            # sherpa-rs static linking on Linux requires this relocation model
-            rustflags: '-C relocation-model=dynamic-no-pic'
+            args: '-- --no-default-features'
+            rustflags: ''
 
     runs-on: ${{ matrix.platform }}
 
@@ -56,13 +56,6 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Install CUDA dependencies (Linux)
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          # Install minimal CUDA development headers/libs for whisper.cpp
-          sudo apt-get update
-          sudo apt-get install -y nvidia-cuda-dev nvidia-cuda-toolkit
 
       - name: Install system dependencies (Linux)
         if: matrix.platform == 'ubuntu-22.04'
