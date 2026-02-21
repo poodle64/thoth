@@ -150,19 +150,14 @@ impl WhisperTranscriptionService {
             samples
         };
 
-        // Append 1 second of silence so the model can finalise punctuation
-        // at the end of the utterance. Only pad if the result stays under the
-        // single-chunk limit (15 s / 240 000 samples).
+        // Append 1 second of silence so the model can finalise the last word
+        // and punctuation. Whisper processes in 30-second windows, so the extra
+        // second never causes a problem regardless of recording length.
         let samples = {
             const TRAILING_SILENCE: usize = 16_000; // 1 s at 16 kHz
-            const MAX_SINGLE_CHUNK: usize = 240_000; // 15 s at 16 kHz
-            if samples.len() + TRAILING_SILENCE <= MAX_SINGLE_CHUNK {
-                let mut padded = samples;
-                padded.extend(std::iter::repeat(0.0f32).take(TRAILING_SILENCE));
-                padded
-            } else {
-                samples
-            }
+            let mut padded = samples;
+            padded.extend(std::iter::repeat(0.0f32).take(TRAILING_SILENCE));
+            padded
         };
 
         self.transcribe_samples(&samples)

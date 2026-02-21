@@ -442,8 +442,9 @@ impl VoiceActivityDetector {
 const TRIM_MIN_SAMPLES_16KHZ: usize = 320_000;
 
 /// Safety margin (in seconds) kept around detected speech boundaries so we
-/// don't clip into the start or end of an utterance.
-const TRIM_MARGIN_SECS: f32 = 0.2;
+/// don't clip into the start or end of an utterance. 500 ms gives enough
+/// room for trailing consonants and natural speech deceleration.
+const TRIM_MARGIN_SECS: f32 = 0.5;
 
 /// Trim leading and trailing silence from audio samples using VAD.
 ///
@@ -452,8 +453,8 @@ const TRIM_MARGIN_SECS: f32 = 0.2;
 /// the saving.
 ///
 /// The function runs a single-pass VAD scan over the audio, locates the first
-/// and last speech frames, and returns a sub-slice that keeps a small margin
-/// (200 ms) around the detected speech boundaries.
+/// and last speech frames, and returns a sub-slice that keeps a safety margin
+/// (500 ms) around the detected speech boundaries.
 ///
 /// # Arguments
 /// * `samples` — mono f32 audio samples normalised to [-1.0, 1.0]
