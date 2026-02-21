@@ -279,7 +279,53 @@ pub fn warmup_transcription() {
     }
     match init_transcription(model_dir) {
         Ok(()) => tracing::info!("Transcription model warmed up"),
-        Err(e) => tracing::warn!("Transcription warmup failed: {}", e),
+        Err(e) => {
+            tracing::warn!("Transcription warmup failed: {}", e);
+
+            // If the selected model's backend is unavailable (e.g. Parakeet without
+            // the feature enabled), fall back to the recommended Whisper model.
+            let selected_id = crate::config::get_config()
+                .ok()
+                .and_then(|c| c.transcription.model_id.clone());
+
+            if let Some(ref id) = selected_id {
+                let fallback = manifest::get_fallback_manifest();
+                let is_parakeet = fallback
+                    .models
+                    .iter()
+                    .find(|m| m.id == *id)
+                    .map(|m| m.model_type == "nemo_transducer")
+                    .unwrap_or(false);
+
+                if is_parakeet && !manifest::is_backend_available("nemo_transducer") {
+                    tracing::warn!(
+                        "Selected model '{}' requires Parakeet backend (not available), \
+                         falling back to recommended Whisper model",
+                        id
+                    );
+
+                    // Find the recommended whisper model and try that instead
+                    if let Some(whisper_model) = fallback.models.iter().find(|m| {
+                        m.model_type == "whisper_ggml" && m.recommended
+                    }) {
+                        let whisper_dir = manifest::get_model_directory(&whisper_model.id);
+                        if manifest::is_model_downloaded(whisper_model) {
+                            match init_transcription(whisper_dir.to_string_lossy().to_string()) {
+                                Ok(()) => {
+                                    tracing::info!(
+                                        "Fell back to Whisper model '{}'",
+                                        whisper_model.id
+                                    );
+                                }
+                                Err(e2) => {
+                                    tracing::warn!("Whisper fallback also failed: {}", e2);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -362,4 +408,10 @@ pub fn set_selected_model_id(model_id: Option<String>) -> Result<(), String> {
 
     tracing::info!("Selected model ID set to: {:?}", model_id);
     Ok(())
+}
+
+/// Check if the Parakeet (Sherpa-ONNX) backend is available in this build
+#[tauri::command]
+pub fn is_parakeet_available() -> bool {
+    cfg!(feature = "parakeet")
 }
