@@ -1,7 +1,14 @@
 <script lang="ts">
-	import { getUpdaterState, downloadAndInstall, dismissUpdate } from '$lib/stores/updater.svelte';
+	import { invoke } from '@tauri-apps/api/core';
+	import { getUpdaterState, downloadAndInstall, dismissUpdate, retryUpdate, RELEASES_URL } from '$lib/stores/updater.svelte';
 
 	const updaterState = getUpdaterState();
+
+	function openReleasesPage() {
+		invoke('open_url', { url: RELEASES_URL }).catch((err) =>
+			console.error('Failed to open releases page:', err)
+		);
+	}
 </script>
 
 {#if updaterState.state === 'available' || updaterState.state === 'downloading' || updaterState.state === 'ready'}
@@ -54,12 +61,33 @@
 			{/if}
 		</div>
 	</div>
+{:else if updaterState.state === 'error'}
+	<div class="update-banner error">
+		<div class="update-content">
+			<div class="update-icon error-icon">
+				<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+					<circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2" />
+					<path d="M10 6v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+					<circle cx="10" cy="14" r="1" fill="currentColor" />
+				</svg>
+			</div>
+			<div class="update-text">
+				<div class="update-title">Update Failed</div>
+				<div class="update-error-message">{updaterState.error}</div>
+			</div>
+		</div>
+		<div class="update-actions">
+			<button class="btn-update" onclick={() => retryUpdate()}>Retry</button>
+			<button class="btn-later" onclick={openReleasesPage}>Download Manually</button>
+			<button class="btn-later" onclick={() => dismissUpdate()}>Dismiss</button>
+		</div>
+	</div>
 {/if}
 
 <style>
 	.update-banner {
 		display: flex;
-		align-items: centre;
+		align-items: center;
 		justify-content: space-between;
 		padding: var(--spacing-3);
 		background: color-mix(in srgb, var(--color-accent) 10%, transparent);
@@ -70,7 +98,7 @@
 
 	.update-content {
 		display: flex;
-		align-items: centre;
+		align-items: center;
 		gap: var(--spacing-3);
 	}
 
@@ -112,7 +140,7 @@
 
 	.update-actions {
 		display: flex;
-		align-items: centre;
+		align-items: center;
 		gap: var(--spacing-2);
 	}
 
@@ -152,5 +180,21 @@
 		font-size: var(--text-sm);
 		color: var(--color-accent);
 		font-weight: 600;
+	}
+
+	/* Error state */
+	.update-banner.error {
+		background: color-mix(in srgb, var(--color-error) 10%, transparent);
+		border-color: color-mix(in srgb, var(--color-error) 30%, transparent);
+	}
+
+	.error-icon {
+		color: var(--color-error);
+	}
+
+	.update-error-message {
+		font-size: var(--text-xs);
+		color: var(--color-text-secondary);
+		line-height: 1.4;
 	}
 </style>

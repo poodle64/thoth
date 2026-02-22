@@ -7,6 +7,9 @@
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 
+/** GitHub releases page for manual download fallback */
+export const RELEASES_URL = 'https://github.com/poodle64/thoth/releases/latest';
+
 /** Update availability state */
 export type UpdateState =
   | 'idle' // Not checked or dismissed
@@ -120,10 +123,42 @@ export async function downloadAndInstall(): Promise<void> {
     await relaunch();
   } catch (err) {
     updaterState.state = 'error';
-    updaterState.error =
-      err instanceof Error ? err.message : 'Failed to download or install update';
+    updaterState.error = describeUpdateError(err);
     console.error('Update download/install failed:', err);
   }
+}
+
+/** Translate raw update errors into actionable user-facing messages */
+function describeUpdateError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const lower = raw.toLowerCase();
+
+  if (lower.includes('permission') || lower.includes('privilege') || lower.includes('cancel')) {
+    return 'Update requires administrator access. Please try again and enter your password when prompted.';
+  }
+  if (
+    lower.includes('network') ||
+    lower.includes('connect') ||
+    lower.includes('timed out') ||
+    lower.includes('fetch')
+  ) {
+    return 'Download interrupted. Check your internet connection and try again.';
+  }
+  if (lower.includes('signature') || lower.includes('verify')) {
+    return 'Update signature verification failed. The download may be corrupted. Please try again.';
+  }
+
+  return `Update failed: ${raw}`;
+}
+
+/**
+ * Retry after a failed update by re-checking for updates.
+ * The previous Update object may be stale after a failed install,
+ * so we start fresh rather than retrying downloadAndInstall().
+ */
+export async function retryUpdate(): Promise<void> {
+  updaterState.error = null;
+  await checkForUpdate();
 }
 
 /**
