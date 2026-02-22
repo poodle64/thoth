@@ -492,6 +492,45 @@ pub fn get_caret_position() -> Option<CaretPosition> {
     }
 }
 
+/// Check if the screen is locked or the screensaver is active.
+///
+/// Uses `CGSessionCopyCurrentDictionary()` from ApplicationServices to query
+/// the `CGSSessionScreenIsLocked` key. Returns `true` when the lock screen
+/// or screensaver is showing, so global shortcuts can be suppressed.
+pub fn is_screen_locked() -> bool {
+    unsafe {
+        #[link(name = "ApplicationServices", kind = "framework")]
+        extern "C" {
+            fn CGSessionCopyCurrentDictionary() -> *const std::ffi::c_void;
+        }
+
+        let dict = CGSessionCopyCurrentDictionary();
+        if dict.is_null() {
+            // Can't determine — assume not locked
+            return false;
+        }
+
+        use core_foundation::base::TCFType;
+        use core_foundation::boolean::CFBoolean;
+        use core_foundation::dictionary::CFDictionary;
+        use core_foundation::string::CFString;
+
+        let cf_dict = CFDictionary::<CFString, CFBoolean>::wrap_under_create_rule(dict as *const _);
+
+        let key = CFString::new("CGSSessionScreenIsLocked");
+
+        let locked = cf_dict
+            .find(key)
+            .is_some_and(|val| bool::from((*val).clone()));
+
+        if locked {
+            tracing::debug!("Screen is locked — suppressing shortcut");
+        }
+
+        locked
+    }
+}
+
 /// Register a listener for system wake-from-sleep events.
 ///
 /// When the Mac wakes up, the CoreML/ONNX compilation cache may have been
