@@ -97,15 +97,21 @@
 
   /** Permission states */
   let microphonePermission = $state<'unknown' | 'granted' | 'denied'>('unknown');
-  let accessibilityPermission = $state<'unknown' | 'granted' | 'denied'>('unknown');
+  let accessibilityPermission = $state<'unknown' | 'granted' | 'denied' | 'stale'>('unknown');
   let inputMonitoringPermission = $state<'unknown' | 'granted' | 'denied'>('unknown');
 
-  /** Whether all permissions are granted */
+  /** Whether all permissions are granted (and functional) */
   let allPermissionsGranted = $derived(
     microphonePermission === 'granted' &&
     accessibilityPermission === 'granted' &&
     inputMonitoringPermission === 'granted'
   );
+
+  /** TCC reset state */
+  let resettingPermissions = $state(false);
+  let resetError = $state<string | null>(null);
+  let showResetConfirm = $state(false);
+  let showManualFix = $state(false);
 
   async function handleAutostartToggle() {
     autostartLoading = true;
@@ -174,7 +180,13 @@
 
     try {
       const accessStatus = await invoke<boolean>('check_accessibility');
-      accessibilityPermission = accessStatus ? 'granted' : 'denied';
+      if (accessStatus) {
+        // Permission entry exists — verify it's actually functional
+        const functional = await invoke<boolean>('verify_accessibility_functional');
+        accessibilityPermission = functional ? 'granted' : 'stale';
+      } else {
+        accessibilityPermission = 'denied';
+      }
     } catch (error) {
       console.error('Failed to check accessibility:', error);
       accessibilityPermission = 'unknown';
@@ -186,6 +198,27 @@
     } catch (error) {
       console.error('Failed to check input monitoring:', error);
       inputMonitoringPermission = 'unknown';
+    }
+  }
+
+  /** Reset TCC permissions for Thoth (requires admin privileges) */
+  async function resetPermissions(services: string[]) {
+    resettingPermissions = true;
+    resetError = null;
+    showResetConfirm = false;
+
+    try {
+      await invoke<string>('reset_tcc_permissions', { services });
+      // After reset, re-check permissions (they should all show as denied now)
+      await checkPermissions();
+      // Open accessibility settings so user can re-grant
+      invoke('request_accessibility');
+      startPermissionPolling();
+    } catch (error) {
+      resetError = error instanceof Error ? error.message : String(error);
+      console.error('Failed to reset TCC permissions:', error);
+    } finally {
+      resettingPermissions = false;
     }
   }
 
@@ -206,7 +239,7 @@
       permissionPollCount++;
       await checkPermissions();
 
-      // Stop if all permissions are granted or we've exceeded attempts
+      // Stop if all permissions are granted (and functional) or we've exceeded attempts
       const allGranted =
         microphonePermission === 'granted' &&
         accessibilityPermission === 'granted' &&
@@ -239,6 +272,7 @@
   let modelStepDone = $derived(setupState === 'ready');
   let micStepDone = $derived(microphonePermission === 'granted');
   let shortcutStepDone = $derived(accessibilityPermission === 'granted');
+  let accessibilityStale = $derived(accessibilityPermission === 'stale');
   let allRequiredDone = $derived(modelStepDone && micStepDone && shortcutStepDone);
 
   /** Celebration animation trigger */
@@ -308,15 +342,26 @@
     }
   });
 
+  let staleEventUnlisten: UnlistenFn | null = null;
+
   onDestroy(() => {
     stopPermissionPolling();
     cleanupDownloadListeners();
+    staleEventUnlisten?.();
   });
 
   onMount(async () => {
     loadAutostartState();
     loadDockState();
     getVersion().then((v) => { currentVersion = v; }).catch(() => {});
+
+    // Listen for stale permission events emitted at startup
+    listen<string>('permission-stale', (event) => {
+      if (event.payload === 'accessibility') {
+        accessibilityPermission = 'stale';
+      }
+    }).then((unlisten) => { staleEventUnlisten = unlisten; });
+
     await checkPermissions();
 
     // If all permissions are already granted, refresh tray in case it was built
@@ -481,12 +526,14 @@
     </div>
 
     <!-- Step 3: Allow global shortcut -->
-    <div class="setup-step" class:completed={shortcutStepDone}>
-      <div class="step-indicator" class:pending={!shortcutStepDone} class:done={shortcutStepDone}>
+    <div class="setup-step" class:completed={shortcutStepDone} class:stale={accessibilityStale}>
+      <div class="step-indicator" class:pending={!shortcutStepDone && !accessibilityStale} class:done={shortcutStepDone} class:warn={accessibilityStale}>
         {#if shortcutStepDone}
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M3 8.5l3.5 3.5 6.5-7" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
+        {:else if accessibilityStale}
+          !
         {:else}
           3
         {/if}
@@ -495,6 +542,25 @@
         <p class="step-title">Allow global shortcut</p>
         {#if shortcutStepDone}
           <p class="step-description done">Shortcut access granted</p>
+        {:else if accessibilityStale}
+          <p class="step-description stale-warning">Permission appears granted but isn't working. This can happen after app updates or reinstalls.</p>
+          <div class="step-actions">
+            <button class="btn-setup warning" onclick={() => resetPermissions(['Accessibility', 'ListenEvent'])} disabled={resettingPermissions}>
+              {resettingPermissions ? 'Resetting...' : 'Reset & Re-grant'}
+            </button>
+            <button class="btn-setup-alt" onclick={() => { showManualFix = !showManualFix; }}>Manual fix</button>
+            <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
+          </div>
+          {#if showManualFix}
+            <div class="manual-fix">
+              <p class="manual-fix-title">Run in Terminal:</p>
+              <code class="manual-fix-code">sudo tccutil reset Accessibility com.poodle64.thoth && sudo tccutil reset ListenEvent com.poodle64.thoth</code>
+              <p class="manual-fix-hint">Then re-enable Thoth in System Settings &gt; Privacy &amp; Security &gt; Accessibility.</p>
+            </div>
+          {/if}
+          {#if resetError}
+            <p class="step-error">{resetError}</p>
+          {/if}
         {:else}
           <p class="step-description">Lets you start recording from anywhere with a keyboard shortcut.</p>
           <div class="step-actions">
@@ -775,11 +841,20 @@
             class="status-dot"
             class:ready={accessibilityPermission === 'granted'}
             class:warning={accessibilityPermission === 'denied'}
+            class:stale={accessibilityPermission === 'stale'}
           ></span>
           <span class="status-label">Accessibility</span>
           <span class="status-value">
             {#if accessibilityPermission === 'granted'}
               Granted
+            {:else if accessibilityPermission === 'stale'}
+              <span class="permission-actions">
+                <span class="status-stale-label">Stale</span>
+                <button class="btn-small warning" onclick={() => resetPermissions(['Accessibility', 'ListenEvent'])} disabled={resettingPermissions}>
+                  {resettingPermissions ? 'Resetting...' : 'Reset'}
+                </button>
+                <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
+              </span>
             {:else}
               <span class="permission-actions">
                 <button class="btn-small" onclick={() => requestPermission('request_accessibility')}>Grant Access</button>
@@ -788,7 +863,12 @@
             {/if}
           </span>
         </div>
-        {#if accessibilityPermission !== 'granted'}
+        {#if accessibilityPermission === 'stale'}
+          <p class="permission-hint stale-hint">Permission appears granted but isn't working. Reset to fix.</p>
+          {#if resetError}
+            <p class="permission-hint error-hint">{resetError}</p>
+          {/if}
+        {:else if accessibilityPermission !== 'granted'}
           <p class="permission-hint">Required for the global recording shortcut to work</p>
         {/if}
         <div class="status-row">
@@ -842,6 +922,47 @@
       </div>
     </div>
   </section>
+
+  <!-- Troubleshooting (advanced) -->
+  <details class="optional-section">
+    <summary class="optional-summary">Troubleshooting</summary>
+    <div class="optional-content">
+      <p class="troubleshoot-description">
+        If permissions appear granted but features aren't working, stale macOS permission entries
+        may be the cause. This commonly happens after app updates or reinstalls.
+      </p>
+      {#if showResetConfirm}
+        <div class="reset-confirm">
+          <p class="reset-confirm-text">
+            This will revoke all macOS permissions for Thoth. You will need to re-grant
+            microphone, accessibility, and input monitoring permissions afterwards.
+          </p>
+          <div class="step-actions">
+            <button class="btn-setup warning" onclick={() => resetPermissions(['All'])} disabled={resettingPermissions}>
+              {resettingPermissions ? 'Resetting...' : 'Confirm Reset'}
+            </button>
+            <button class="btn-setup-alt" onclick={() => { showResetConfirm = false; }}>Cancel</button>
+          </div>
+        </div>
+      {:else}
+        <div class="step-actions">
+          <button class="btn-small warning" onclick={() => { showResetConfirm = true; }} disabled={resettingPermissions}>
+            Reset All Permissions
+          </button>
+        </div>
+      {/if}
+      {#if resetError}
+        <p class="step-error">{resetError}</p>
+      {/if}
+      <details class="manual-fix-details">
+        <summary class="manual-fix-summary">Manual fix (Terminal)</summary>
+        <div class="manual-fix">
+          <code class="manual-fix-code">sudo tccutil reset All com.poodle64.thoth</code>
+          <p class="manual-fix-hint">Then restart Thoth and re-grant permissions in System Settings &gt; Privacy &amp; Security.</p>
+        </div>
+      </details>
+    </div>
+  </details>
 {/if}
 
 <style>
@@ -1221,5 +1342,126 @@
 
   .gpu-cpu {
     color: var(--color-text-tertiary);
+  }
+
+  /* Stale permission indicator */
+  .status-dot.stale {
+    background: var(--color-warning);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  .step-indicator.warn {
+    background: color-mix(in srgb, var(--color-warning) 15%, var(--color-bg-secondary));
+    color: var(--color-warning);
+    font-weight: 700;
+  }
+
+  .setup-step.stale {
+    border-color: color-mix(in srgb, var(--color-warning) 40%, var(--color-border-subtle));
+  }
+
+  .stale-warning {
+    color: var(--color-warning) !important;
+  }
+
+  .stale-hint {
+    color: var(--color-warning) !important;
+  }
+
+  .error-hint {
+    color: var(--color-error, #ef4444) !important;
+  }
+
+  .status-stale-label {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--color-warning);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  .btn-setup.warning,
+  .btn-small.warning {
+    background: var(--color-warning);
+    color: var(--color-bg-primary, #1a1a1a);
+  }
+
+  .btn-setup.warning:hover,
+  .btn-small.warning:hover {
+    background: color-mix(in srgb, var(--color-warning) 85%, black);
+  }
+
+  .step-error {
+    margin: 6px 0 0;
+    font-size: var(--text-xs);
+    color: var(--color-error, #ef4444);
+  }
+
+  /* Manual fix */
+  .manual-fix {
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: var(--color-bg-tertiary);
+    border-radius: var(--radius-sm);
+  }
+
+  .manual-fix-title {
+    margin: 0 0 6px;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--color-text-secondary);
+  }
+
+  .manual-fix-code {
+    display: block;
+    padding: 8px 10px;
+    background: var(--color-bg-primary);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono, 'SF Mono', 'Fira Code', monospace);
+    font-size: 11px;
+    color: var(--color-text-primary);
+    word-break: break-all;
+    user-select: all;
+    cursor: text;
+  }
+
+  .manual-fix-hint {
+    margin: 6px 0 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
+  }
+
+  .manual-fix-details {
+    margin-top: 8px;
+  }
+
+  .manual-fix-summary {
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
+    cursor: pointer;
+  }
+
+  /* Troubleshooting section */
+  .troubleshoot-description {
+    margin: 0 0 10px;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    line-height: 1.4;
+  }
+
+  .reset-confirm {
+    padding: 12px;
+    background: color-mix(in srgb, var(--color-warning) 8%, var(--color-bg-tertiary));
+    border: 1px solid color-mix(in srgb, var(--color-warning) 30%, var(--color-border-subtle));
+    border-radius: var(--radius-md);
+    margin-bottom: 8px;
+  }
+
+  .reset-confirm-text {
+    margin: 0 0 10px;
+    font-size: var(--text-sm);
+    color: var(--color-text-primary);
+    line-height: 1.4;
   }
 </style>

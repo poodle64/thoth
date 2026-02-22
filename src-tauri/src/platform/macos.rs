@@ -165,6 +165,133 @@ pub fn open_microphone_settings() {
     }
 }
 
+/// Verify that accessibility permission is functionally working, not just granted.
+///
+/// `AXIsProcessTrusted()` can return `true` even when the TCC database entry is
+/// stale (e.g., after reinstall with a different code signature). This function
+/// goes further by actually attempting an Accessibility API call to confirm the
+/// permission is live.
+///
+/// Returns `true` if accessibility is genuinely working.
+/// Returns `false` if not granted, or if granted but stale/non-functional.
+pub fn verify_accessibility_functional() -> bool {
+    if !check_accessibility_permission() {
+        return false;
+    }
+
+    // Actually attempt an AX API call to verify the permission is live
+    use core_foundation::base::TCFType;
+    use core_foundation::string::CFString;
+
+    unsafe {
+        #[link(name = "ApplicationServices", kind = "framework")]
+        extern "C" {
+            fn AXUIElementCreateSystemWide() -> *mut std::ffi::c_void;
+            fn AXUIElementCopyAttributeValue(
+                element: *mut std::ffi::c_void,
+                attribute: *const std::ffi::c_void,
+                value: *mut *mut std::ffi::c_void,
+            ) -> i32;
+            fn CFRelease(cf: *const std::ffi::c_void);
+        }
+
+        // kAXErrorCannotComplete — returned when permission is stale
+        const AX_ERROR_CANNOT_COMPLETE: i32 = -25204;
+
+        let system_wide = AXUIElementCreateSystemWide();
+        if system_wide.is_null() {
+            return false;
+        }
+
+        let attr = CFString::new("AXFocusedApplication");
+        let mut value: *mut std::ffi::c_void = std::ptr::null_mut();
+        let result = AXUIElementCopyAttributeValue(
+            system_wide,
+            attr.as_concrete_TypeRef() as *const _,
+            &mut value,
+        );
+
+        if !value.is_null() {
+            CFRelease(value as *const _);
+        }
+        CFRelease(system_wide as *const _);
+
+        // Result 0 = success (got a focused app).
+        // kAXErrorNoValue (-25212) = no focused app, but the API is responding — permission works.
+        // kAXErrorCannotComplete (-25204) = permission is stale/broken.
+        if result == AX_ERROR_CANNOT_COMPLETE {
+            tracing::warn!(
+                "Accessibility permission appears granted but AX API returned \
+                 kAXErrorCannotComplete — TCC entry is likely stale"
+            );
+            return false;
+        }
+
+        true
+    }
+}
+
+/// Reset TCC (Transparency, Consent, and Control) permission entries for Thoth.
+///
+/// Uses `tccutil reset` via `osascript` to prompt for administrator privileges,
+/// which is required for system-level permissions (Accessibility, Input Monitoring).
+///
+/// Valid service names: "Accessibility", "ListenEvent", "Microphone", "All"
+pub fn reset_tcc_permissions(services: &[String]) -> Result<String, String> {
+    use std::process::Command;
+
+    if services.is_empty() {
+        return Err("No services specified to reset.".to_string());
+    }
+
+    const BUNDLE_ID: &str = "com.poodle64.thoth";
+
+    // Allowlist of valid TCC service names to prevent command injection
+    const VALID_SERVICES: &[&str] = &[
+        "Accessibility",
+        "ListenEvent",
+        "Microphone",
+        "Camera",
+        "ScreenCapture",
+        "All",
+    ];
+
+    for service in services {
+        if !VALID_SERVICES.contains(&service.as_str()) {
+            return Err(format!("Invalid TCC service name: {}", service));
+        }
+    }
+
+    let commands: Vec<String> = services
+        .iter()
+        .map(|s| format!("tccutil reset {} {}", s, BUNDLE_ID))
+        .collect();
+    let script = commands.join(" && ");
+
+    tracing::info!("Resetting TCC permissions: {}", script);
+
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(format!(
+            "do shell script \"{}\" with administrator privileges",
+            script
+        ))
+        .output()
+        .map_err(|e| format!("Failed to execute tccutil: {}", e))?;
+
+    if output.status.success() {
+        tracing::info!(
+            "TCC permissions reset successfully for services: {:?}",
+            services
+        );
+        Ok("Permissions reset successfully. Please re-grant them in System Settings.".to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        tracing::error!("TCC reset failed: {}", stderr);
+        Err(format!("Failed to reset permissions: {}", stderr))
+    }
+}
+
 /// Position of the text caret (insertion point) on screen
 #[derive(Debug, Clone, Copy)]
 pub struct CaretPosition {
