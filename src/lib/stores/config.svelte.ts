@@ -56,6 +56,9 @@ export interface EnhancementConfig {
   ollamaUrl: string;
 }
 
+/** Recording indicator visual style */
+export type IndicatorStyle = 'cursor-dot' | 'fixed-float' | 'pill';
+
 /** General application settings */
 export interface GeneralConfig {
   /** Launch application on system startup */
@@ -68,6 +71,8 @@ export interface GeneralConfig {
   checkForUpdates: boolean;
   /** Show the floating recording indicator during recording */
   showRecordingIndicator: boolean;
+  /** Visual style for the recording indicator */
+  indicatorStyle: IndicatorStyle;
 }
 
 /** Recorder window position options */
@@ -142,6 +147,7 @@ interface ConfigRaw {
     show_in_dock: boolean;
     check_for_updates: boolean;
     show_recording_indicator: boolean;
+    indicator_style: IndicatorStyle;
   };
   recorder: {
     position: RecorderPosition;
@@ -184,6 +190,7 @@ function parseConfig(raw: ConfigRaw): Config {
       showInDock: raw.general.show_in_dock,
       checkForUpdates: raw.general.check_for_updates,
       showRecordingIndicator: raw.general.show_recording_indicator,
+      indicatorStyle: raw.general.indicator_style,
     },
     recorder: {
       position: raw.recorder.position,
@@ -227,6 +234,7 @@ function serialiseConfig(config: Config): ConfigRaw {
       show_in_dock: config.general.showInDock,
       check_for_updates: config.general.checkForUpdates,
       show_recording_indicator: config.general.showRecordingIndicator,
+      indicator_style: config.general.indicatorStyle,
     },
     recorder: {
       position: config.recorder.position,
@@ -270,6 +278,7 @@ function getDefaultConfig(): Config {
       showInDock: false,
       checkForUpdates: true,
       showRecordingIndicator: true,
+      indicatorStyle: 'cursor-dot',
     },
     recorder: {
       position: 'top-right',

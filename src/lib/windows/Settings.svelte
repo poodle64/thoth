@@ -34,7 +34,7 @@
 	import AboutDialog from '../components/AboutDialog.svelte';
 	import ShortcutInput from '../components/ShortcutInput.svelte';
 	import UpdateNotificationBanner from '../components/UpdateNotificationBanner.svelte';
-	import { configStore, type RecordingMode } from '../stores/config.svelte';
+	import { configStore, type RecordingMode, type IndicatorStyle } from '../stores/config.svelte';
 	import { pipelineStore } from '../stores/pipeline.svelte';
 	import { shortcutsStore, type ShortcutInfo } from '../stores/shortcuts.svelte';
 	import { soundStore } from '../stores/sound.svelte';
@@ -199,6 +199,21 @@
       await invoke('set_ptt_mode_enabled', { enabled: isPttEnabled });
     } catch (error) {
       console.error('Failed to set PTT mode:', error);
+    }
+  }
+
+  async function handleIndicatorStyleChange(style: IndicatorStyle) {
+    configStore.updateGeneral('indicatorStyle', style);
+    await configStore.save();
+
+    // If currently recording, re-show the indicator to apply the new style
+    try {
+      if (pipelineStore.isRecording && configStore.general.showRecordingIndicator) {
+        await invoke('hide_recording_indicator');
+        await invoke('show_recording_indicator');
+      }
+    } catch (e) {
+      console.error('Failed to update indicator style:', e);
     }
   }
 
@@ -409,6 +424,41 @@
                   <span class="toggle-slider"></span>
                 </label>
               </div>
+              {#if configStore.general.showRecordingIndicator}
+                <div class="row-separator"></div>
+                <div class="setting-row card">
+                  <div class="setting-info">
+                    <span class="setting-label">Indicator Style</span>
+                    <span class="setting-description">Visual appearance of the recording indicator</span>
+                  </div>
+                </div>
+                <div class="indicator-style-selector">
+                  <button
+                    class="mode-option"
+                    class:active={configStore.general.indicatorStyle === 'cursor-dot'}
+                    onclick={() => handleIndicatorStyleChange('cursor-dot')}
+                  >
+                    <span class="mode-title">Cursor Dot</span>
+                    <span class="mode-description">Follows your mouse cursor</span>
+                  </button>
+                  <button
+                    class="mode-option"
+                    class:active={configStore.general.indicatorStyle === 'fixed-float'}
+                    onclick={() => handleIndicatorStyleChange('fixed-float')}
+                  >
+                    <span class="mode-title">Fixed Float</span>
+                    <span class="mode-description">Stays at a fixed screen position</span>
+                  </button>
+                  <button
+                    class="mode-option"
+                    class:active={configStore.general.indicatorStyle === 'pill'}
+                    onclick={() => handleIndicatorStyleChange('pill')}
+                  >
+                    <span class="mode-title">Pill Bar</span>
+                    <span class="mode-description">Waveform bar at top of screen</span>
+                  </button>
+                </div>
+              {/if}
             </div>
           </section>
         </div>
@@ -610,10 +660,15 @@
   }
 
   /* Mode selector */
-  .mode-selector {
+  .mode-selector,
+  .indicator-style-selector {
     display: flex;
     gap: 12px;
     margin-bottom: 16px;
+  }
+
+  .indicator-style-selector {
+    margin-top: 8px;
   }
 
   .mode-option {
