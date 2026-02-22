@@ -2,7 +2,7 @@
 //!
 //! Desktop application for macOS and Linux.
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 pub mod audio;
 pub mod clipboard;
@@ -252,10 +252,22 @@ pub fn run() {
                     });
                 }
 
-                // Check accessibility permission on startup
+                // Check accessibility permission on startup (including stale entry detection)
                 let has_accessibility = platform::check_accessibility();
                 if has_accessibility {
-                    tracing::info!("Accessibility permission granted");
+                    // Permission entry exists — verify it's actually functional
+                    if platform::verify_accessibility_functional() {
+                        tracing::info!("Accessibility permission granted and functional");
+                    } else {
+                        tracing::warn!(
+                            "Accessibility permission appears granted but is stale — \
+                             TCC entry may need resetting"
+                        );
+                        // Emit event so the frontend can show a warning
+                        if let Err(e) = app.emit("permission-stale", "accessibility") {
+                            tracing::error!("Failed to emit permission-stale event: {}", e);
+                        }
+                    }
                 } else {
                     tracing::warn!(
                         "Accessibility permission not granted - global shortcuts may not work"
@@ -296,6 +308,8 @@ pub fn run() {
             // Platform
             platform::check_accessibility,
             platform::request_accessibility,
+            platform::verify_accessibility_functional,
+            platform::reset_tcc_permissions,
             platform::check_microphone_permission,
             platform::request_microphone_permission,
             platform::get_gpu_info,

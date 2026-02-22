@@ -208,6 +208,42 @@ pub fn open_input_monitoring_settings() {
     }
 }
 
+/// Verify that accessibility permission is functionally working, not just granted.
+///
+/// `AXIsProcessTrusted()` can return `true` for stale TCC entries (e.g., after
+/// reinstall with a different code signature). This performs an actual AX API
+/// call to confirm the permission is live.
+#[tauri::command]
+pub fn verify_accessibility_functional() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos::verify_accessibility_functional()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true // Not needed on other platforms
+    }
+}
+
+/// Reset TCC permission entries for Thoth.
+///
+/// Prompts for administrator privileges via macOS dialog, then runs
+/// `tccutil reset` for each specified service.
+///
+/// Valid services: "Accessibility", "ListenEvent", "Microphone", "All"
+#[tauri::command]
+pub async fn reset_tcc_permissions(services: Vec<String>) -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::reset_tcc_permissions(&services)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = services;
+        Ok("Permission reset is only supported on macOS.".to_string())
+    }
+}
+
 /// Check microphone permission status
 ///
 /// Returns the permission status as a string:
