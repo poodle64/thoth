@@ -2,21 +2,21 @@
   import { onMount, onDestroy } from 'svelte';
   import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
   import { invoke } from '@tauri-apps/api/core';
+  import type { IndicatorStyle } from '$lib/stores/config.svelte';
 
   // Helper to emit logs to main window (since this window's console is separate)
   function indicatorLog(...args: unknown[]) {
     const message = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
     console.log('[Indicator]', message);
-    // Also emit as event so main window can see it
     emit('indicator-log', { message: `[Indicator] ${message}` }).catch(() => {});
   }
 
-  // Immediate logging to verify JS is loading
   indicatorLog('===== PAGE SCRIPT EXECUTING =====');
 
   // State
   let visualizerState = $state<'idle' | 'recording' | 'processing'>('idle');
   let audioLevel = $state(0);
+  let indicatorStyle = $state<IndicatorStyle>('cursor-dot');
 
   // Animation state
   let canvas: HTMLCanvasElement;
@@ -29,13 +29,23 @@
   // Processing animation
   let processingPhase = 0;
 
-  // Dimensions — 58x58 window, 34px visible rounded square centred inside
-  const WIDTH = 58;
-  const HEIGHT = 58;
+  // Waveform history for pill style (circular buffer)
+  const WAVEFORM_BARS = 32;
+  let waveformHistory: number[] = new Array(WAVEFORM_BARS).fill(0);
+  let waveformIndex = 0;
+  let waveformUpdateCounter = 0;
+
+  // Style dimensions
+  const DOT_SIZE = 58;
+  const PILL_W = 280;
+  const PILL_H = 44;
   const ICON_SIZE = 34;
-  const ICON_RADIUS = 9; // rounded square corner radius
-  const ICON_X = (WIDTH - ICON_SIZE) / 2;
-  const ICON_Y = (HEIGHT - ICON_SIZE) / 2;
+  const ICON_RADIUS = 9;
+
+  // Derived dimensions based on style
+  let canvasWidth = $derived(indicatorStyle === 'pill' ? PILL_W : DOT_SIZE);
+  let canvasHeight = $derived(indicatorStyle === 'pill' ? PILL_H : DOT_SIZE);
+
   // Accent colour (Scribe's Amber)
   const ACCENT = { r: 208, g: 139, b: 62 }; // #D08B3E
 
@@ -47,6 +57,15 @@
     ctx = canvas.getContext('2d');
     setupCanvas();
     animate();
+
+    // Listen for style changes from backend
+    const styleUnlisten = await listen<IndicatorStyle>('indicator-style', (event) => {
+      indicatorLog('Indicator style changed to:', event.payload);
+      indicatorStyle = event.payload;
+      // Re-setup canvas for new dimensions
+      setupCanvas();
+    });
+    unlisteners.push(styleUnlisten);
 
     // Listen for the test event from backend
     const shownUnlisten = await listen('indicator-shown', (event) => {
@@ -83,9 +102,15 @@
       const levelUnlisten = await listen<{ rms: number; peak: number }>(
         'recording-audio-level',
         (event) => {
-          indicatorLog('RECEIVED audio level:', event.payload.rms.toFixed(4), event.payload.peak.toFixed(4));
           // Normalise and boost for visibility
           audioLevel = Math.min(1, event.payload.rms * 3);
+
+          // Update waveform history for pill style
+          waveformUpdateCounter++;
+          if (waveformUpdateCounter % 2 === 0) {
+            waveformHistory[waveformIndex] = audioLevel;
+            waveformIndex = (waveformIndex + 1) % WAVEFORM_BARS;
+          }
         }
       );
       unlisteners.push(levelUnlisten);
@@ -116,10 +141,13 @@
 
   function setupCanvas() {
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = WIDTH * dpr;
-    canvas.height = HEIGHT * dpr;
-    canvas.style.width = `${WIDTH}px`;
-    canvas.style.height = `${HEIGHT}px`;
+    const w = indicatorStyle === 'pill' ? PILL_W : DOT_SIZE;
+    const h = indicatorStyle === 'pill' ? PILL_H : DOT_SIZE;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = `${w}px`;
+    canvas.style.height = `${h}px`;
+    ctx = canvas.getContext('2d');
     ctx?.scale(dpr, dpr);
   }
 
@@ -127,7 +155,7 @@
   function animate() {
     animateCount++;
     if (animateCount % 60 === 0) {
-      indicatorLog('animate() heartbeat, state:', visualizerState, 'audioLevel:', audioLevel.toFixed(3));
+      indicatorLog('animate() heartbeat, state:', visualizerState, 'style:', indicatorStyle, 'audioLevel:', audioLevel.toFixed(3));
     }
 
     if (!ctx) {
@@ -135,39 +163,50 @@
       return;
     }
 
-    // Clear canvas
-    ctx.clearRect(0, 0, WIDTH, HEIGHT);
+    const w = indicatorStyle === 'pill' ? PILL_W : DOT_SIZE;
+    const h = indicatorStyle === 'pill' ? PILL_H : DOT_SIZE;
 
-    if (visualizerState === 'recording') {
-      // Smooth glow towards audio level
-      const targetGlow = Math.min(1, audioLevel * 2);
-      glowIntensity += (targetGlow - glowIntensity) * 0.2;
-      drawGlow();
-      drawRoundedSquare();
-      drawMicIcon();
-    } else if (visualizerState === 'processing') {
-      processingPhase += 0.04;
-      const pulse = Math.sin(processingPhase * Math.PI) * 0.5 + 0.5;
-      drawRoundedSquare(0.6 + pulse * 0.4);
-      drawMicIcon(0.6 + pulse * 0.4);
+    // Clear canvas
+    ctx.clearRect(0, 0, w, h);
+
+    if (indicatorStyle === 'pill') {
+      drawPill(w, h);
     } else {
-      // Idle: draw static (window is off-screen anyway)
-      drawRoundedSquare();
-      drawMicIcon();
+      drawDot(w, h);
     }
 
     animationFrame = requestAnimationFrame(animate);
   }
 
-  function drawGlow() {
+  // ─── Dot / Fixed-Float Rendering ───────────────────────────────────
+
+  function drawDot(w: number, h: number) {
+    const iconX = (w - ICON_SIZE) / 2;
+    const iconY = (h - ICON_SIZE) / 2;
+
+    if (visualizerState === 'recording') {
+      const targetGlow = Math.min(1, audioLevel * 2);
+      glowIntensity += (targetGlow - glowIntensity) * 0.2;
+      drawDotGlow(w, h, iconX, iconY);
+      drawRoundedSquare(iconX, iconY);
+      drawMicIcon(w, h);
+    } else if (visualizerState === 'processing') {
+      processingPhase += 0.04;
+      const pulse = Math.sin(processingPhase * Math.PI) * 0.5 + 0.5;
+      drawRoundedSquare(iconX, iconY, 0.6 + pulse * 0.4);
+      drawMicIcon(w, h, 0.6 + pulse * 0.4);
+    } else {
+      drawRoundedSquare(iconX, iconY);
+      drawMicIcon(w, h);
+    }
+  }
+
+  function drawDotGlow(w: number, h: number, iconX: number, iconY: number) {
     if (!ctx || glowIntensity < 0.05) return;
 
-    const cx = WIDTH / 2;
-    const cy = HEIGHT / 2;
     const spread = 4 + glowIntensity * 10;
     const alpha = 0.15 + glowIntensity * 0.35;
 
-    // Outer glow
     ctx.save();
     ctx.shadowColor = `rgba(${ACCENT.r}, ${ACCENT.g}, ${ACCENT.b}, ${alpha})`;
     ctx.shadowBlur = spread;
@@ -175,46 +214,42 @@
     ctx.shadowOffsetY = 0;
 
     ctx.beginPath();
-    ctx.roundRect(ICON_X, ICON_Y, ICON_SIZE, ICON_SIZE, ICON_RADIUS);
+    ctx.roundRect(iconX, iconY, ICON_SIZE, ICON_SIZE, ICON_RADIUS);
     ctx.fillStyle = `rgba(${ACCENT.r}, ${ACCENT.g}, ${ACCENT.b}, 0.01)`;
     ctx.fill();
     ctx.restore();
   }
 
-  function drawRoundedSquare(opacity: number = 1) {
+  function drawRoundedSquare(x: number, y: number, opacity: number = 1) {
     if (!ctx) return;
-
     ctx.beginPath();
-    ctx.roundRect(ICON_X, ICON_Y, ICON_SIZE, ICON_SIZE, ICON_RADIUS);
-
+    ctx.roundRect(x, y, ICON_SIZE, ICON_SIZE, ICON_RADIUS);
     ctx.fillStyle = `rgba(${ACCENT.r}, ${ACCENT.g}, ${ACCENT.b}, ${opacity})`;
     ctx.fill();
   }
 
-  function drawMicIcon(opacity: number = 1) {
+  function drawMicIcon(w: number, h: number, opacity: number = 1) {
     if (!ctx) return;
 
-    const cx = WIDTH / 2;
-    const cy = HEIGHT / 2;
+    const cx = w / 2;
+    const cy = h / 2;
 
     ctx.save();
     ctx.translate(cx, cy);
 
-    // Scale the 24x24 viewBox icon to fit ~20px within the 34px square
     const scale = 20 / 24;
     ctx.scale(scale, scale);
-    // Shift up slightly so mic body is visually centred (the base adds weight at bottom)
     ctx.translate(0, -1);
 
     const white = `rgba(255, 255, 255, ${opacity})`;
 
-    // Mic body: rounded rectangle from y=-8 to y=4, width 6 (centred)
+    // Mic body
     ctx.beginPath();
     ctx.roundRect(-3, -8, 6, 12, 3);
     ctx.fillStyle = white;
     ctx.fill();
 
-    // Pickup arc: from (-7, 0) curving down to (7, 0) with bottom at y=4
+    // Pickup arc
     ctx.beginPath();
     ctx.arc(0, 0, 7, 0, Math.PI, false);
     ctx.strokeStyle = white;
@@ -222,13 +257,13 @@
     ctx.lineCap = 'round';
     ctx.stroke();
 
-    // Stand line: from (0, 7) to (0, 10)
+    // Stand line
     ctx.beginPath();
     ctx.moveTo(0, 7);
     ctx.lineTo(0, 10);
     ctx.stroke();
 
-    // Base: from (-4, 10) to (4, 10)
+    // Base
     ctx.beginPath();
     ctx.moveTo(-4, 10);
     ctx.lineTo(4, 10);
@@ -237,9 +272,138 @@
     ctx.restore();
   }
 
-  /**
-   * Handle click — cancel recording/processing.
-   */
+  // ─── Pill Rendering ────────────────────────────────────────────────
+
+  function drawPill(w: number, h: number) {
+    if (!ctx) return;
+
+    const radius = h / 2;
+    const micAreaWidth = 40;
+
+    if (visualizerState === 'recording') {
+      // Background pill shape
+      drawPillBackground(w, h, radius, 0.85);
+      // Waveform bars
+      drawWaveformBars(w, h, micAreaWidth);
+      // Mic icon on the left
+      drawPillMicIcon(h, micAreaWidth);
+    } else if (visualizerState === 'processing') {
+      processingPhase += 0.04;
+      const pulse = Math.sin(processingPhase * Math.PI) * 0.5 + 0.5;
+      drawPillBackground(w, h, radius, 0.6 + pulse * 0.25);
+      drawPillProcessingDots(w, h);
+      drawPillMicIcon(h, micAreaWidth, 0.6 + pulse * 0.4);
+    } else {
+      drawPillBackground(w, h, radius);
+      drawPillMicIcon(h, micAreaWidth);
+    }
+  }
+
+  function drawPillBackground(w: number, h: number, radius: number, opacity: number = 1) {
+    if (!ctx) return;
+    ctx.beginPath();
+    ctx.roundRect(0, 0, w, h, radius);
+    ctx.fillStyle = `rgba(${ACCENT.r}, ${ACCENT.g}, ${ACCENT.b}, ${opacity})`;
+    ctx.fill();
+  }
+
+  function drawPillMicIcon(h: number, areaWidth: number, opacity: number = 1) {
+    if (!ctx) return;
+
+    const cx = areaWidth / 2 + 4;
+    const cy = h / 2;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    const scale = 16 / 24;
+    ctx.scale(scale, scale);
+    ctx.translate(0, -1);
+
+    const white = `rgba(255, 255, 255, ${opacity})`;
+
+    // Mic body
+    ctx.beginPath();
+    ctx.roundRect(-3, -8, 6, 12, 3);
+    ctx.fillStyle = white;
+    ctx.fill();
+
+    // Pickup arc
+    ctx.beginPath();
+    ctx.arc(0, 0, 7, 0, Math.PI, false);
+    ctx.strokeStyle = white;
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // Stand
+    ctx.beginPath();
+    ctx.moveTo(0, 7);
+    ctx.lineTo(0, 10);
+    ctx.stroke();
+
+    // Base
+    ctx.beginPath();
+    ctx.moveTo(-4, 10);
+    ctx.lineTo(4, 10);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawWaveformBars(w: number, h: number, micAreaWidth: number) {
+    if (!ctx) return;
+
+    const barRegionStart = micAreaWidth + 4;
+    const barRegionEnd = w - 16;
+    const barRegionWidth = barRegionEnd - barRegionStart;
+    const barWidth = 3;
+    const barGap = (barRegionWidth - WAVEFORM_BARS * barWidth) / (WAVEFORM_BARS - 1);
+    const maxBarHeight = h - 14;
+    const cy = h / 2;
+
+    for (let i = 0; i < WAVEFORM_BARS; i++) {
+      // Read from circular buffer, oldest first
+      const bufIndex = (waveformIndex + i) % WAVEFORM_BARS;
+      const level = waveformHistory[bufIndex];
+
+      // Minimum visible height + scaled height
+      const barHeight = Math.max(4, level * maxBarHeight);
+      const x = barRegionStart + i * (barWidth + barGap);
+      const y = cy - barHeight / 2;
+
+      // Fade bars from left (older) to right (newer)
+      const ageFactor = 0.4 + (i / WAVEFORM_BARS) * 0.6;
+      const alpha = ageFactor;
+
+      ctx.beginPath();
+      ctx.roundRect(x, y, barWidth, barHeight, barWidth / 2);
+      ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+      ctx.fill();
+    }
+  }
+
+  function drawPillProcessingDots(w: number, h: number) {
+    if (!ctx) return;
+
+    const cy = h / 2;
+    const cx = w / 2 + 10;
+    const dotRadius = 3;
+    const dotSpacing = 14;
+
+    for (let i = 0; i < 3; i++) {
+      const phase = processingPhase + i * 0.7;
+      const bounce = Math.sin(phase * Math.PI) * 0.5 + 0.5;
+      const y = cy - bounce * 6;
+      const alpha = 0.5 + bounce * 0.5;
+
+      ctx.beginPath();
+      ctx.arc(cx + (i - 1) * dotSpacing, y, dotRadius, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+      ctx.fill();
+    }
+  }
+
   async function handleStop() {
     indicatorLog('Stop button clicked');
     try {
@@ -253,7 +417,13 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="indicator-container" onclick={handleStop}>
+<div
+  class="indicator-container"
+  class:pill={indicatorStyle === 'pill'}
+  onclick={handleStop}
+  style:width="{canvasWidth}px"
+  style:height="{canvasHeight}px"
+>
   <canvas bind:this={canvas} class="visualizer-canvas"></canvas>
 </div>
 
@@ -267,8 +437,6 @@
   }
 
   .indicator-container {
-    width: 58px;
-    height: 58px;
     display: flex;
     align-items: center;
     justify-content: center;

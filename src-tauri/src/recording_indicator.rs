@@ -15,18 +15,26 @@
 //! indicator on Wayland.
 
 use crate::config;
+use crate::config::IndicatorStyle;
 use crate::mouse_tracker;
-use tauri::{AppHandle, LogicalPosition, Manager, Runtime, WebviewWindow};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Runtime, WebviewWindow};
 
 /// Label for the recording indicator window (must match tauri.conf.json)
 const INDICATOR_WINDOW_LABEL: &str = "recording-indicator";
 
-/// Indicator dimensions in logical pixels (must match frontend)
-const PILL_WIDTH: f64 = 58.0;
-const PILL_HEIGHT: f64 = 58.0;
+/// Cursor-dot/fixed-float dimensions in logical pixels
+const DOT_WIDTH: f64 = 58.0;
+const DOT_HEIGHT: f64 = 58.0;
+
+/// Pill dimensions in logical pixels
+const PILL_WIDTH: f64 = 280.0;
+const PILL_HEIGHT: f64 = 44.0;
 
 /// Fallback: padding from bottom of screen (above dock)
 const BOTTOM_PADDING: f64 = 120.0;
+
+/// Padding from screen edge for pill style
+const PILL_EDGE_PADDING: f64 = 12.0;
 
 /// Check if we're running on Wayland (where indicator positioning won't work well)
 #[cfg(target_os = "linux")]
@@ -95,20 +103,116 @@ pub(crate) fn find_monitor_for_point(
     None
 }
 
+/// Get the window dimensions for a given indicator style.
+pub fn dimensions_for_style(style: IndicatorStyle) -> (f64, f64) {
+    match style {
+        IndicatorStyle::CursorDot | IndicatorStyle::FixedFloat => (DOT_WIDTH, DOT_HEIGHT),
+        IndicatorStyle::Pill => (PILL_WIDTH, PILL_HEIGHT),
+    }
+}
+
+/// Resize the indicator window to match the current style.
+fn resize_indicator(indicator: &WebviewWindow, style: IndicatorStyle) -> Result<(), String> {
+    let (w, h) = dimensions_for_style(style);
+    indicator
+        .set_size(tauri::Size::Logical(LogicalSize::new(w, h)))
+        .map_err(|e| e.to_string())
+}
+
+/// Position the indicator at a fixed location based on `RecorderPosition` config.
+fn position_at_fixed(
+    app: &AppHandle,
+    indicator: &WebviewWindow,
+    style: IndicatorStyle,
+) -> Result<(), String> {
+    let cfg = config::get_config().unwrap_or_default();
+    let pos = cfg.recorder.position;
+    let (iw, ih) = dimensions_for_style(style);
+
+    let monitor = app
+        .get_webview_window("main")
+        .and_then(|w| w.current_monitor().ok().flatten())
+        .or_else(|| indicator.current_monitor().ok().flatten())
+        .or_else(|| indicator.primary_monitor().ok().flatten())
+        .ok_or_else(|| "Could not determine current monitor".to_string())?;
+
+    let scale = monitor.scale_factor();
+    let mp = monitor.position();
+    let ms = monitor.size();
+    let mx = mp.x as f64 / scale;
+    let my = mp.y as f64 / scale;
+    let mw = ms.width as f64 / scale;
+    let mh = ms.height as f64 / scale;
+
+    let padding = 20.0;
+    let (x, y) = match pos {
+        config::RecorderPosition::Cursor => {
+            // For fixed-float with cursor position: use centre-bottom fallback
+            (mx + (mw / 2.0) - (iw / 2.0), my + mh - ih - BOTTOM_PADDING)
+        }
+        config::RecorderPosition::TrayIcon => {
+            // Near top-right (where tray typically is)
+            (mx + mw - iw - padding, my + padding + 30.0)
+        }
+        config::RecorderPosition::TopLeft => (mx + padding, my + padding + 30.0),
+        config::RecorderPosition::TopRight => (mx + mw - iw - padding, my + padding + 30.0),
+        config::RecorderPosition::BottomLeft => (mx + padding, my + mh - ih - BOTTOM_PADDING),
+        config::RecorderPosition::BottomRight => {
+            (mx + mw - iw - padding, my + mh - ih - BOTTOM_PADDING)
+        }
+        config::RecorderPosition::Centre => {
+            (mx + (mw / 2.0) - (iw / 2.0), my + (mh / 2.0) - (ih / 2.0))
+        }
+    };
+
+    indicator
+        .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
+        .map_err(|e| e.to_string())?;
+
+    tracing::debug!("Fixed-float indicator at ({}, {}) position={:?}", x, y, pos);
+    Ok(())
+}
+
+/// Position the pill indicator at the top-centre of the screen.
+fn position_pill(app: &AppHandle, indicator: &WebviewWindow) -> Result<(), String> {
+    let monitor = app
+        .get_webview_window("main")
+        .and_then(|w| w.current_monitor().ok().flatten())
+        .or_else(|| indicator.current_monitor().ok().flatten())
+        .or_else(|| indicator.primary_monitor().ok().flatten())
+        .ok_or_else(|| "Could not determine current monitor".to_string())?;
+
+    let scale = monitor.scale_factor();
+    let mp = monitor.position();
+    let ms = monitor.size();
+    let mx = mp.x as f64 / scale;
+    let my = mp.y as f64 / scale;
+    let mw = ms.width as f64 / scale;
+
+    let x = mx + (mw / 2.0) - (PILL_WIDTH / 2.0);
+    let y = my + PILL_EDGE_PADDING + 30.0; // Below menu bar
+
+    indicator
+        .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
+        .map_err(|e| e.to_string())?;
+
+    tracing::debug!("Pill indicator at top-centre ({}, {})", x, y);
+    Ok(())
+}
+
 /// Shared logic for showing the recording indicator.
 ///
-/// Checks config, warns on Wayland, gets the window, shows on Linux first,
-/// positions at cursor (using `fallback_position` when mouse position is
-/// unavailable), shows on macOS, and starts mouse tracking.
+/// Checks config, warns on Wayland, gets the window, resizes and positions
+/// based on the current indicator style, then shows and optionally starts
+/// mouse tracking (cursor-dot only).
 fn show_indicator_common<F>(app: &AppHandle, fallback_position: F) -> Result<(), String>
 where
     F: FnOnce(&AppHandle, &WebviewWindow) -> Result<(), String>,
 {
-    let show_indicator = config::get_config()
-        .map(|c| c.general.show_recording_indicator)
-        .unwrap_or(true);
+    let cfg = config::get_config().unwrap_or_default();
+    let style = cfg.general.indicator_style;
 
-    if !show_indicator {
+    if !cfg.general.show_recording_indicator {
         tracing::info!("Recording indicator disabled in config, skipping show");
         return Ok(());
     }
@@ -120,21 +224,37 @@ where
     let indicator = get_indicator_window(app)
         .ok_or_else(|| "Recording indicator window not found".to_string())?;
 
+    // Resize window for the current style
+    resize_indicator(&indicator, style)?;
+
+    // Emit style to frontend so it knows how to render
+    let _ = indicator.emit("indicator-style", style);
+
     // On Linux, show before positioning to ensure the window is mapped
     #[cfg(target_os = "linux")]
     {
         indicator.show().map_err(|e| e.to_string())?;
     }
 
-    // Position at cursor or use the provided fallback
-    if let Some((x, y)) = mouse_tracker::get_initial_position() {
-        indicator
-            .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
-            .map_err(|e| e.to_string())?;
-        tracing::debug!("Recording indicator positioned at cursor ({}, {})", x, y);
-    } else {
-        tracing::info!("No mouse position available, using fallback position");
-        fallback_position(app, &indicator)?;
+    match style {
+        IndicatorStyle::CursorDot => {
+            // Position at cursor or use the provided fallback
+            if let Some((x, y)) = mouse_tracker::get_initial_position() {
+                indicator
+                    .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
+                    .map_err(|e| e.to_string())?;
+                tracing::debug!("Cursor-dot indicator at ({}, {})", x, y);
+            } else {
+                tracing::info!("No mouse position available, using fallback position");
+                fallback_position(app, &indicator)?;
+            }
+        }
+        IndicatorStyle::FixedFloat => {
+            position_at_fixed(app, &indicator, style)?;
+        }
+        IndicatorStyle::Pill => {
+            position_pill(app, &indicator)?;
+        }
     }
 
     // On macOS, show after positioning
@@ -143,7 +263,11 @@ where
         indicator.show().map_err(|e| e.to_string())?;
     }
 
-    mouse_tracker::start_tracking();
+    // Only track mouse for cursor-dot style
+    if style == IndicatorStyle::CursorDot {
+        mouse_tracker::start_tracking();
+    }
+
     Ok(())
 }
 
@@ -160,8 +284,8 @@ fn position_at_primary_monitor<R: Runtime>(indicator: &tauri::WebviewWindow<R>) 
         let my = pos.y as f64 / scale;
         let mw = size.width as f64 / scale;
         let mh = size.height as f64 / scale;
-        let x = mx + (mw / 2.0) - (PILL_WIDTH / 2.0);
-        let y = my + mh - PILL_HEIGHT - BOTTOM_PADDING;
+        let x = mx + (mw / 2.0) - (DOT_WIDTH / 2.0);
+        let y = my + mh - DOT_HEIGHT - BOTTOM_PADDING;
         let _ = indicator.set_position(tauri::Position::Logical(LogicalPosition::new(x, y)));
     }
 }
@@ -221,8 +345,8 @@ fn position_at_bottom_centre(app: &AppHandle, indicator: &WebviewWindow) -> Resu
     );
 
     // Calculate centre-bottom position
-    let x = monitor_x + (monitor_width / 2.0) - (PILL_WIDTH / 2.0);
-    let y = monitor_y + monitor_height - PILL_HEIGHT - BOTTOM_PADDING;
+    let x = monitor_x + (monitor_width / 2.0) - (DOT_WIDTH / 2.0);
+    let y = monitor_y + monitor_height - DOT_HEIGHT - BOTTOM_PADDING;
 
     tracing::info!("Setting indicator position to ({}, {})", x, y);
 
@@ -274,8 +398,9 @@ pub fn hide_recording_indicator(app: AppHandle) -> Result<(), String> {
 
 /// Show the recording indicator immediately (generic version for shortcut handler).
 ///
-/// Positions the indicator at the current mouse cursor position and starts
-/// cursor-following tracking. Skips the caret position lookup for instant response.
+/// Positions the indicator based on the configured style. For cursor-dot,
+/// positions at the current mouse cursor position and starts cursor-following
+/// tracking. For fixed-float and pill, uses static positioning.
 ///
 /// The window is kept always-visible but positioned off-screen when "hidden"
 /// to avoid macOS window show/hide animation delays.
@@ -286,19 +411,14 @@ pub fn hide_recording_indicator(app: AppHandle) -> Result<(), String> {
 pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     tracing::info!("show_indicator_instant called (fast path)");
 
-    // Delegate to the AppHandle (non-generic) path. The generic version
-    // exists for API compatibility; internally we use the concrete type.
-    // On macOS (the only current platform using Runtime generics), AppHandle
-    // and AppHandle<R> both resolve to the same Tauri runtime.
     let indicator = get_indicator_window_generic(app)
         .ok_or_else(|| "Recording indicator window not found".to_string())?;
 
     // Check config
-    let show_indicator = config::get_config()
-        .map(|c| c.general.show_recording_indicator)
-        .unwrap_or(true);
+    let cfg = config::get_config().unwrap_or_default();
+    let style = cfg.general.indicator_style;
 
-    if !show_indicator {
+    if !cfg.general.show_recording_indicator {
         tracing::info!("Recording indicator disabled in config, skipping instant show");
         return Ok(());
     }
@@ -307,21 +427,40 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
         tracing::warn!("Running on Wayland - indicator positioning may not work correctly");
     }
 
+    // Resize window for the current style
+    let (w, h) = dimensions_for_style(style);
+    let _ = indicator.set_size(tauri::Size::Logical(LogicalSize::new(w, h)));
+
+    // Emit style to frontend
+    let _ = indicator.emit("indicator-style", style);
+
     // On Linux, show before positioning to ensure the window is mapped
     #[cfg(target_os = "linux")]
     {
         indicator.show().map_err(|e| e.to_string())?;
     }
 
-    // Position at cursor or fall back to primary monitor centre-bottom
-    if let Some((x, y)) = mouse_tracker::get_initial_position() {
-        indicator
-            .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
-            .map_err(|e| e.to_string())?;
-        tracing::debug!("Recording indicator positioned at cursor ({}, {})", x, y);
-    } else {
-        position_at_primary_monitor(&indicator);
-        tracing::debug!("Recording indicator positioned at fallback (bottom-centre)");
+    match style {
+        IndicatorStyle::CursorDot => {
+            // Position at cursor or fall back to primary monitor centre-bottom
+            if let Some((x, y)) = mouse_tracker::get_initial_position() {
+                indicator
+                    .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
+                    .map_err(|e| e.to_string())?;
+                tracing::debug!("Cursor-dot indicator at ({}, {})", x, y);
+            } else {
+                position_at_primary_monitor(&indicator);
+                tracing::debug!("Cursor-dot indicator at fallback (bottom-centre)");
+            }
+        }
+        IndicatorStyle::FixedFloat => {
+            // Position at the configured fixed location
+            position_fixed_generic(&indicator)?;
+        }
+        IndicatorStyle::Pill => {
+            // Position at top-centre of screen
+            position_pill_generic(&indicator)?;
+        }
     }
 
     // On macOS, show after positioning
@@ -330,7 +469,83 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
         indicator.show().map_err(|e| e.to_string())?;
     }
 
-    mouse_tracker::start_tracking();
+    // Only track mouse for cursor-dot style
+    if style == IndicatorStyle::CursorDot {
+        mouse_tracker::start_tracking();
+    }
+
+    Ok(())
+}
+
+/// Position indicator at fixed location (generic version for shortcut handler).
+fn position_fixed_generic<R: Runtime>(
+    indicator: &tauri::WebviewWindow<R>,
+) -> Result<(), String> {
+    let cfg = config::get_config().unwrap_or_default();
+    let pos = cfg.recorder.position;
+    let style = cfg.general.indicator_style;
+    let (iw, ih) = dimensions_for_style(style);
+
+    let monitor = indicator
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .ok_or_else(|| "Could not determine primary monitor".to_string())?;
+
+    let scale = monitor.scale_factor();
+    let mp = monitor.position();
+    let ms = monitor.size();
+    let mx = mp.x as f64 / scale;
+    let my = mp.y as f64 / scale;
+    let mw = ms.width as f64 / scale;
+    let mh = ms.height as f64 / scale;
+
+    let padding = 20.0;
+    let (x, y) = match pos {
+        config::RecorderPosition::Cursor => {
+            (mx + (mw / 2.0) - (iw / 2.0), my + mh - ih - BOTTOM_PADDING)
+        }
+        config::RecorderPosition::TrayIcon => (mx + mw - iw - padding, my + padding + 30.0),
+        config::RecorderPosition::TopLeft => (mx + padding, my + padding + 30.0),
+        config::RecorderPosition::TopRight => (mx + mw - iw - padding, my + padding + 30.0),
+        config::RecorderPosition::BottomLeft => (mx + padding, my + mh - ih - BOTTOM_PADDING),
+        config::RecorderPosition::BottomRight => {
+            (mx + mw - iw - padding, my + mh - ih - BOTTOM_PADDING)
+        }
+        config::RecorderPosition::Centre => {
+            (mx + (mw / 2.0) - (iw / 2.0), my + (mh / 2.0) - (ih / 2.0))
+        }
+    };
+
+    indicator
+        .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Position pill at top-centre (generic version for shortcut handler).
+fn position_pill_generic<R: Runtime>(
+    indicator: &tauri::WebviewWindow<R>,
+) -> Result<(), String> {
+    let monitor = indicator
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .ok_or_else(|| "Could not determine primary monitor".to_string())?;
+
+    let scale = monitor.scale_factor();
+    let mp = monitor.position();
+    let ms = monitor.size();
+    let mx = mp.x as f64 / scale;
+    let my = mp.y as f64 / scale;
+    let mw = ms.width as f64 / scale;
+
+    let x = mx + (mw / 2.0) - (PILL_WIDTH / 2.0);
+    let y = my + PILL_EDGE_PADDING + 30.0;
+
+    indicator
+        .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 

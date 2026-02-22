@@ -162,6 +162,24 @@ impl Default for EnhancementConfig {
     }
 }
 
+/// Recording indicator visual style
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum IndicatorStyle {
+    /// Small dot/square that follows the mouse cursor (default)
+    CursorDot,
+    /// Small stationary window at a fixed screen position
+    FixedFloat,
+    /// Elongated horizontal bar with waveform visualisation
+    Pill,
+}
+
+impl Default for IndicatorStyle {
+    fn default() -> Self {
+        Self::CursorDot
+    }
+}
+
 /// General application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -176,6 +194,8 @@ pub struct GeneralConfig {
     pub check_for_updates: bool,
     /// Show the floating recording indicator during recording
     pub show_recording_indicator: bool,
+    /// Visual style for the recording indicator
+    pub indicator_style: IndicatorStyle,
 }
 
 impl Default for GeneralConfig {
@@ -186,6 +206,7 @@ impl Default for GeneralConfig {
             show_in_dock: false,
             check_for_updates: true,
             show_recording_indicator: true,
+            indicator_style: IndicatorStyle::default(),
         }
     }
 }
@@ -726,6 +747,7 @@ mod tests {
                 show_in_dock: true,
                 check_for_updates: true,
                 show_recording_indicator: true,
+                indicator_style: IndicatorStyle::CursorDot,
             },
             recorder: RecorderConfig {
                 position: RecorderPosition::Centre,
