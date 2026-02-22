@@ -141,6 +141,17 @@ pub fn register<R: Runtime>(
                 return;
             }
 
+            // Suppress shortcuts when the screen is locked or the screensaver
+            // is active. Prevents accidental recording when the user presses a
+            // key to dismiss the lock screen.
+            if crate::platform::is_screen_locked() {
+                tracing::debug!(
+                    "Discarding shortcut event for '{}' — screen is locked",
+                    shortcut_id
+                );
+                return;
+            }
+
             // Log at INFO level so it always shows
             tracing::info!(
                 ">>> Shortcut callback fired for '{}' (accelerator: '{}', shortcut: {:?})",

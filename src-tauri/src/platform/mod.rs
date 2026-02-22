@@ -155,6 +155,21 @@ fn get_macos_gpu_name() -> Option<String> {
     None
 }
 
+/// Check if the screen is locked or the screensaver is active.
+///
+/// Used to suppress global shortcuts when the user is on the lock screen,
+/// preventing accidental recording triggers when dismissing the screensaver.
+pub fn is_screen_locked() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos::is_screen_locked()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false // Not implemented on other platforms
+    }
+}
+
 /// Check if accessibility permissions are available
 #[tauri::command]
 pub fn check_accessibility() -> bool {
