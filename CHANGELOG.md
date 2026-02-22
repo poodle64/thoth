@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.2.7] - 2026-02-22
+
+### Added
+
+- **Retranscribe recordings**: Re-process existing recordings from history with current model settings
+- **Configurable recording indicator style**: Three visual styles (cursor-dot, fixed-float, pill) selectable in Settings
+- **Stale TCC permission detection**: Automatically detects stale macOS accessibility/microphone permissions with guided reset flow
+
+### Fixed
+
+- Trailing silence now consistently padded across all transcription backends, preventing truncation at end of speech
+- Recording indicator mouse tracker handles macOS sleep/wake cycles gracefully
+- Updater shows actionable error states with retry and manual download fallback
+
 ## [2026.2.5] - 2026-02-20
 
 ### Added
