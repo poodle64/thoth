@@ -210,6 +210,37 @@ pub fn register<R: Runtime>(
                         }
                     }
 
+                    // Handle copy-last-transcription directly in Rust
+                    // (no frontend round-trip needed)
+                    if shortcut_id == shortcut_ids::COPY_LAST_TRANSCRIPTION {
+                        match crate::database::transcription::list_transcriptions(
+                            Some(1),
+                            Some(0),
+                        ) {
+                            Ok(transcriptions) => {
+                                if let Some(t) = transcriptions.into_iter().next() {
+                                    match arboard::Clipboard::new()
+                                        .and_then(|mut cb| cb.set_text(t.text))
+                                    {
+                                        Ok(()) => tracing::info!(
+                                            "Copied last transcription to clipboard via shortcut"
+                                        ),
+                                        Err(e) => tracing::error!(
+                                            "Failed to copy to clipboard: {}",
+                                            e
+                                        ),
+                                    }
+                                } else {
+                                    tracing::info!("No transcriptions to copy");
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to get last transcription: {}", e)
+                            }
+                        }
+                        return;
+                    }
+
                     // Emit legacy event for backwards compatibility
                     match app_handle.emit("shortcut-triggered", shortcut_id.clone()) {
                         Ok(_) => {
