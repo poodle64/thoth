@@ -438,6 +438,20 @@
                     class:active={configStore.general.indicatorStyle === 'cursor-dot'}
                     onclick={() => handleIndicatorStyleChange('cursor-dot')}
                   >
+                    <div class="mode-preview">
+                      <svg viewBox="0 0 80 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Cursor arrow -->
+                        <path d="M20 8 L20 36 L26 30 L32 40 L36 38 L30 28 L38 28 Z" fill="var(--color-text-secondary)" stroke="var(--color-bg-primary)" stroke-width="1.5"/>
+                        <!-- Glowing dot -->
+                        <circle cx="52" cy="22" r="10" fill="var(--color-accent)" opacity="0.2"/>
+                        <circle cx="52" cy="22" r="7" fill="var(--color-accent)" opacity="0.4"/>
+                        <circle cx="52" cy="22" r="4.5" fill="var(--color-accent)"/>
+                        <!-- Mic icon inside dot -->
+                        <rect x="50.5" y="18" width="3" height="5" rx="1.5" fill="white"/>
+                        <path d="M49.5 22.5 C49.5 24 50.5 25 52 25 C53.5 25 54.5 24 54.5 22.5" stroke="white" stroke-width="0.8" fill="none"/>
+                        <line x1="52" y1="25" x2="52" y2="26.5" stroke="white" stroke-width="0.8"/>
+                      </svg>
+                    </div>
                     <span class="mode-title">Cursor Dot</span>
                     <span class="mode-description">Follows your mouse cursor</span>
                   </button>
@@ -446,6 +460,23 @@
                     class:active={configStore.general.indicatorStyle === 'fixed-float'}
                     onclick={() => handleIndicatorStyleChange('fixed-float')}
                   >
+                    <div class="mode-preview">
+                      <svg viewBox="0 0 80 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Screen outline -->
+                        <rect x="10" y="6" width="60" height="36" rx="3" stroke="var(--color-text-tertiary)" stroke-width="1.5" fill="none"/>
+                        <!-- Screen stand -->
+                        <line x1="32" y1="42" x2="48" y2="42" stroke="var(--color-text-tertiary)" stroke-width="1.5" stroke-linecap="round"/>
+                        <line x1="40" y1="42" x2="40" y2="46" stroke="var(--color-text-tertiary)" stroke-width="1.5"/>
+                        <line x1="34" y1="46" x2="46" y2="46" stroke="var(--color-text-tertiary)" stroke-width="1.5" stroke-linecap="round"/>
+                        <!-- Fixed dot in top-right corner of screen -->
+                        <circle cx="59" cy="16" r="6" fill="var(--color-accent)" opacity="0.3"/>
+                        <circle cx="59" cy="16" r="4" fill="var(--color-accent)"/>
+                        <!-- Mic icon inside dot -->
+                        <rect x="58" y="13.5" width="2" height="3.5" rx="1" fill="white"/>
+                        <path d="M57.2 16.5 C57.2 17.5 58 18.2 59 18.2 C60 18.2 60.8 17.5 60.8 16.5" stroke="white" stroke-width="0.6" fill="none"/>
+                        <line x1="59" y1="18.2" x2="59" y2="19" stroke="white" stroke-width="0.6"/>
+                      </svg>
+                    </div>
                     <span class="mode-title">Fixed Float</span>
                     <span class="mode-description">Stays at a fixed screen position</span>
                   </button>
@@ -454,6 +485,25 @@
                     class:active={configStore.general.indicatorStyle === 'pill'}
                     onclick={() => handleIndicatorStyleChange('pill')}
                   >
+                    <div class="mode-preview">
+                      <svg viewBox="0 0 80 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Pill shape -->
+                        <rect x="8" y="16" width="64" height="20" rx="10" fill="var(--color-accent)"/>
+                        <!-- Mic icon on left side -->
+                        <rect x="17" y="22" width="4" height="6" rx="2" fill="white"/>
+                        <path d="M15.5 27 C15.5 29 17 30.5 19 30.5 C21 30.5 22.5 29 22.5 27" stroke="white" stroke-width="1" fill="none"/>
+                        <line x1="19" y1="30.5" x2="19" y2="32" stroke="white" stroke-width="1"/>
+                        <!-- Waveform bars -->
+                        <rect x="28" y="24" width="2.5" height="4" rx="1" fill="white" opacity="0.45"/>
+                        <rect x="33" y="22" width="2.5" height="8" rx="1" fill="white" opacity="0.5"/>
+                        <rect x="38" y="20" width="2.5" height="12" rx="1" fill="white" opacity="0.55"/>
+                        <rect x="43" y="23" width="2.5" height="6" rx="1" fill="white" opacity="0.65"/>
+                        <rect x="48" y="19" width="2.5" height="14" rx="1" fill="white" opacity="0.75"/>
+                        <rect x="53" y="21" width="2.5" height="10" rx="1" fill="white" opacity="0.85"/>
+                        <rect x="58" y="23" width="2.5" height="6" rx="1" fill="white" opacity="0.95"/>
+                        <rect x="63" y="24" width="2.5" height="4" rx="1" fill="white"/>
+                      </svg>
+                    </div>
                     <span class="mode-title">Pill Bar</span>
                     <span class="mode-description">Waveform bar at top of screen</span>
                   </button>
@@ -683,6 +733,24 @@
     cursor: pointer;
     text-align: left;
     transition: border-color var(--transition-fast), background var(--transition-fast);
+  }
+
+  .indicator-style-selector .mode-option {
+    align-items: center;
+    text-align: center;
+    gap: 6px;
+    padding: 12px 12px 14px;
+  }
+
+  .mode-preview {
+    width: 100%;
+    max-width: 80px;
+    aspect-ratio: 80 / 52;
+  }
+
+  .mode-preview svg {
+    width: 100%;
+    height: 100%;
   }
 
   .mode-option:hover {

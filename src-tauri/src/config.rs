@@ -726,7 +726,7 @@ mod tests {
                 model_id: Some("test-model".to_string()),
                 language: "de".to_string(),
                 auto_copy: false,
-                auto_paste: false,
+                auto_paste: true,
                 add_leading_space: true,
             },
             shortcuts: ShortcutConfig {

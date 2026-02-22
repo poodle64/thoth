@@ -54,10 +54,11 @@ impl TranscriptionService {
 
     /// Transcribe audio from a WAV file
     ///
-    /// Appends 1 second of trailing silence so the model can finalise the last
-    /// word, then passes the padded WAV to FluidAudio for transcription.
+    /// Pads with 500 ms leading silence (so the model can initialise) and
+    /// 1 s trailing silence (so it can finalise the last word), then passes
+    /// the padded WAV to FluidAudio for transcription.
     pub fn transcribe(&self, audio_path: &Path) -> Result<String> {
-        let padded_path = append_trailing_silence(audio_path)?;
+        let padded_path = pad_with_silence(audio_path)?;
         let transcribe_path = padded_path.as_deref().unwrap_or(audio_path);
 
         let start = std::time::Instant::now();
@@ -86,11 +87,14 @@ impl TranscriptionService {
     }
 }
 
-/// Append 1 second of silence to a WAV file and write a temporary copy.
+/// Pad a WAV file with leading and trailing silence, writing a temporary copy.
+///
+/// Prepends 500 ms of silence so the model can initialise before speech starts,
+/// and appends 1 s of silence so it can finalise the last word.
 ///
 /// Returns `Ok(Some(path))` with the padded temp file, or `Ok(None)` if the
 /// original file couldn't be read (in which case FluidAudio gets the original).
-fn append_trailing_silence(audio_path: &Path) -> Result<Option<PathBuf>> {
+fn pad_with_silence(audio_path: &Path) -> Result<Option<PathBuf>> {
     let mut reader = match hound::WavReader::open(audio_path) {
         Ok(r) => r,
         Err(e) => {
@@ -101,29 +105,37 @@ fn append_trailing_silence(audio_path: &Path) -> Result<Option<PathBuf>> {
 
     let spec = reader.spec();
     let sample_rate = spec.sample_rate;
-    let silence_samples = sample_rate as usize; // 1 second
+    let leading_samples = sample_rate as usize / 2; // 500 ms
+    let trailing_samples = sample_rate as usize; // 1 second
 
     // Build temp path next to the original
     let tmp_path = audio_path.with_extension("padded.wav");
 
     let mut writer = hound::WavWriter::create(&tmp_path, spec)?;
 
-    // Copy all existing samples
     match spec.sample_format {
         hound::SampleFormat::Int => {
+            // Leading silence (per channel)
+            for _ in 0..leading_samples * spec.channels as usize {
+                writer.write_sample(0i16)?;
+            }
+            // Copy all existing samples
             for sample in reader.samples::<i16>() {
                 writer.write_sample(sample?)?;
             }
-            // Append silence (per channel)
-            for _ in 0..silence_samples * spec.channels as usize {
+            // Trailing silence (per channel)
+            for _ in 0..trailing_samples * spec.channels as usize {
                 writer.write_sample(0i16)?;
             }
         }
         hound::SampleFormat::Float => {
+            for _ in 0..leading_samples * spec.channels as usize {
+                writer.write_sample(0.0f32)?;
+            }
             for sample in reader.samples::<f32>() {
                 writer.write_sample(sample?)?;
             }
-            for _ in 0..silence_samples * spec.channels as usize {
+            for _ in 0..trailing_samples * spec.channels as usize {
                 writer.write_sample(0.0f32)?;
             }
         }
@@ -132,8 +144,9 @@ fn append_trailing_silence(audio_path: &Path) -> Result<Option<PathBuf>> {
     writer.finalize()?;
 
     tracing::info!(
-        "Padded WAV with {:.1}s trailing silence: {}",
-        silence_samples as f32 / sample_rate as f32,
+        "Padded WAV with {:.1}s leading + {:.1}s trailing silence: {}",
+        leading_samples as f32 / sample_rate as f32,
+        trailing_samples as f32 / sample_rate as f32,
         tmp_path.display()
     );
 
