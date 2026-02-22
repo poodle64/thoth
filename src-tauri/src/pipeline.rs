@@ -519,13 +519,10 @@ async fn process_audio(
     // Apply paragraph formatting for output only (not stored in database)
     let mut output_text = transcription::filter::format_paragraphs(&output.text);
 
-    // Append a trailing space after terminal punctuation so consecutive
-    // transcriptions don't run together when inserted at the cursor.
-    if output_text
-        .as_bytes()
-        .last()
-        .is_some_and(|&b| matches!(b, b'.' | b'?' | b'!' | b',' | b';' | b':'))
-    {
+    // Always append a trailing space so consecutive transcriptions don't
+    // run together when inserted at the cursor. Without this, "it" + "And"
+    // becomes "itAnd" instead of "it And".
+    if !output_text.ends_with(' ') && !output_text.ends_with('\n') {
         output_text.push(' ');
     }
 

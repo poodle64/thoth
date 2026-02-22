@@ -26,13 +26,9 @@ Thumbs.db
 .claude/CLAUDE.local.md
 .claude/.sessions/
 # Master project symlinks (local dev only, broken for other contributors)
-.claude/commands/master
 .claude/commands/deploy.md
 .claude/commands/git-release.md
 .claude/commands/screenshot.md
-.claude/hooks/master
-.claude/rules/master
-.claude/skills
 
 # ============================================================================
 # Environment & Secrets
@@ -86,7 +82,6 @@ docs/UPDATE_TESTING.md
 docs/app-icon-prompt.md
 docs/archive/
 docs/branding/
-docs/master
 
 # ============================================================================
 # Temporary files

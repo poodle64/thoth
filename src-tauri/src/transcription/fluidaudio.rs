@@ -106,7 +106,7 @@ fn pad_with_silence(audio_path: &Path) -> Result<Option<PathBuf>> {
     let spec = reader.spec();
     let sample_rate = spec.sample_rate;
     let leading_samples = sample_rate as usize / 2; // 500 ms
-    let trailing_samples = sample_rate as usize; // 1 second
+    let trailing_samples = sample_rate as usize * 3 / 2; // 1.5 seconds
 
     // Build temp path next to the original
     let tmp_path = audio_path.with_extension("padded.wav");

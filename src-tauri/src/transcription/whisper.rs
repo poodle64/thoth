@@ -155,7 +155,7 @@ impl WhisperTranscriptionService {
         // windows, so the extra padding never causes a problem.
         let samples = {
             const LEADING_SILENCE: usize = 8_000; // 500 ms at 16 kHz
-            const TRAILING_SILENCE: usize = 16_000; // 1 s at 16 kHz
+            const TRAILING_SILENCE: usize = 24_000; // 1.5 s at 16 kHz
             let mut padded = Vec::with_capacity(LEADING_SILENCE + samples.len() + TRAILING_SILENCE);
             padded.extend(std::iter::repeat(0.0f32).take(LEADING_SILENCE));
             padded.extend(samples);
