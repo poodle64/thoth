@@ -297,17 +297,28 @@ fn audio_has_speech(path: &std::path::Path) -> Result<bool, String> {
         samples
     };
 
-    // Calculate RMS
-    let rms = crate::audio::metering::calculate_rms(&mono_samples);
+    // Check for speech using windowed RMS rather than overall RMS.
+    // Short recordings often contain startup silence from the audio stream
+    // initialising, which dilutes the overall RMS below the threshold even
+    // when speech is clearly present in part of the recording.
+    let overall_rms = crate::audio::metering::calculate_rms(&mono_samples);
+
+    // Also find the peak RMS in 500ms windows
+    let window_size = 8000; // 500 ms at 16 kHz
+    let peak_window_rms = mono_samples
+        .chunks(window_size)
+        .map(|chunk| crate::audio::metering::calculate_rms(chunk))
+        .fold(0.0f32, f32::max);
 
     tracing::debug!(
-        "Audio RMS: {:.6} (threshold: {}), samples: {}",
-        rms,
+        "Audio RMS: overall={:.6}, peak_window={:.6} (threshold: {}), samples: {}",
+        overall_rms,
+        peak_window_rms,
         MIN_SPEECH_RMS,
         mono_samples.len()
     );
 
-    Ok(rms >= MIN_SPEECH_RMS)
+    Ok(peak_window_rms >= MIN_SPEECH_RMS)
 }
 
 /// Eagerly initialise the transcription model in the background.

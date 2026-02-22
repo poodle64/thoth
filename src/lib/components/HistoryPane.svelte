@@ -535,31 +535,13 @@
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
         </button>
-        {#if historyStore.records.length > 0}
-          <button
-            class="toolbar-btn danger"
-            onclick={handleClearAllRequest}
-            title="Clear all history"
-            type="button"
-          >
-            <svg
-              class="toolbar-btn-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-          </button>
-        {/if}
       </div>
     {/if}
   </div>
 
   <div class="content">
     <aside class="list-panel">
+      <div class="list-panel-scroll">
       <HistoryList
         items={filteredRecords}
         selectedId={historyStore.selectedId}
@@ -607,20 +589,91 @@
           {/if}
         {/snippet}
       </HistoryList>
+      </div>
+      {#if historyStore.records.length > 0}
+        <div class="list-panel-footer">
+          <button
+            class="clear-all-btn"
+            onclick={handleClearAllRequest}
+            type="button"
+          >
+            Clear All History
+          </button>
+        </div>
+      {/if}
     </aside>
 
     <main class="detail-panel">
       {#if historyStore.selectedRecord}
         {@const selected = historyStore.selectedRecord}
         <div class="detail-header">
-          <div class="detail-meta">
-            <span class="detail-date">{historyStore.formatDate(selected.timestamp)}</span>
-            {#if selected.duration > 0}
-              <span class="detail-duration">{historyStore.formatDuration(selected.duration)}</span>
-            {/if}
-            {#if selected.enhanced}
-              <span class="detail-badge">Enhanced</span>
-            {/if}
+          <div class="detail-header-top">
+            <div class="detail-meta">
+              <span class="detail-date">{historyStore.formatDate(selected.timestamp)}</span>
+              {#if selected.duration > 0}
+                <span class="detail-duration">{historyStore.formatDuration(selected.duration)}</span>
+              {/if}
+              {#if selected.enhanced}
+                <span class="detail-badge">Enhanced</span>
+              {/if}
+            </div>
+            <div class="detail-actions">
+              <button class="btn-icon-only primary" onclick={handleCopySelected} type="button" title="Copy to clipboard">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+              </button>
+              {#if hasMetadata(selected)}
+                <button
+                  class="btn"
+                  class:active={showMetadata}
+                  onclick={() => (showMetadata = !showMetadata)}
+                  title="Toggle metadata"
+                  type="button"
+                >
+                  <svg
+                    class="btn-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="16" x2="12" y2="12"></line>
+                    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                  </svg>
+                  Info
+                </button>
+              {/if}
+              {#if selected.audioPath}
+                <button
+                  class="btn"
+                  onclick={handleRetranscribe}
+                  disabled={retranscribingId !== null}
+                  title="Re-run transcription with current model"
+                  type="button"
+                >
+                  <svg
+                    class="btn-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                  </svg>
+                  {retranscribingId ? 'Redo...' : 'Redo'}
+                </button>
+              {/if}
+              <button class="btn-icon-only danger" onclick={handleDeleteSelected} type="button" title="Delete transcription">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+              </button>
+            </div>
           </div>
           <div class="detail-timestamp">
             {selected.timestamp.toLocaleString('en-AU', {
@@ -730,80 +783,6 @@
             </div>
           </div>
         {/if}
-
-        <div class="detail-actions">
-          <button class="btn primary" onclick={handleCopySelected} type="button">
-            <svg
-              class="btn-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
-            Copy
-          </button>
-          {#if hasMetadata(selected)}
-            <button
-              class="btn"
-              class:active={showMetadata}
-              onclick={() => (showMetadata = !showMetadata)}
-              title="Toggle metadata"
-              type="button"
-            >
-              <svg
-                class="btn-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="12" y1="16" x2="12" y2="12"></line>
-                <line x1="12" y1="8" x2="12.01" y2="8"></line>
-              </svg>
-              Info
-            </button>
-          {/if}
-          {#if selected.audioPath}
-            <button
-              class="btn"
-              onclick={handleRetranscribe}
-              disabled={retranscribingId !== null}
-              title="Re-run transcription with current model"
-              type="button"
-            >
-              <svg
-                class="btn-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <polyline points="23 4 23 10 17 10"></polyline>
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-              </svg>
-              {retranscribingId ? 'Retranscribing...' : 'Retranscribe'}
-            </button>
-          {/if}
-          <button class="btn danger" onclick={handleDeleteSelected} type="button">
-            <svg
-              class="btn-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path
-                d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
-              ></path>
-            </svg>
-            Delete
-          </button>
-        </div>
       {:else}
         <div class="empty-detail">
           <svg
@@ -1112,6 +1091,40 @@
     min-width: 280px;
     border-right: 1px solid var(--color-border);
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .list-panel-scroll {
+    flex: 1;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .list-panel-footer {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-top: 1px solid var(--color-border-subtle);
+    background: var(--color-bg-secondary);
+    flex-shrink: 0;
+  }
+
+  .clear-all-btn {
+    width: 100%;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border: none;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--color-text-tertiary);
+    font-size: var(--text-xs);
+    cursor: pointer;
+    transition:
+      background var(--transition-fast),
+      color var(--transition-fast);
+  }
+
+  .clear-all-btn:hover {
+    background: color-mix(in srgb, var(--color-error) 10%, transparent);
+    color: var(--color-error);
   }
 
   .detail-panel {
@@ -1131,6 +1144,13 @@
     padding: var(--spacing-md) var(--spacing-lg);
     border-bottom: 1px solid var(--color-border-subtle);
     background: var(--color-bg-secondary);
+  }
+
+  .detail-header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
   }
 
   .detail-meta {
@@ -1310,38 +1330,33 @@
 
   .detail-actions {
     display: flex;
-    gap: var(--spacing-sm);
-    padding: var(--spacing-md) var(--spacing-lg);
-    border-top: 1px solid var(--color-border);
-    background: var(--color-bg-secondary);
+    align-items: center;
+    gap: var(--spacing-xs);
+    flex-shrink: 0;
   }
 
   .btn {
     display: flex;
     align-items: center;
     gap: var(--spacing-xs);
-    padding: var(--spacing-sm) var(--spacing-md);
+    padding: 4px 10px;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     background: var(--color-bg-tertiary);
     color: var(--color-text-primary);
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
     cursor: pointer;
     transition: background var(--transition-fast);
+    white-space: nowrap;
   }
 
   .btn:hover {
     background: var(--color-bg-hover);
   }
 
-  .btn.primary {
-    background: var(--color-accent);
-    border-color: var(--color-accent);
-    color: white;
-  }
-
-  .btn.primary:hover {
-    background: var(--color-accent-hover);
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   .btn.danger {
@@ -1364,8 +1379,56 @@
   }
 
   .btn-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+  }
+
+  .btn-icon-only {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition:
+      background var(--transition-fast),
+      color var(--transition-fast);
+    flex-shrink: 0;
+  }
+
+  .btn-icon-only svg {
     width: 16px;
     height: 16px;
+  }
+
+  .btn-icon-only:hover {
+    background: var(--color-bg-hover);
+    color: var(--color-text-primary);
+  }
+
+  .btn-icon-only.primary {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: white;
+  }
+
+  .btn-icon-only.primary:hover {
+    background: var(--color-accent-hover);
+  }
+
+  .btn-icon-only.danger {
+    color: var(--color-error);
+    border-color: color-mix(in srgb, var(--color-error) 40%, transparent);
+  }
+
+  .btn-icon-only.danger:hover {
+    background: color-mix(in srgb, var(--color-error) 10%, transparent);
   }
 
   /* ========== Empty States ========== */
