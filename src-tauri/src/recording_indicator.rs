@@ -421,39 +421,43 @@ fn position_at_primary_monitor<R: Runtime>(indicator: &tauri::WebviewWindow<R>) 
 pub fn show_recording_indicator(app: AppHandle) -> Result<(), String> {
     tracing::info!("show_recording_indicator called");
 
-    #[cfg(feature = "native-indicator")]
+    // Try native indicator first on supported platforms
+    #[cfg(all(feature = "native-indicator", target_os = "macos"))]
     {
         // Initialize native indicator if not already done
         let style = native::IndicatorStyle::CursorDot; // TODO: Get from config
-        native::init_native_indicator(style).map_err(|e| e.to_string())?;
+        match native::init_native_indicator(style) {
+            Ok(()) => {
+                // Calculate position (bottom-centre of primary monitor)
+                let position = calculate_indicator_position(&app)?;
 
-        // Calculate position (bottom-centre of primary monitor)
-        let position = calculate_indicator_position(&app)?;
+                // Show native indicator
+                native::show_native_indicator(position.x, position.y)
+                    .map_err(|e| e.to_string())?;
 
-        // Show native indicator
-        native::show_native_indicator(position.x, position.y)
-            .map_err(|e| e.to_string())?;
+                // Set initial state
+                if let Err(e) = native::set_native_indicator_state(native::VisualizerState::Idle) {
+                    tracing::warn!("Failed to set native indicator state: {:?}", e);
+                }
 
-        // Set initial state
-        if let Err(e) = native::set_native_indicator_state(native::VisualizerState::Idle) {
-            tracing::warn!("Failed to set native indicator state: {:?}", e);
+                tracing::info!("Native indicator shown at ({}, {})", position.x, position.y);
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::warn!("Failed to initialize native indicator: {:?}, falling back to WebView", e);
+                // Fall through to WebView fallback
+            }
         }
-
-        tracing::info!("Native indicator shown at ({}, {})", position.x, position.y);
-        Ok(())
     }
 
-    #[cfg(not(feature = "native-indicator"))]
-    {
-        // WebView fallback
-        show_indicator_common(&app, |app_handle, indicator| {
-            position_at_bottom_centre(app_handle, indicator)
-        })
-    }
+    // WebView fallback (used on non-macOS or when native fails)
+    show_indicator_common(&app, |app_handle, indicator| {
+        position_at_bottom_centre(app_handle, indicator)
+    })
 }
 
 /// Calculate indicator position (bottom-centre of primary monitor)
-#[cfg(feature = "native-indicator")]
+#[cfg(all(feature = "native-indicator", target_os = "macos"))]
 fn calculate_indicator_position(app: &AppHandle) -> Result<LogicalPosition<f64>, String> {
     // Try to get monitor from main window, fallback to primary
     let monitor = if let Some(main_window) = app.get_webview_window("main") {
@@ -562,17 +566,23 @@ pub fn hide_recording_indicator(app: AppHandle) -> Result<(), String> {
     // Stop mouse tracking before hiding
     mouse_tracker::stop_tracking();
 
-    #[cfg(feature = "native-indicator")]
+    // Try native indicator first on supported platforms
+    #[cfg(all(feature = "native-indicator", target_os = "macos"))]
     {
-        // Hide native indicator
-        native::hide_native_indicator().map_err(|e| e.to_string())?;
-        tracing::info!("Native indicator hidden");
-        return Ok(());
+        match native::hide_native_indicator() {
+            Ok(()) => {
+                tracing::info!("Native indicator hidden");
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::warn!("Failed to hide native indicator: {:?}, falling back to WebView", e);
+                // Fall through to WebView fallback
+            }
+        }
     }
 
-    #[cfg(not(feature = "native-indicator"))]
-    {
-        let window = get_indicator_window(&app)
+    // WebView fallback (used on non-macOS or when native fails)
+    let window = get_indicator_window(&app)
         .ok_or_else(|| "Recording indicator window not found".to_string())?;
 
     // On Linux, use actual hide() - this should work now that the window
@@ -607,8 +617,7 @@ pub fn hide_recording_indicator(app: AppHandle) -> Result<(), String> {
         tracing::info!("Recording indicator moved off-screen (hidden)");
     }
 
-        Ok(())
-    }
+    Ok(())
 }
 
 /// Show the recording indicator immediately (generic version for shortcut handler).

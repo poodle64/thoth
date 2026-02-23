@@ -272,7 +272,8 @@ pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Resu
                     }
                 }
 
-                #[cfg(feature = "native-indicator")]
+                // Try native indicator on macOS, otherwise use WebView
+                #[cfg(all(feature = "native-indicator", target_os = "macos"))]
                 {
                     // Update native indicator (must happen on main thread)
                     // Use tauri::async_runtime to dispatch to main thread
@@ -290,9 +291,9 @@ pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Resu
                     });
                 }
 
-                #[cfg(not(feature = "native-indicator"))]
+                // WebView fallback (non-macOS or feature disabled)
+                #[cfg(not(all(feature = "native-indicator", target_os = "macos")))]
                 {
-                    // Fallback: emit events to WebView indicator
                     let event = AudioLevelEvent { rms, peak };
 
                     // Try to emit directly to the recording-indicator window, fall back to global
