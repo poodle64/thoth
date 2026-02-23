@@ -27,9 +27,12 @@ Flow was:
 
 ### Issue 3: Thread Safety Violation (Crash)
 
-After fixing Issue 2, the app crashed with "Rust cannot catch foreign exceptions". The keyboard service calls `show_indicator_instant()` from a background polling thread, which was trying to create NSWindow directly.
+After fixing Issue 2, the app crashed with "Rust cannot catch foreign exceptions" because:
 
-**macOS NSWindow MUST be created on the main thread.** Violating this causes an uncatchable Objective-C exception that crashes the app.
+- `show_indicator_instant()` is called from background threads (keyboard service, global shortcuts)
+- NSWindow creation was attempted directly from those threads
+- **macOS NSWindow MUST be created on the main thread**
+- Violating this causes an uncatchable Objective-C exception that crashes the app
 
 ## Solution
 
@@ -41,18 +44,24 @@ After fixing Issue 2, the app crashed with "Rust cannot catch foreign exceptions
 - Remove hardcoded state override in `update_audio()` - it should only update audio levels, not manage state
 - Reset state to Idle when hiding indicator
 
-**Commit f00b79b - Initialisation (Critical):**
+**Commit f00b79b - Initialisation (attempted, caused crash):**
 
 - Added native indicator initialisation to `show_indicator_instant()`
-- Made `calculate_indicator_position()` generic to work with both code paths
-- Native indicator now properly initialises, shows, and receives audio updates
+- This caused crashes due to thread safety violations
+- **Reverted in c798cbe**
 
-**Commit 0c4531d - Thread Safety (Crash Fix):**
+**Commit 0c4531d - Thread Safety Fix (attempted, still crashed):**
 
-- Dispatch NSWindow creation to main thread via `tauri::async_runtime::spawn()`
-- Wait briefly (100ms timeout) for initialisation to complete
-- Fall back to WebView if initialisation fails or times out
-- Same pattern as audio level updates - all NSWindow operations must go through main thread
+- Tried to dispatch NSWindow creation to main thread via `tauri::async_runtime::spawn()`
+- Still crashed because Tauri APIs also have thread requirements
+- **Reverted in c798cbe**
+
+**Commit c798cbe - Deferred Initialisation (Final Solution):**
+
+- `show_indicator_instant()` always uses WebView (thread-safe from any thread)
+- When recording starts (via IPC command on main thread), pipeline initialises native indicator
+- Seamlessly swaps native for WebView at same position
+- WebView visible for ~100ms before swap (imperceptible to user)
 
 ## Files Changed
 
@@ -64,25 +73,21 @@ After fixing Issue 2, the app crashed with "Rust cannot catch foreign exceptions
 - [src-tauri/src/recording_indicator/native.rs](src-tauri/src/recording_indicator/native.rs#L574-L577) - Reset to Idle on hide
 - [src-tauri/src/audio/preview.rs](src-tauri/src/audio/preview.rs#L179-L181) - Fixed unused import warnings
 
-**Initialisation (f00b79b):**
+**Deferred Initialisation (c798cbe):**
 
-- [src-tauri/src/recording_indicator.rs](src-tauri/src/recording_indicator.rs#L635-L705) - Added native support to show_indicator_instant()
-- [src-tauri/src/recording_indicator.rs](src-tauri/src/recording_indicator.rs#L461) - Made calculate_indicator_position() generic
-
-**Thread Safety (0c4531d):**
-
-- [src-tauri/src/recording_indicator.rs](src-tauri/src/recording_indicator.rs#L554-L615) - Dispatch native init to main thread with timeout
+- [src-tauri/src/recording_indicator.rs](src-tauri/src/recording_indicator.rs#L554-L561) - show_indicator_instant() uses WebView only
+- [src-tauri/src/pipeline.rs](src-tauri/src/pipeline.rs#L232-L260) - Pipeline initialises native and swaps for WebView
 
 ## Result
 
-✅ Native indicator now initialises correctly via `show_indicator_instant()`
-✅ NSWindow created safely on main thread (no more crashes)
+✅ No crashes (WebView init is thread-safe)
+✅ Instant indicator appearance (WebView shows immediately)
+✅ Native rendering during recording (seamless swap)
 ✅ Waveform displays correctly in both pill and dot styles
 ✅ Transitions smoothly: Recording → Processing → Idle
 ✅ Audio levels update in real-time
 ✅ No more "stuck in weird state" when toggling quickly
 ✅ No more "Native indicator not initialised" errors
-✅ No more "Rust cannot catch foreign exceptions" crashes
 
 ## Testing
 
@@ -95,9 +100,11 @@ pnpm tauri dev
 Test the waveform:
 
 1. Start recording with configured shortcut
-2. Speak into microphone - waveform should pulse with audio levels
-3. Stop recording - indicator should show processing animation
-4. When complete, indicator should disappear
+2. Brief WebView indicator appears (~100ms)
+3. Native indicator swaps in when recording starts
+4. Speak into microphone - waveform should pulse with audio levels
+5. Stop recording - indicator should show processing animation
+6. When complete, indicator should disappear
 
 Expected behaviour:
 
@@ -107,11 +114,11 @@ Expected behaviour:
 Check logs for successful initialisation:
 
 ```bash
-tail -f ~/.thoth/logs/thoth-debug.log | grep -i "native indicator"
+tail -f ~/.thoth/logs/thoth-debug.log | grep -i "native indicator\|switched from"
 ```
 
 Should see:
 
-- "Native indicator shown at (x, y)"
+- "Switched from WebView to native indicator"
 - No "not initialised" errors
 - No crashes
