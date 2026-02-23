@@ -232,12 +232,32 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
             // NOTE: Recording indicator is shown instantly from the shortcut handler
             // (show_indicator_instant) - no need to show it here again.
 
-            // Update native indicator state to Recording and start metering
+            // Initialize and show native indicator (replaces WebView indicator)
             #[cfg(all(feature = "native-indicator", target_os = "macos"))]
             {
-                use crate::recording_indicator::native::{set_native_indicator_state, VisualizerState};
-                if let Err(e) = set_native_indicator_state(VisualizerState::Recording) {
-                    tracing::warn!("Failed to set native indicator to Recording state: {:?}", e);
+                use crate::recording_indicator::native::{init_native_indicator, show_native_indicator, set_native_indicator_state, IndicatorStyle, VisualizerState};
+                use crate::config;
+
+                let cfg = config::get_config().unwrap_or_default();
+                let native_style = match cfg.general.indicator_style {
+                    crate::config::IndicatorStyle::Pill => IndicatorStyle::Pill,
+                    crate::config::IndicatorStyle::CursorDot => IndicatorStyle::CursorDot,
+                    crate::config::IndicatorStyle::FixedFloat => IndicatorStyle::FixedFloat,
+                };
+
+                // Initialize if not already done
+                if let Err(e) = init_native_indicator(native_style) {
+                    tracing::warn!("Failed to initialize native indicator: {:?}", e);
+                } else {
+                    // Hide WebView indicator and show native one at same position
+                    if let Some(webview_indicator) = app.get_webview_window("recording-indicator") {
+                        if let Ok(position) = webview_indicator.outer_position() {
+                            let _ = webview_indicator.hide();
+                            let _ = show_native_indicator(position.x as f64, position.y as f64);
+                            let _ = set_native_indicator_state(VisualizerState::Recording);
+                            tracing::info!("Switched from WebView to native indicator");
+                        }
+                    }
                 }
             }
 

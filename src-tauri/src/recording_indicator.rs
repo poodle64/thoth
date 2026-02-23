@@ -644,74 +644,11 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
         return Ok(());
     }
 
-    // Try native indicator first on supported platforms
-    // IMPORTANT: Must be dispatched to main thread (NSWindow requirement)
-    #[cfg(all(feature = "native-indicator", target_os = "macos"))]
-    {
-        let native_style = match style {
-            IndicatorStyle::Pill => native::IndicatorStyle::Pill,
-            IndicatorStyle::CursorDot => native::IndicatorStyle::CursorDot,
-            IndicatorStyle::FixedFloat => native::IndicatorStyle::FixedFloat,
-        };
+    // NOTE: Native indicator initialization requires main thread, but show_indicator_instant()
+    // is called from background threads (keyboard service, global shortcuts). For now, we
+    // always use WebView here and let the pipeline initialize the native indicator when
+    // recording actually starts (which happens via IPC command on main thread).
 
-        // Calculate position based on style (can be done off main thread)
-        let position = match style {
-            IndicatorStyle::CursorDot => {
-                // Try mouse cursor first
-                if let Some((x, y)) = mouse_tracker::get_initial_position() {
-                    LogicalPosition::new(x, y)
-                } else if let Some(pos) = crate::platform::get_caret_position() {
-                    LogicalPosition::new(pos.x - (DOT_WIDTH / 2.0), pos.y - DOT_HEIGHT - 12.0)
-                } else {
-                    calculate_indicator_position(app)?
-                }
-            }
-            IndicatorStyle::Pill => calculate_indicator_position(app)?,
-            IndicatorStyle::FixedFloat => calculate_indicator_position(app)?,
-        };
-
-        // Dispatch to main thread (NSWindow must be created on main thread)
-        let init_result = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let init_result_clone = init_result.clone();
-
-        tauri::async_runtime::spawn(async move {
-            let result = (|| {
-                native::init_native_indicator(native_style)?;
-                native::show_native_indicator(position.x, position.y)?;
-                native::set_native_indicator_state(native::VisualizerState::Idle)?;
-                Ok::<(), anyhow::Error>(())
-            })();
-
-            *init_result_clone.lock().unwrap() = Some(result);
-        });
-
-        // Wait briefly for initialization (with timeout)
-        let start = std::time::Instant::now();
-        while start.elapsed() < std::time::Duration::from_millis(100) {
-            if let Some(result) = init_result.lock().unwrap().as_ref() {
-                match result {
-                    Ok(()) => {
-                        // Only track mouse for cursor-dot style
-                        if style == IndicatorStyle::CursorDot {
-                            mouse_tracker::start_tracking();
-                        }
-                        tracing::info!("Native indicator shown at ({}, {})", position.x, position.y);
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to initialize native indicator: {:?}, falling back to WebView", e);
-                        break;
-                    }
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-
-        // If we get here, either it failed or timed out - fall through to WebView
-        tracing::warn!("Native indicator initialization timed out or failed, falling back to WebView");
-    }
-
-    // WebView fallback (non-macOS or native failed)
     let indicator = get_indicator_window_generic(app)
         .ok_or_else(|| "Recording indicator window not found".to_string())?;
 
