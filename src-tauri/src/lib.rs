@@ -162,8 +162,16 @@ pub fn run() {
         let stdout_layer = tracing_subscriber::fmt::layer().with_timer(LocalTimer);
         tracing_subscriber::registry()
             .with(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                    #[cfg(debug_assertions)]
+                    {
+                        tracing_subscriber::EnvFilter::new("debug")
+                    }
+                    #[cfg(not(debug_assertions))]
+                    {
+                        tracing_subscriber::EnvFilter::new("info")
+                    }
+                }),
             )
             .with(stdout_layer)
             .with(file_layer)
@@ -297,7 +305,7 @@ pub fn run() {
 
             // Re-warm the model after wake-from-sleep (CoreML cache eviction)
             #[cfg(target_os = "macos")]
-            platform::macos::register_wake_observer();
+            platform::macos::register_wake_observer(app.handle().clone());
 
             Ok(())
         })
@@ -464,6 +472,7 @@ pub fn run() {
             pipeline::pipeline_transcribe_file,
             pipeline::pipeline_retranscribe,
             pipeline::pipeline_cancel,
+            pipeline::indicator_window_ready,
             pipeline::is_pipeline_running,
             pipeline::get_pipeline_state,
             // Hands-free (VAD-based automatic recording)
