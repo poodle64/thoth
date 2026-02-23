@@ -10,7 +10,9 @@ use parking_lot::Mutex;
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
+#[cfg(not(all(feature = "native-indicator", target_os = "macos")))]
+use tauri::Manager;
 
 #[cfg(feature = "native-indicator")]
 use crate::recording_indicator::native;
@@ -175,6 +177,8 @@ static RECORDING_METER_STATE: Mutex<Option<MeteringState>> = Mutex::new(None);
 /// This runs alongside recording to provide real-time audio levels for the
 /// recording indicator overlay. Uses the same device as recording.
 pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Result<(), String> {
+    // `app` is only used in the WebView fallback path; suppress warning when native-indicator is active
+    let _app = &app;
     tracing::info!(
         "Recording metering: starting with device_id={:?}",
         device_id

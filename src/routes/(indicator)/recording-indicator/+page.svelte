@@ -76,11 +76,18 @@
     // Listen for pipeline progress
     const progressUnlisten = await listen<{ state: string; message: string; deviceName?: string }>(
       'pipeline-progress',
-      (event) => {
+      async (event) => {
         const state = event.payload.state;
         indicatorLog('Pipeline state:', state);
         if (state === 'recording') {
           visualizerState = 'recording';
+          // Signal backend to start metering now that recording has started
+          try {
+            await invoke('indicator_window_ready');
+            indicatorLog('===== Called indicator_window_ready (recording started) =====');
+          } catch (err) {
+            indicatorLog('FAILED to call indicator_window_ready on recording start:', err);
+          }
         } else if (
           state === 'transcribing' ||
           state === 'filtering' ||
@@ -102,6 +109,11 @@
       const levelUnlisten = await listen<{ rms: number; peak: number }>(
         'recording-audio-level',
         (event) => {
+          // Log every 30th event to avoid spam
+          if (waveformUpdateCounter % 30 === 0) {
+            indicatorLog(`[AUDIO LEVEL EVENT] rms=${event.payload.rms.toFixed(3)}, peak=${event.payload.peak.toFixed(3)}, audioLevel will be=${Math.min(1, event.payload.rms * 3).toFixed(3)}`);
+          }
+
           // Normalise and boost for visibility
           audioLevel = Math.min(1, event.payload.rms * 3);
 
@@ -116,9 +128,14 @@
       unlisteners.push(levelUnlisten);
       indicatorLog('===== Audio level listener REGISTERED SUCCESSFULLY =====');
 
-      // Emit ready event to signal backend we're ready to receive audio levels
-      await emit('indicator-ready', {});
-      indicatorLog('===== EMITTED indicator-ready EVENT =====');
+      // Signal backend we're ready to receive audio levels
+      // This will start metering if recording is already in progress
+      try {
+        await invoke('indicator_window_ready');
+        indicatorLog('===== Called indicator_window_ready command =====');
+      } catch (err) {
+        indicatorLog('FAILED to call indicator_window_ready:', err);
+      }
     } catch (err) {
       indicatorLog('FAILED to register audio level listener:', err);
     }

@@ -179,7 +179,9 @@ pub fn verify_accessibility_functional() -> bool {
         return false;
     }
 
-    // Actually attempt an AX API call to verify the permission is live
+    // Use a more robust AX API check that doesn't depend on window focus state.
+    // We check if we can get the role of the system-wide element, which should
+    // always succeed if accessibility permission is working.
     use core_foundation::base::TCFType;
     use core_foundation::string::CFString;
 
@@ -195,15 +197,20 @@ pub fn verify_accessibility_functional() -> bool {
             fn CFRelease(cf: *const std::ffi::c_void);
         }
 
-        // kAXErrorCannotComplete — returned when permission is stale
-        const AX_ERROR_CANNOT_COMPLETE: i32 = -25204;
+        // AX error codes
+        const AX_ERROR_SUCCESS: i32 = 0;
+        const AX_ERROR_API_DISABLED: i32 = -25211;
+        const AX_ERROR_INVALID_UI_ELEMENT: i32 = -25201;
 
         let system_wide = AXUIElementCreateSystemWide();
         if system_wide.is_null() {
             return false;
         }
 
-        let attr = CFString::new("AXFocusedApplication");
+        // Query the "AXRole" attribute of the system-wide element.
+        // This should always succeed (returns "AXSystemWide") if permission is working,
+        // regardless of focus state or window activity.
+        let attr = CFString::new("AXRole");
         let mut value: *mut std::ffi::c_void = std::ptr::null_mut();
         let result = AXUIElementCopyAttributeValue(
             system_wide,
@@ -216,17 +223,28 @@ pub fn verify_accessibility_functional() -> bool {
         }
         CFRelease(system_wide as *const _);
 
-        // Result 0 = success (got a focused app).
-        // kAXErrorNoValue (-25212) = no focused app, but the API is responding — permission works.
-        // kAXErrorCannotComplete (-25204) = permission is stale/broken.
-        if result == AX_ERROR_CANNOT_COMPLETE {
+        // If we got success, permission is working
+        if result == AX_ERROR_SUCCESS {
+            return true;
+        }
+
+        // kAXErrorAPIDisabled means accessibility is disabled system-wide or for this app
+        // kAXErrorInvalidUIElement would be very unexpected for system-wide element
+        if result == AX_ERROR_API_DISABLED || result == AX_ERROR_INVALID_UI_ELEMENT {
             tracing::warn!(
-                "Accessibility permission appears granted but AX API returned \
-                 kAXErrorCannotComplete — TCC entry is likely stale"
+                "Accessibility permission check failed with error code {} — \
+                 permission may be stale or disabled",
+                result
             );
             return false;
         }
 
+        // For any other error, be conservative and assume it's working
+        // (AXIsProcessTrusted already returned true, and we did get a valid system element)
+        tracing::debug!(
+            "AX API verification returned code {} (non-fatal), assuming permission is working",
+            result
+        );
         true
     }
 }
@@ -533,11 +551,15 @@ pub fn is_screen_locked() -> bool {
 
 /// Register a listener for system wake-from-sleep events.
 ///
-/// When the Mac wakes up, the CoreML/ONNX compilation cache may have been
-/// evicted. We re-warm the transcription model in the background so the
-/// first recording after wake isn't penalised.
-pub fn register_wake_observer() {
-    std::thread::spawn(|| {
+/// When the Mac wakes up:
+/// - The CoreML/ONNX compilation cache may have been evicted
+/// - The recording indicator window may have been moved by macOS
+/// - Monitor configurations may have changed
+///
+/// We re-warm the transcription model, reposition the indicator window,
+/// and invalidate cached monitor bounds.
+pub fn register_wake_observer(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
         let mut last_check = std::time::Instant::now();
 
         loop {
@@ -549,21 +571,30 @@ pub fn register_wake_observer() {
             // the system was asleep.
             if elapsed > std::time::Duration::from_secs(30) {
                 tracing::info!(
-                    "Detected wake from sleep ({:.0}s gap), re-warming transcription model",
+                    "Detected wake from sleep ({:.0}s gap), performing post-wake recovery",
                     elapsed.as_secs_f64()
                 );
-                // Brief delay to let the system stabilise after wake
+
+                // Brief delay to let the system stabilise after wake (displays reconnect, etc.)
                 std::thread::sleep(std::time::Duration::from_secs(3));
+
+                // Re-warm the transcription model
                 crate::transcription::warmup_transcription();
+
+                // Reposition the indicator window if it moved during sleep
+                crate::recording_indicator::reposition_indicator_offscreen(&app);
+
                 // Invalidate mouse tracker's cached monitor bounds
                 crate::mouse_tracker::notify_wake();
+
+                tracing::info!("Post-wake recovery complete");
             }
 
             last_check = now;
         }
     });
 
-    tracing::info!("Registered wake-from-sleep observer for model re-warming");
+    tracing::info!("Registered wake-from-sleep observer");
 }
 
 #[cfg(test)]

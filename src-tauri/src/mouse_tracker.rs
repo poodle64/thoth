@@ -182,14 +182,27 @@ fn get_mouse_position() -> Option<(f64, f64)> {
 /// Get the initial indicator position based on the current cursor location.
 ///
 /// Returns the offset position `(x, y)` ready for `set_position()`, or `None`
-/// if the mouse position cannot be determined. Coordinates may be negative
-/// on multi-monitor setups where a secondary monitor is above or to the
-/// left of the primary display.
+/// if the mouse position cannot be determined. Retries up to 3 times with a
+/// short delay to handle transient Core Graphics failures (e.g. right after
+/// wake from sleep or when no mouse event has been generated yet).
+///
+/// Coordinates may be negative on multi-monitor setups where a secondary
+/// monitor is above or to the left of the primary display.
 pub fn get_initial_position() -> Option<(f64, f64)> {
-    let (cx, cy) = get_mouse_position()?;
-    let x = cx + CURSOR_OFFSET_X;
-    let y = cy + CURSOR_OFFSET_Y;
-    Some((x, y))
+    // Retry a few times — CGEvent can transiently fail if no HID events
+    // have been generated since boot or after sleep/wake.
+    for attempt in 0..3 {
+        if let Some((cx, cy)) = get_mouse_position() {
+            let x = cx + CURSOR_OFFSET_X;
+            let y = cy + CURSOR_OFFSET_Y;
+            return Some((x, y));
+        }
+        if attempt < 2 {
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+    tracing::warn!("get_initial_position: mouse position unavailable after 3 attempts");
+    None
 }
 
 /// Check if the cursor is near the edge of cached monitor bounds.
@@ -358,7 +371,20 @@ pub fn start_tracking() {
                 .wake_detected
                 .swap(false, Ordering::SeqCst)
             {
+                #[cfg(debug_assertions)]
+                {
+                    if let Ok(pos) = window.outer_position() {
+                        tracing::debug!(
+                            "Wake detected in tracking loop, window at ({}, {}), invalidating caches",
+                            pos.x, pos.y
+                        );
+                    } else {
+                        tracing::debug!("Wake detected in tracking loop, invalidating caches");
+                    }
+                }
+                #[cfg(not(debug_assertions))]
                 tracing::info!("Wake detected in tracking loop, invalidating monitor cache");
+
                 cached_monitor = None;
                 last_monitor_refresh = None;
                 last_refresh_cx = f64::NAN;
@@ -464,6 +490,27 @@ pub fn start_tracking() {
                     let _ = window.set_position(tauri::Position::Logical(LogicalPosition::new(
                         smooth_x, smooth_y,
                     )));
+
+                    #[cfg(debug_assertions)]
+                    {
+                        // Periodically log position in dev mode (every ~1s)
+                        static LAST_LOG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let last_ms = LAST_LOG.load(Ordering::Relaxed);
+
+                        if now_ms - last_ms > 1000 {
+                            if let Ok(actual_pos) = window.outer_position() {
+                                tracing::trace!(
+                                    "Tracking: cursor=({:.0},{:.0}) → smooth=({:.0},{:.0}) → window=({},{})",
+                                    cx, cy, smooth_x, smooth_y, actual_pos.x, actual_pos.y
+                                );
+                            }
+                            LAST_LOG.store(now_ms, Ordering::Relaxed);
+                        }
+                    }
                 }
             } else {
                 // Mouse position unavailable: log once, then rate-limit

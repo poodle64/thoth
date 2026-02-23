@@ -9,7 +9,6 @@
 //! 6. History (save to database)
 
 use crate::clipboard;
-use crate::config;
 use crate::database;
 use crate::dictionary;
 use crate::enhancement;
@@ -232,11 +231,22 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
 
             // NOTE: Recording indicator is shown instantly from the shortcut handler
             // (show_indicator_instant) - no need to show it here again.
-            //
-            // Audio metering is started ONLY when the indicator window emits 'indicator-ready',
-            // which happens after its onMount completes and listeners are registered.
-            // This avoids the race condition where events are emitted before listeners exist.
-            tracing::debug!("Pipeline: Recording started, waiting for indicator-ready signal to start metering");
+
+            // Update native indicator state to Recording and start metering
+            #[cfg(all(feature = "native-indicator", target_os = "macos"))]
+            {
+                use crate::recording_indicator::native::{set_native_indicator_state, VisualizerState};
+                if let Err(e) = set_native_indicator_state(VisualizerState::Recording) {
+                    tracing::warn!("Failed to set native indicator to Recording state: {:?}", e);
+                }
+            }
+
+            // Start audio metering for the indicator
+            if let Err(e) = crate::audio::start_recording_metering(app.clone(), device_id.as_deref()) {
+                tracing::warn!("Failed to start recording metering: {}", e);
+            }
+
+            tracing::debug!("Pipeline: Recording started, metering active");
 
             Ok(path)
         }
@@ -414,6 +424,16 @@ async fn run_transcription_pipeline(
         tracing::info!("Pipeline: Model loaded, proceeding with transcription");
     }
     emit_progress(app, PipelineState::Transcribing, "Transcribing audio...");
+
+    // Update native indicator to Processing state
+    #[cfg(all(feature = "native-indicator", target_os = "macos"))]
+    {
+        use crate::recording_indicator::native::{set_native_indicator_state, VisualizerState};
+        if let Err(e) = set_native_indicator_state(VisualizerState::Processing) {
+            tracing::warn!("Failed to set native indicator to Processing state: {:?}", e);
+        }
+    }
+
     let transcription_start = std::time::Instant::now();
     let raw_text = transcription::transcribe_file(audio_path.to_string())?;
     let transcription_duration_seconds = transcription_start.elapsed().as_secs_f64();

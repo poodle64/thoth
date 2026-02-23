@@ -309,7 +309,7 @@ impl SoftwareRenderer {
             VisualizerState::Recording => {
                 // Glow effect
                 if self.glow_intensity >= 0.05 {
-                    self.draw_dot_glow(width, height, icon_x, icon_y, icon_size, icon_radius);
+                    self.draw_dot_glow(width, height, icon_x, icon_y, icon_size);
                 }
                 // Rounded square background
                 self.draw_rounded_square(icon_x, icon_y, icon_size, icon_radius, accent, 1.0);
@@ -343,7 +343,6 @@ impl SoftwareRenderer {
         icon_x: f32,
         icon_y: f32,
         icon_size: f32,
-        icon_radius: f32,
     ) {
         // Note: tiny-skia doesn't support shadows directly. This is a simplified glow
         // by drawing multiple larger rounded rects with decreasing opacity.
@@ -370,7 +369,6 @@ impl SoftwareRenderer {
             let glow_x = icon_x - offset;
             let glow_y = icon_y - offset;
             let glow_size = icon_size + offset * 2.0;
-            let glow_radius = icon_radius + offset;
 
             let rect = tiny_skia::Rect::from_xywh(glow_x, glow_y, glow_size, glow_size).unwrap();
             let path = PathBuilder::from_rect(rect);
@@ -389,7 +387,7 @@ impl SoftwareRenderer {
         x: f32,
         y: f32,
         size: f32,
-        radius: f32,
+        _radius: f32,
         color: Color,
         opacity: f32,
     ) {
@@ -554,14 +552,10 @@ mod macos {
             window.setOpaque(false);
             window.setHasShadow(false);
             window.setIgnoresMouseEvents(true);
-            unsafe {
-                window.setBackgroundColor(Some(&NSColor::clearColor()));
-            }
+            window.setBackgroundColor(Some(&NSColor::clearColor()));
 
             // Enable transparency
-            unsafe {
-                window.setAlphaValue(1.0);
-            }
+            window.setAlphaValue(1.0);
 
             Ok(window)
         }
@@ -569,42 +563,34 @@ mod macos {
         /// Show the indicator at the specified position.
         pub fn show(&mut self, x: f64, y: f64) {
             let origin = CGPoint { x, y };
-            unsafe {
-                self.window.setFrameOrigin(origin);
-                self.window.orderFrontRegardless();
-            }
+            self.window.setFrameOrigin(origin);
+            self.window.orderFrontRegardless();
 
             // Render initial frame
             self.renderer.render(self.style, self.state);
-            unsafe {
-                self.blit_to_window();
-            }
+            unsafe { self.blit_to_window() };
         }
 
         /// Hide the indicator.
         pub fn hide(&mut self) {
-            unsafe {
-                self.window.orderOut(None);
-            }
+            self.window.orderOut(None);
+            // Reset to idle state for next show
+            self.state = VisualizerState::Idle;
         }
 
         /// Update audio levels and re-render.
         pub fn update_audio(&mut self, rms: f32, peak: f32) {
-            self.state = VisualizerState::Recording;
+            // Update audio levels in renderer (don't override state - it's managed separately)
             self.renderer.update_audio_level(rms, peak);
             self.renderer.render(self.style, self.state);
-            unsafe {
-                self.blit_to_window();
-            }
+            unsafe { self.blit_to_window() };
         }
 
         /// Set the visualizer state.
         pub fn set_state(&mut self, state: VisualizerState) {
             self.state = state;
             self.renderer.render(self.style, self.state);
-            unsafe {
-                self.blit_to_window();
-            }
+            unsafe { self.blit_to_window() };
         }
 
         /// Set the indicator style.
@@ -630,21 +616,18 @@ mod macos {
                 width: width as f64,
                 height: height as f64,
             };
-            unsafe {
-                self.window.setContentSize(size);
-            }
+            self.window.setContentSize(size);
 
             // Re-render
             self.renderer.render(self.style, self.state);
-            unsafe {
-                self.blit_to_window();
-            }
+            unsafe { self.blit_to_window() };
         }
 
         /// Blit the pixmap to the NSWindow's content view.
         ///
         /// # Safety
         /// Must be called from the main thread.
+        #[allow(deprecated)] // lockFocus/unlockFocus still works; NSView subclass alternative is future work
         unsafe fn blit_to_window(&self) {
             let Some(content_view) = self.window.contentView() else {
                 tracing::warn!("No content view for indicator window");
@@ -710,9 +693,7 @@ mod macos {
 
     impl Drop for NativeIndicator {
         fn drop(&mut self) {
-            unsafe {
-                self.window.close();
-            }
+            self.window.close();
         }
     }
 }
