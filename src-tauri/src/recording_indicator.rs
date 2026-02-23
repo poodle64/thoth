@@ -14,6 +14,8 @@
 //! reliably due to Wayland's security model. Users may want to disable the
 //! indicator on Wayland.
 
+pub mod native;
+
 use crate::config;
 use crate::config::IndicatorStyle;
 use crate::mouse_tracker;
@@ -174,20 +176,83 @@ fn position_at_fixed(
 }
 
 /// Position the pill indicator at the top-centre of the screen.
+///
+/// Determines which screen to use based on:
+/// 1. Caret position (if available) - shows on screen where user is typing
+/// 2. Mouse cursor position - shows on screen where mouse is
+/// 3. Main window's screen - fallback to Thoth's window screen
+/// 4. Primary monitor - last resort
 fn position_pill(app: &AppHandle, indicator: &WebviewWindow) -> Result<(), String> {
-    let monitor = app
-        .get_webview_window("main")
-        .and_then(|w| w.current_monitor().ok().flatten())
-        .or_else(|| indicator.current_monitor().ok().flatten())
-        .or_else(|| indicator.primary_monitor().ok().flatten())
-        .ok_or_else(|| "Could not determine current monitor".to_string())?;
+    // Try to determine which monitor based on caret/cursor position
+    let monitor = {
+        // First try: get monitor from caret position (where user is typing)
+        if let Some(caret) = crate::platform::get_caret_position() {
+            if let Some((mx, my, mw, mh, scale)) =
+                find_monitor_for_point(app, caret.x, caret.y)
+            {
+                tracing::debug!(
+                    "Pill positioning: using caret screen at ({:.0}, {:.0})",
+                    caret.x,
+                    caret.y
+                );
+                Some((mx, my, mw, mh, scale))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+        .or_else(|| {
+            // Second try: get monitor from mouse cursor position
+            if let Some((cx, cy)) = mouse_tracker::get_initial_position() {
+                if let Some(mon) = find_monitor_for_point(app, cx, cy) {
+                    tracing::debug!(
+                        "Pill positioning: using cursor screen at ({:.0}, {:.0})",
+                        cx,
+                        cy
+                    );
+                    Some(mon)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            // Third try: main window's monitor
+            app.get_webview_window("main")
+                .and_then(|w| w.current_monitor().ok().flatten())
+                .map(|m| {
+                    let scale = m.scale_factor();
+                    let mp = m.position();
+                    let ms = m.size();
+                    let mx = mp.x as f64 / scale;
+                    let my = mp.y as f64 / scale;
+                    let mw = ms.width as f64 / scale;
+                    let mh = ms.height as f64 / scale;
+                    tracing::debug!("Pill positioning: using main window screen");
+                    (mx, my, mw, mh, scale)
+                })
+        })
+        .or_else(|| {
+            // Last resort: primary monitor
+            indicator.primary_monitor().ok().flatten().map(|m| {
+                let scale = m.scale_factor();
+                let mp = m.position();
+                let ms = m.size();
+                let mx = mp.x as f64 / scale;
+                let my = mp.y as f64 / scale;
+                let mw = ms.width as f64 / scale;
+                let mh = ms.height as f64 / scale;
+                tracing::debug!("Pill positioning: using primary monitor (fallback)");
+                (mx, my, mw, mh, scale)
+            })
+        })
+        .ok_or_else(|| "Could not determine current monitor".to_string())?
+    };
 
-    let scale = monitor.scale_factor();
-    let mp = monitor.position();
-    let ms = monitor.size();
-    let mx = mp.x as f64 / scale;
-    let my = mp.y as f64 / scale;
-    let mw = ms.width as f64 / scale;
+    let (mx, my, mw, _mh, _scale) = monitor;
 
     let x = mx + (mw / 2.0) - (PILL_WIDTH / 2.0);
     let y = my + PILL_EDGE_PADDING + 30.0; // Below menu bar
@@ -238,29 +303,84 @@ where
 
     match style {
         IndicatorStyle::CursorDot => {
-            // Position at cursor or use the provided fallback
+            // Position at mouse cursor, then try caret, then use provided fallback
             if let Some((x, y)) = mouse_tracker::get_initial_position() {
                 indicator
                     .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
                     .map_err(|e| e.to_string())?;
-                tracing::debug!("Cursor-dot indicator at ({}, {})", x, y);
+                #[cfg(debug_assertions)]
+                {
+                    if let Ok(pos) = indicator.outer_position() {
+                        tracing::debug!(
+                            "Cursor-dot indicator positioned at ({:.0}, {:.0}), actual window position: ({}, {})",
+                            x, y, pos.x, pos.y
+                        );
+                    } else {
+                        tracing::debug!("Cursor-dot indicator positioned at ({:.0}, {:.0})", x, y);
+                    }
+                }
+                #[cfg(not(debug_assertions))]
+                tracing::debug!("Cursor-dot indicator at mouse ({:.0}, {:.0})", x, y);
+            } else if let Some(pos) = crate::platform::get_caret_position() {
+                let x = pos.x - (DOT_WIDTH / 2.0);
+                let y = pos.y - DOT_HEIGHT - 12.0;
+                indicator
+                    .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
+                    .map_err(|e| e.to_string())?;
+                #[cfg(debug_assertions)]
+                {
+                    if let Ok(window_pos) = indicator.outer_position() {
+                        tracing::debug!(
+                            "Cursor-dot indicator at caret ({:.0}, {:.0}), actual window position: ({}, {})",
+                            x, y, window_pos.x, window_pos.y
+                        );
+                    } else {
+                        tracing::debug!("Cursor-dot indicator at caret ({:.0}, {:.0})", x, y);
+                    }
+                }
+                #[cfg(not(debug_assertions))]
+                tracing::debug!("Cursor-dot indicator at caret ({:.0}, {:.0})", x, y);
             } else {
-                tracing::info!("No mouse position available, using fallback position");
+                tracing::debug!("No mouse or caret position, using fallback");
                 fallback_position(app, &indicator)?;
+                #[cfg(debug_assertions)]
+                {
+                    if let Ok(pos) = indicator.outer_position() {
+                        tracing::debug!("Indicator fallback position set, actual window at ({}, {})", pos.x, pos.y);
+                    }
+                }
             }
         }
         IndicatorStyle::FixedFloat => {
             position_at_fixed(app, &indicator, style)?;
+            #[cfg(debug_assertions)]
+            {
+                if let Ok(pos) = indicator.outer_position() {
+                    tracing::debug!("Fixed-float indicator, actual window position: ({}, {})", pos.x, pos.y);
+                }
+            }
         }
         IndicatorStyle::Pill => {
             position_pill(app, &indicator)?;
+            #[cfg(debug_assertions)]
+            {
+                if let Ok(pos) = indicator.outer_position() {
+                    tracing::debug!("Pill indicator, actual window position: ({}, {})", pos.x, pos.y);
+                }
+            }
         }
     }
 
-    // On macOS, show after positioning
+    // On macOS, window is already shown (kept visible off-screen to avoid animation delays)
     #[cfg(not(target_os = "linux"))]
     {
-        indicator.show().map_err(|e| e.to_string())?;
+        // Check if window is already visible to avoid redundant show() call
+        if !indicator.is_visible().unwrap_or(false) {
+            indicator.show().map_err(|e| e.to_string())?;
+            tracing::debug!("Indicator window was hidden, showing it (common path)");
+        } else {
+            tracing::debug!("Indicator window already visible, skipping show() (common path)");
+        }
     }
 
     // Only track mouse for cursor-dot style
@@ -348,7 +468,7 @@ fn position_at_bottom_centre(app: &AppHandle, indicator: &WebviewWindow) -> Resu
     let x = monitor_x + (monitor_width / 2.0) - (DOT_WIDTH / 2.0);
     let y = monitor_y + monitor_height - DOT_HEIGHT - BOTTOM_PADDING;
 
-    tracing::info!("Setting indicator position to ({}, {})", x, y);
+    tracing::debug!("Setting indicator position to ({}, {})", x, y);
 
     indicator
         .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
@@ -390,6 +510,19 @@ pub fn hide_recording_indicator(app: AppHandle) -> Result<(), String> {
                 -10000.0, -10000.0,
             )))
             .map_err(|e| e.to_string())?;
+
+        #[cfg(debug_assertions)]
+        {
+            if let Ok(pos) = window.outer_position() {
+                tracing::debug!(
+                    "Recording indicator moved off-screen, actual window position: ({}, {})",
+                    pos.x, pos.y
+                );
+            } else {
+                tracing::debug!("Recording indicator moved off-screen");
+            }
+        }
+        #[cfg(not(debug_assertions))]
         tracing::info!("Recording indicator moved off-screen (hidden)");
     }
 
@@ -442,12 +575,19 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
 
     match style {
         IndicatorStyle::CursorDot => {
-            // Position at cursor or fall back to primary monitor centre-bottom
+            // Position at mouse cursor, then try caret, then fall back to bottom-centre
             if let Some((x, y)) = mouse_tracker::get_initial_position() {
                 indicator
                     .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
                     .map_err(|e| e.to_string())?;
-                tracing::debug!("Cursor-dot indicator at ({}, {})", x, y);
+                tracing::debug!("Cursor-dot indicator at mouse ({:.0}, {:.0})", x, y);
+            } else if let Some(pos) = crate::platform::get_caret_position() {
+                let x = pos.x - (DOT_WIDTH / 2.0);
+                let y = pos.y - DOT_HEIGHT - 12.0;
+                indicator
+                    .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
+                    .map_err(|e| e.to_string())?;
+                tracing::debug!("Cursor-dot indicator at caret ({:.0}, {:.0})", x, y);
             } else {
                 position_at_primary_monitor(&indicator);
                 tracing::debug!("Cursor-dot indicator at fallback (bottom-centre)");
@@ -463,10 +603,17 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
         }
     }
 
-    // On macOS, show after positioning
+    // On macOS, window is already shown (kept visible off-screen to avoid animation delays)
+    // Just ensure it's visible - if already visible, this is a no-op
     #[cfg(not(target_os = "linux"))]
     {
-        indicator.show().map_err(|e| e.to_string())?;
+        // Check if window is already visible to avoid redundant show() call
+        if !indicator.is_visible().unwrap_or(false) {
+            indicator.show().map_err(|e| e.to_string())?;
+            tracing::debug!("Indicator window was hidden, showing it");
+        } else {
+            tracing::debug!("Indicator window already visible, skipping show()");
+        }
     }
 
     // Only track mouse for cursor-dot style
@@ -524,21 +671,99 @@ fn position_fixed_generic<R: Runtime>(
 }
 
 /// Position pill at top-centre (generic version for shortcut handler).
+///
+/// Similar to `position_pill()` but works with generic Runtime parameter.
+/// Determines screen based on caret or cursor position if available.
 fn position_pill_generic<R: Runtime>(
     indicator: &tauri::WebviewWindow<R>,
 ) -> Result<(), String> {
-    let monitor = indicator
-        .primary_monitor()
-        .ok()
-        .flatten()
-        .ok_or_else(|| "Could not determine primary monitor".to_string())?;
+    // Try to determine which monitor based on caret/cursor position
+    let monitor = {
+        // First try: get monitor from caret position
+        if let Some(caret) = crate::platform::get_caret_position() {
+            // We need an AppHandle to call find_monitor_for_point, but we have Runtime generic
+            // So we'll manually find the monitor containing this point
+            if let Ok(monitors) = indicator.available_monitors() {
+                monitors.into_iter().find_map(|m| {
+                    let scale = m.scale_factor();
+                    let pos = m.position();
+                    let size = m.size();
+                    let mx = pos.x as f64 / scale;
+                    let my = pos.y as f64 / scale;
+                    let mw = size.width as f64 / scale;
+                    let mh = size.height as f64 / scale;
 
-    let scale = monitor.scale_factor();
-    let mp = monitor.position();
-    let ms = monitor.size();
-    let mx = mp.x as f64 / scale;
-    let my = mp.y as f64 / scale;
-    let mw = ms.width as f64 / scale;
+                    // Check if caret is within this monitor
+                    if caret.x >= mx
+                        && caret.x < mx + mw
+                        && caret.y >= my
+                        && caret.y < my + mh
+                    {
+                        tracing::debug!(
+                            "Pill positioning (generic): using caret screen at ({:.0}, {:.0})",
+                            caret.x,
+                            caret.y
+                        );
+                        Some((mx, my, mw, mh))
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+        .or_else(|| {
+            // Second try: get monitor from cursor position
+            if let Some((cx, cy)) = mouse_tracker::get_initial_position() {
+                if let Ok(monitors) = indicator.available_monitors() {
+                    monitors.into_iter().find_map(|m| {
+                        let scale = m.scale_factor();
+                        let pos = m.position();
+                        let size = m.size();
+                        let mx = pos.x as f64 / scale;
+                        let my = pos.y as f64 / scale;
+                        let mw = size.width as f64 / scale;
+                        let mh = size.height as f64 / scale;
+
+                        if cx >= mx && cx < mx + mw && cy >= my && cy < my + mh {
+                            tracing::debug!(
+                                "Pill positioning (generic): using cursor screen at ({:.0}, {:.0})",
+                                cx,
+                                cy
+                            );
+                            Some((mx, my, mw, mh))
+                        } else {
+                            None
+                        }
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            // Last resort: primary monitor
+            indicator.primary_monitor().ok().flatten().map(|m| {
+                let scale = m.scale_factor();
+                let mp = m.position();
+                let ms = m.size();
+                let mx = mp.x as f64 / scale;
+                let my = mp.y as f64 / scale;
+                let mw = ms.width as f64 / scale;
+                let mh = ms.height as f64 / scale;
+                tracing::debug!("Pill positioning (generic): using primary monitor (fallback)");
+                (mx, my, mw, mh)
+            })
+        })
+        .ok_or_else(|| "Could not determine current monitor".to_string())?
+    };
+
+    let (mx, my, mw, _mh) = monitor;
 
     let x = mx + (mw / 2.0) - (PILL_WIDTH / 2.0);
     let y = my + PILL_EDGE_PADDING + 30.0;
@@ -547,6 +772,43 @@ fn position_pill_generic<R: Runtime>(
         .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Reposition the indicator window to its off-screen location.
+///
+/// Called after wake-from-sleep to ensure the window is back in the
+/// expected off-screen position, in case macOS moved it during sleep.
+pub fn reposition_indicator_offscreen(app: &AppHandle) {
+    #[cfg(not(target_os = "linux"))]
+    {
+        if let Some(window) = app.get_webview_window(INDICATOR_WINDOW_LABEL) {
+            if let Ok(pos) = window.outer_position() {
+                let x = pos.x as f64;
+                let y = pos.y as f64;
+
+                // Check if window is NOT where we expect it (off-screen at -10000, -10000)
+                if (x - (-10000.0)).abs() > 100.0 || (y - (-10000.0)).abs() > 100.0 {
+                    tracing::warn!(
+                        "Indicator window found at unexpected position ({:.0}, {:.0}) after wake - repositioning to off-screen",
+                        x, y
+                    );
+
+                    // Move back off-screen
+                    if let Err(e) = window.set_position(tauri::Position::Logical(LogicalPosition::new(
+                        -10000.0, -10000.0,
+                    ))) {
+                        tracing::error!("Failed to reposition indicator off-screen after wake: {}", e);
+                    } else {
+                        tracing::debug!("Indicator window repositioned to off-screen after wake");
+                    }
+                } else {
+                    tracing::debug!("Indicator window still at expected off-screen position after wake");
+                }
+            } else {
+                tracing::warn!("Could not get indicator window position after wake");
+            }
+        }
+    }
 }
 
 /// Pre-warm the recording indicator window by loading its content.
@@ -606,12 +868,16 @@ pub fn prewarm_indicator_window(app: &AppHandle) {
                     -10000.0, -10000.0,
                 ))) {
                     tracing::warn!("Failed to position indicator off-screen: {}", e);
+                } else {
+                    tracing::debug!("Positioned indicator off-screen at (-10000, -10000)");
                 }
 
                 // Show the window to trigger webview content load - we keep it visible
                 // (but off-screen) permanently to avoid show/hide animation delays
                 if let Err(e) = window.show() {
                     tracing::warn!("Failed to show indicator for pre-warming: {}", e);
+                } else {
+                    tracing::debug!("Indicator window shown (off-screen)");
                 }
 
                 // Wait for the webview to fully load and render
