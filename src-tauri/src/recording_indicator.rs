@@ -420,9 +420,80 @@ fn position_at_primary_monitor<R: Runtime>(indicator: &tauri::WebviewWindow<R>) 
 #[tauri::command]
 pub fn show_recording_indicator(app: AppHandle) -> Result<(), String> {
     tracing::info!("show_recording_indicator called");
-    show_indicator_common(&app, |app_handle, indicator| {
-        position_at_bottom_centre(app_handle, indicator)
-    })
+
+    #[cfg(feature = "native-indicator")]
+    {
+        // Initialize native indicator if not already done
+        let style = native::IndicatorStyle::CursorDot; // TODO: Get from config
+        native::init_native_indicator(style).map_err(|e| e.to_string())?;
+
+        // Calculate position (bottom-centre of primary monitor)
+        let position = calculate_indicator_position(&app)?;
+
+        // Show native indicator
+        native::show_native_indicator(position.x, position.y)
+            .map_err(|e| e.to_string())?;
+
+        // Set initial state
+        if let Err(e) = native::set_native_indicator_state(native::VisualizerState::Idle) {
+            tracing::warn!("Failed to set native indicator state: {:?}", e);
+        }
+
+        tracing::info!("Native indicator shown at ({}, {})", position.x, position.y);
+        Ok(())
+    }
+
+    #[cfg(not(feature = "native-indicator"))]
+    {
+        // WebView fallback
+        show_indicator_common(&app, |app_handle, indicator| {
+            position_at_bottom_centre(app_handle, indicator)
+        })
+    }
+}
+
+/// Calculate indicator position (bottom-centre of primary monitor)
+#[cfg(feature = "native-indicator")]
+fn calculate_indicator_position(app: &AppHandle) -> Result<LogicalPosition<f64>, String> {
+    // Try to get monitor from main window, fallback to primary
+    let monitor = if let Some(main_window) = app.get_webview_window("main") {
+        main_window
+            .current_monitor()
+            .ok()
+            .flatten()
+            .or_else(|| main_window.primary_monitor().ok().flatten())
+    } else {
+        // Use primary monitor
+        app.primary_monitor().ok().flatten()
+    }
+    .ok_or_else(|| "Could not determine current monitor".to_string())?;
+
+    let monitor_pos = monitor.position();
+    let monitor_size = monitor.size();
+    let scale_factor = monitor.scale_factor();
+
+    // Convert to logical pixels
+    let monitor_x = monitor_pos.x as f64 / scale_factor;
+    let monitor_y = monitor_pos.y as f64 / scale_factor;
+    let monitor_width = monitor_size.width as f64 / scale_factor;
+    let monitor_height = monitor_size.height as f64 / scale_factor;
+
+    tracing::info!(
+        "Monitor: pos=({}, {}), size={}x{}, scale={}",
+        monitor_x,
+        monitor_y,
+        monitor_width,
+        monitor_height,
+        scale_factor
+    );
+
+    // Calculate centre-bottom position (using DOT_WIDTH for now - native indicator handles sizing)
+    let x = monitor_x + (monitor_width / 2.0) - (DOT_WIDTH / 2.0);
+    let y = monitor_y + monitor_height - DOT_HEIGHT - BOTTOM_PADDING;
+
+    tracing::debug!("Calculated indicator position: ({}, {})", x, y);
+
+    Ok(LogicalPosition::new(x, y))
 }
 
 /// Position the indicator at the bottom centre of the main window's monitor
@@ -491,7 +562,17 @@ pub fn hide_recording_indicator(app: AppHandle) -> Result<(), String> {
     // Stop mouse tracking before hiding
     mouse_tracker::stop_tracking();
 
-    let window = get_indicator_window(&app)
+    #[cfg(feature = "native-indicator")]
+    {
+        // Hide native indicator
+        native::hide_native_indicator().map_err(|e| e.to_string())?;
+        tracing::info!("Native indicator hidden");
+        return Ok(());
+    }
+
+    #[cfg(not(feature = "native-indicator"))]
+    {
+        let window = get_indicator_window(&app)
         .ok_or_else(|| "Recording indicator window not found".to_string())?;
 
     // On Linux, use actual hide() - this should work now that the window
@@ -526,7 +607,8 @@ pub fn hide_recording_indicator(app: AppHandle) -> Result<(), String> {
         tracing::info!("Recording indicator moved off-screen (hidden)");
     }
 
-    Ok(())
+        Ok(())
+    }
 }
 
 /// Show the recording indicator immediately (generic version for shortcut handler).

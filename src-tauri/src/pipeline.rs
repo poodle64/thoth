@@ -9,6 +9,7 @@
 //! 6. History (save to database)
 
 use crate::clipboard;
+use crate::config;
 use crate::database;
 use crate::dictionary;
 use crate::enhancement;
@@ -18,7 +19,7 @@ use cpal::traits::DeviceTrait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Pipeline execution state
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -231,14 +232,11 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
 
             // NOTE: Recording indicator is shown instantly from the shortcut handler
             // (show_indicator_instant) - no need to show it here again.
-            // The indicator window is pre-warmed at startup so no JS init wait needed.
-
-            // Start recording metering AFTER the indicator is visible
-            if let Err(e) =
-                crate::audio::start_recording_metering(app, device_id.as_deref())
-            {
-                tracing::warn!("Pipeline: Failed to start recording metering: {}", e);
-            }
+            //
+            // Audio metering is started ONLY when the indicator window emits 'indicator-ready',
+            // which happens after its onMount completes and listeners are registered.
+            // This avoids the race condition where events are emitted before listeners exist.
+            tracing::debug!("Pipeline: Recording started, waiting for indicator-ready signal to start metering");
 
             Ok(path)
         }
@@ -317,6 +315,9 @@ pub async fn pipeline_stop_and_process(
     tracing::info!("Pipeline: Returning result from stop_and_process");
     result
 }
+
+// indicator_window_ready() removed - no longer needed with native rendering.
+// Audio metering now calls the native renderer directly without IPC events.
 
 /// Cancel the current pipeline execution
 #[tauri::command]
@@ -519,11 +520,17 @@ async fn process_audio(
     // Apply paragraph formatting for output only (not stored in database)
     let mut output_text = transcription::filter::format_paragraphs(&output.text);
 
-    // Always append a trailing space so consecutive transcriptions don't
-    // run together when inserted at the cursor. Without this, "it" + "And"
-    // becomes "itAnd" instead of "it And".
-    if !output_text.ends_with(' ') && !output_text.ends_with('\n') {
-        output_text.push(' ');
+    // Ensure consecutive transcriptions don't run together when inserted at
+    // the cursor. If the text doesn't end with punctuation, add a full stop
+    // so "leak it" + "And if" becomes "leak it. And if" (not "leak itAnd if").
+    if !output_text.ends_with('\n') {
+        let last_char = output_text.trim_end().chars().last().unwrap_or('.');
+        if !last_char.is_ascii_punctuation() {
+            output_text = output_text.trim_end().to_string();
+            output_text.push_str(". ");
+        } else if !output_text.ends_with(' ') {
+            output_text.push(' ');
+        }
     }
 
     tracing::info!(
@@ -956,8 +963,25 @@ fn emit_progress_with_device(
         message: message.to_string(),
         device_name,
     };
-    if let Err(e) = app.emit("pipeline-progress", &progress) {
-        tracing::warn!("Failed to emit pipeline progress: {}", e);
+
+    // Try to emit directly to the recording-indicator window first, then fall back to global
+    let emitted = if let Some(indicator_window) = app.get_webview_window("recording-indicator") {
+        indicator_window.emit("pipeline-progress", &progress).is_ok()
+    } else {
+        false
+    };
+
+    if !emitted {
+        if let Err(e) = app.emit("pipeline-progress", &progress) {
+            tracing::warn!("Failed to emit pipeline progress: {}", e);
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        if state == PipelineState::Recording {
+            tracing::debug!("Emitted pipeline-progress: state=recording to indicator window");
+        }
     }
 }
 

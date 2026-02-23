@@ -472,7 +472,6 @@ pub fn run() {
             pipeline::pipeline_transcribe_file,
             pipeline::pipeline_retranscribe,
             pipeline::pipeline_cancel,
-            pipeline::indicator_window_ready,
             pipeline::is_pipeline_running,
             pipeline::get_pipeline_state,
             // Hands-free (VAD-based automatic recording)

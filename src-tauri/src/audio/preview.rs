@@ -12,6 +12,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 
+#[cfg(feature = "native-indicator")]
+use crate::recording_indicator::native;
+
 /// Audio level event emitted to the frontend
 #[derive(Debug, Clone, Serialize)]
 pub struct AudioLevelEvent {
@@ -236,31 +239,101 @@ pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Resu
 
     tracing::info!("Recording metering: audio stream active");
 
-    // Spawn emitter thread to send levels to the recording-indicator window
+    // Spawn emitter thread to send levels to the native indicator
     let emit_stop_flag = stop_flag.clone();
     let emit_handle = std::thread::spawn(move || {
+        #[cfg(debug_assertions)]
+        let mut event_count = 0u32;
+
         while !emit_stop_flag.load(Ordering::Relaxed) {
             while let Ok(samples) = rx.try_recv() {
                 let mut meter = meter.lock();
                 let level = meter.process(&samples);
 
-                let event = AudioLevelEvent {
-                    rms: level.rms,
-                    peak: level.peak,
-                };
+                let rms = level.rms;
+                let peak = level.peak;
 
-                // Try to emit directly to the recording-indicator window, fall back to global
-                let emitted =
-                    if let Some(indicator_window) = app.get_webview_window("recording-indicator") {
-                        indicator_window
-                            .emit("recording-audio-level", &event)
-                            .is_ok()
+                #[cfg(debug_assertions)]
+                {
+                    event_count += 1;
+                    if event_count == 1 {
+                        tracing::info!(
+                            "[RECORDING METERING] First audio level: rms={:.3}, peak={:.3}",
+                            rms,
+                            peak
+                        );
+                    } else if event_count == 60 {
+                        // Log after 2 seconds
+                        tracing::info!(
+                            "[RECORDING METERING] Sent {} updates (latest rms={:.3})",
+                            event_count,
+                            rms
+                        );
+                    }
+                }
+
+                #[cfg(feature = "native-indicator")]
+                {
+                    // Update native indicator (must happen on main thread)
+                    // Use tauri::async_runtime to dispatch to main thread
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = native::update_native_indicator_audio(rms, peak) {
+                            #[cfg(debug_assertions)]
+                            {
+                                static LOGGED_UPDATE_ERROR: std::sync::atomic::AtomicBool =
+                                    std::sync::atomic::AtomicBool::new(false);
+                                if !LOGGED_UPDATE_ERROR.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                    tracing::warn!("Failed to update native indicator: {:?}", e);
+                                }
+                            }
+                        }
+                    });
+                }
+
+                #[cfg(not(feature = "native-indicator"))]
+                {
+                    // Fallback: emit events to WebView indicator
+                    let event = AudioLevelEvent { rms, peak };
+
+                    // Try to emit directly to the recording-indicator window, fall back to global
+                    let emitted = if let Some(indicator_window) =
+                        app.get_webview_window("recording-indicator")
+                    {
+                        let result = indicator_window.emit("recording-audio-level", &event);
+                        #[cfg(debug_assertions)]
+                        {
+                            if event_count == 1 && result.is_ok() {
+                                tracing::debug!("Successfully emitted first event to indicator window");
+                            }
+                            if let Err(e) = &result {
+                                static LOGGED_EMIT_ERROR: std::sync::atomic::AtomicBool =
+                                    std::sync::atomic::AtomicBool::new(false);
+                                if !LOGGED_EMIT_ERROR.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                    tracing::warn!(
+                                        "Failed to emit recording-audio-level to indicator window: {:?}",
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                        result.is_ok()
                     } else {
+                        #[cfg(debug_assertions)]
+                        {
+                            static LOGGED_NO_WINDOW: std::sync::atomic::AtomicBool =
+                                std::sync::atomic::AtomicBool::new(false);
+                            if !LOGGED_NO_WINDOW.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                tracing::warn!(
+                                    "Recording indicator window not found, falling back to global emit"
+                                );
+                            }
+                        }
                         false
                     };
 
-                if !emitted {
-                    let _ = app.emit("recording-audio-level", &event);
+                    if !emitted {
+                        let _ = app.emit("recording-audio-level", &event);
+                    }
                 }
             }
 

@@ -92,9 +92,10 @@ core-foundation = "0.10"
 core-graphics = "0.24"
 
 [features]
-default = ["parakeet", "fluidaudio"]
+default = ["parakeet", "fluidaudio", "native-indicator"]
 parakeet = ["sherpa-rs"]
 fluidaudio = ["fluidaudio-rs"]
+native-indicator = []
 # GPU acceleration for whisper.cpp (mutually exclusive, only use one)
 # Use: cargo build --features cuda      for NVIDIA GPUs
 # Use: cargo build --features hipblas   for AMD GPUs (ROCm/HIP)
