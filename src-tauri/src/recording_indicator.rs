@@ -458,7 +458,7 @@ pub fn show_recording_indicator(app: AppHandle) -> Result<(), String> {
 
 /// Calculate indicator position (bottom-centre of primary monitor)
 #[cfg(all(feature = "native-indicator", target_os = "macos"))]
-fn calculate_indicator_position(app: &AppHandle) -> Result<LogicalPosition<f64>, String> {
+fn calculate_indicator_position<R: Runtime>(app: &AppHandle<R>) -> Result<LogicalPosition<f64>, String> {
     // Try to get monitor from main window, fallback to primary
     let monitor = if let Some(main_window) = app.get_webview_window("main") {
         main_window
@@ -635,9 +635,6 @@ pub fn hide_recording_indicator(app: AppHandle) -> Result<(), String> {
 pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     tracing::info!("show_indicator_instant called (fast path)");
 
-    let indicator = get_indicator_window_generic(app)
-        .ok_or_else(|| "Recording indicator window not found".to_string())?;
-
     // Check config
     let cfg = config::get_config().unwrap_or_default();
     let style = cfg.general.indicator_style;
@@ -646,6 +643,61 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
         tracing::info!("Recording indicator disabled in config, skipping instant show");
         return Ok(());
     }
+
+    // Try native indicator first on supported platforms
+    #[cfg(all(feature = "native-indicator", target_os = "macos"))]
+    {
+        let native_style = match style {
+            IndicatorStyle::Pill => native::IndicatorStyle::Pill,
+            IndicatorStyle::CursorDot => native::IndicatorStyle::CursorDot,
+            IndicatorStyle::FixedFloat => native::IndicatorStyle::FixedFloat,
+        };
+
+        match native::init_native_indicator(native_style) {
+            Ok(()) => {
+                // Calculate position based on style
+                let position = match style {
+                    IndicatorStyle::CursorDot => {
+                        // Try mouse cursor first
+                        if let Some((x, y)) = mouse_tracker::get_initial_position() {
+                            LogicalPosition::new(x, y)
+                        } else if let Some(pos) = crate::platform::get_caret_position() {
+                            LogicalPosition::new(pos.x - (DOT_WIDTH / 2.0), pos.y - DOT_HEIGHT - 12.0)
+                        } else {
+                            calculate_indicator_position(app)?
+                        }
+                    }
+                    IndicatorStyle::Pill => calculate_indicator_position(app)?,
+                    IndicatorStyle::FixedFloat => calculate_indicator_position(app)?,
+                };
+
+                // Show native indicator
+                native::show_native_indicator(position.x, position.y)
+                    .map_err(|e| e.to_string())?;
+
+                // Set initial state to Idle (will be updated to Recording when recording starts)
+                if let Err(e) = native::set_native_indicator_state(native::VisualizerState::Idle) {
+                    tracing::warn!("Failed to set native indicator state: {:?}", e);
+                }
+
+                // Only track mouse for cursor-dot style
+                if style == IndicatorStyle::CursorDot {
+                    mouse_tracker::start_tracking();
+                }
+
+                tracing::info!("Native indicator shown at ({}, {})", position.x, position.y);
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::warn!("Failed to initialize native indicator: {:?}, falling back to WebView", e);
+                // Fall through to WebView fallback
+            }
+        }
+    }
+
+    // WebView fallback (non-macOS or native failed)
+    let indicator = get_indicator_window_generic(app)
+        .ok_or_else(|| "Recording indicator window not found".to_string())?;
 
     if is_wayland() {
         tracing::warn!("Running on Wayland - indicator positioning may not work correctly");
