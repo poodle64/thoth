@@ -77,11 +77,13 @@ models/
 # ============================================================================
 # Internal docs (local dev only, not for public repo)
 # ============================================================================
-docs/DEPLOYMENT.md
-docs/UPDATE_TESTING.md
-docs/app-icon-prompt.md
-docs/archive/
-docs/branding/
+docs/deployment/
+docs/research/
+# Branding: track hero image and overview screenshot, gitignore private design work
+docs/branding/colour-schemes.md
+docs/branding/colour-preview.html
+docs/branding/icon-design-brief.md
+docs/branding/app-icon-prompt.md
 
 # ============================================================================
 # Temporary files
