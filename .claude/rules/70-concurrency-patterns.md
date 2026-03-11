@@ -77,4 +77,4 @@ Async/await and actor isolation patterns for Thoth.
 
 ## See Also
 
-- [docs/architecture/concurrency-patterns.md](../../docs/architecture/concurrency-patterns.md) - Detailed patterns and examples
+- [docs/development/concurrency-patterns.md](../../docs/development/concurrency-patterns.md) - Detailed patterns and examples

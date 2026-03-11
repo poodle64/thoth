@@ -19,7 +19,7 @@
 
 </div>
 
-![Thoth in action](docs/screenshots/hero.gif)
+![Thoth in action](docs/branding/hero.gif)
 
 Voice input on macOS and Linux is either cloud-dependent or requires complex
 setup. Thoth runs speech-to-text **locally** using whisper.cpp with GPU
@@ -218,7 +218,7 @@ If GPU initialisation fails, Thoth automatically falls back to CPU transcription
 ## Documentation
 
 - **Product docs:** [docs/product/](docs/product/). Intent, workflows, design principles
-- **Architecture:** [docs/architecture/](docs/architecture/). Audio pipeline, data model
+- **Development:** [docs/development/](docs/development/). Audio pipeline, data model, architecture
 
 ---
 
