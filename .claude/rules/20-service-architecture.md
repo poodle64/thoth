@@ -82,5 +82,5 @@ Service design patterns and conventions for Thoth.
 
 ## See Also
 
-- [docs/architecture/service-patterns.md](../../docs/architecture/service-patterns.md) - Detailed patterns and examples
-- [docs/architecture/overview.md](../../docs/architecture/overview.md) - High-level architecture
+- [docs/development/service-patterns.md](../../docs/development/service-patterns.md) - Detailed patterns and examples
+- [docs/development/architecture-overview.md](../../docs/development/architecture-overview.md) - High-level architecture
