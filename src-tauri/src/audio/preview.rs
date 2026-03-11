@@ -10,12 +10,9 @@ use parking_lot::Mutex;
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
 #[cfg(not(all(feature = "native-indicator", target_os = "macos")))]
 use tauri::Manager;
-
-#[cfg(feature = "native-indicator")]
-use crate::recording_indicator::native;
+use tauri::{AppHandle, Emitter};
 
 /// Audio level event emitted to the frontend
 #[derive(Debug, Clone, Serialize)]
@@ -172,6 +169,12 @@ pub fn is_audio_preview_running() -> bool {
 /// Global recording meter state
 static RECORDING_METER_STATE: Mutex<Option<MeteringState>> = Mutex::new(None);
 
+/// Channel for sending audio levels from background thread to main thread (for native indicator)
+static AUDIO_LEVEL_CHANNEL: once_cell::sync::Lazy<(
+    crossbeam_channel::Sender<(f32, f32)>,
+    crossbeam_channel::Receiver<(f32, f32)>,
+)> = once_cell::sync::Lazy::new(|| crossbeam_channel::unbounded());
+
 /// Start recording metering - emits `recording-audio-level` events
 ///
 /// This runs alongside recording to provide real-time audio levels for the
@@ -276,23 +279,11 @@ pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Resu
                     }
                 }
 
-                // Try native indicator on macOS, otherwise use WebView
+                // Send audio levels to main thread via channel (for native indicator)
                 #[cfg(all(feature = "native-indicator", target_os = "macos"))]
                 {
-                    // Update native indicator (must happen on main thread)
-                    // Use tauri::async_runtime to dispatch to main thread
-                    tauri::async_runtime::spawn(async move {
-                        if let Err(e) = native::update_native_indicator_audio(rms, peak) {
-                            #[cfg(debug_assertions)]
-                            {
-                                static LOGGED_UPDATE_ERROR: std::sync::atomic::AtomicBool =
-                                    std::sync::atomic::AtomicBool::new(false);
-                                if !LOGGED_UPDATE_ERROR.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                                    tracing::warn!("Failed to update native indicator: {:?}", e);
-                                }
-                            }
-                        }
-                    });
+                    // Non-blocking send - if the channel is full, just skip this update
+                    let _ = AUDIO_LEVEL_CHANNEL.0.try_send((rms, peak));
                 }
 
                 // WebView fallback (non-macOS or feature disabled)
@@ -308,12 +299,16 @@ pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Resu
                         #[cfg(debug_assertions)]
                         {
                             if event_count == 1 && result.is_ok() {
-                                tracing::debug!("Successfully emitted first event to indicator window");
+                                tracing::debug!(
+                                    "Successfully emitted first event to indicator window"
+                                );
                             }
                             if let Err(e) = &result {
                                 static LOGGED_EMIT_ERROR: std::sync::atomic::AtomicBool =
                                     std::sync::atomic::AtomicBool::new(false);
-                                if !LOGGED_EMIT_ERROR.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                                if !LOGGED_EMIT_ERROR
+                                    .swap(true, std::sync::atomic::Ordering::Relaxed)
+                                {
                                     tracing::warn!(
                                         "Failed to emit recording-audio-level to indicator window: {:?}",
                                         e
@@ -362,6 +357,21 @@ pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Resu
 /// Stop recording metering
 pub fn stop_recording_metering() {
     stop_recording_metering_inner();
+}
+
+/// Poll for the latest audio levels from the recording meter.
+///
+/// This should be called periodically from the main thread to drain the channel
+/// and get the most recent audio levels for updating the native indicator.
+/// Returns None if no updates are available.
+#[cfg(all(feature = "native-indicator", target_os = "macos"))]
+pub fn poll_recording_audio_levels() -> Option<(f32, f32)> {
+    // Drain all pending updates and keep only the latest
+    let mut latest = None;
+    while let Ok(levels) = AUDIO_LEVEL_CHANNEL.1.try_recv() {
+        latest = Some(levels);
+    }
+    latest
 }
 
 /// Internal stop function

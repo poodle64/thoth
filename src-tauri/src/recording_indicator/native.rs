@@ -557,6 +557,10 @@ mod macos {
             // Enable transparency
             window.setAlphaValue(1.0);
 
+            // Prevent macOS from restoring this window after sleep/wake or app restart
+            // Mark as transient so macOS doesn't restore it after sleep/wake or app restart
+            window.setCollectionBehavior(objc2_app_kit::NSWindowCollectionBehavior::Transient);
+
             Ok(window)
         }
 
@@ -774,6 +778,22 @@ pub fn update_native_indicator_audio(rms: f32, peak: f32) -> anyhow::Result<()> 
     })
 }
 
+/// Poll for audio level updates and apply them to the native indicator.
+///
+/// This should be called periodically from the main thread (via Tauri command
+/// from frontend). It drains the audio level channel and updates the indicator
+/// with the latest levels.
+///
+/// MUST be called from the main thread (Tauri commands run on main thread).
+#[tauri::command]
+#[cfg(all(feature = "native-indicator", target_os = "macos"))]
+pub fn poll_native_indicator_audio() -> Result<(), String> {
+    if let Some((rms, peak)) = crate::audio::poll_recording_audio_levels() {
+        update_native_indicator_audio(rms, peak).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Set the visualizer state.
 ///
 /// MUST be called from the main thread.
@@ -860,6 +880,14 @@ pub fn set_native_indicator_style(_style: IndicatorStyle) -> anyhow::Result<()> 
     Err(anyhow::anyhow!(
         "Native indicator only supported on macOS currently"
     ))
+}
+
+/// No-op stub for non-macOS platforms
+#[tauri::command]
+#[cfg(not(all(feature = "native-indicator", target_os = "macos")))]
+pub fn poll_native_indicator_audio() -> Result<(), String> {
+    // No-op on non-macOS platforms or when native-indicator feature is disabled
+    Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]

@@ -135,6 +135,9 @@ function createPipelineStore() {
   let unlisteners: UnlistenFn[] = [];
   let isInitialised = false;
 
+  // Native indicator audio polling interval
+  let audioPollingInterval: number | null = null;
+
   // Toggle cooldown: after a state change (start/stop), ignore further toggles
   // for this duration. Prevents accidental double-toggles from immediately reversing the action.
   // Key bounce is handled by the Rust shortcut debounce (50ms); this is a higher-level guard.
@@ -229,6 +232,7 @@ function createPipelineStore() {
    * Clean up event listeners
    */
   function cleanup(): void {
+    stopNativeIndicatorPolling();
     for (const unlisten of unlisteners) {
       unlisten();
     }
@@ -268,6 +272,9 @@ function createPipelineStore() {
       // Start duration timer
       startDurationTimer();
 
+      // Start polling for native indicator audio levels
+      startNativeIndicatorPolling();
+
       return { success: true };
     } catch (e) {
       const errorMsg = `${e}`;
@@ -301,6 +308,9 @@ function createPipelineStore() {
     };
 
     debug(' Built config:', fullConfig);
+
+    // Stop polling native indicator audio
+    stopNativeIndicatorPolling();
 
     // Hide recording indicator
     debug(' Hiding recording indicator');
@@ -423,6 +433,9 @@ function createPipelineStore() {
     }
 
     try {
+      // Stop polling native indicator audio
+      stopNativeIndicatorPolling();
+
       // Hide recording indicator
       try {
         await invoke('hide_recording_indicator');
@@ -510,6 +523,7 @@ function createPipelineStore() {
    */
   async function forceReset(): Promise<void> {
     debug(' Force reset called');
+    stopNativeIndicatorPolling();
     try {
       // Cancel any running pipeline on the backend
       await invoke('pipeline_cancel');
@@ -539,6 +553,38 @@ function createPipelineStore() {
         clearInterval(interval);
       }
     }, 100);
+  }
+
+  /**
+   * Start polling for native indicator audio levels
+   *
+   * This is only needed when the native-indicator feature is active on macOS.
+   * The frontend polls the Rust channel at ~30fps to update the native indicator.
+   */
+  function startNativeIndicatorPolling(): void {
+    // Stop any existing interval first
+    stopNativeIndicatorPolling();
+
+    // Poll at ~30fps (33ms interval)
+    audioPollingInterval = window.setInterval(async () => {
+      try {
+        await invoke('poll_native_indicator_audio');
+      } catch (e) {
+        // Silently ignore errors - the command may not be available on all platforms
+      }
+    }, 33);
+    debug('Native indicator polling started');
+  }
+
+  /**
+   * Stop polling for native indicator audio levels
+   */
+  function stopNativeIndicatorPolling(): void {
+    if (audioPollingInterval !== null) {
+      clearInterval(audioPollingInterval);
+      audioPollingInterval = null;
+      debug('Native indicator polling stopped');
+    }
   }
 
   /**

@@ -258,8 +258,11 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
                             tracing::info!("Switched from WebView to native indicator");
                         }
                     }
+
                 }
             }
+            // Note: Audio level updates for native indicator are polled from frontend
+            // using poll_native_indicator_audio() command at ~30fps
 
             // Start audio metering for the indicator
             if let Err(e) = crate::audio::start_recording_metering(app.clone(), device_id.as_deref()) {

@@ -16,6 +16,8 @@ pub use capture::AudioRecorder;
 pub use device::{get_device_display_name, get_recording_device, list_input_devices, AudioDevice};
 pub use format::AudioConverter;
 pub use metering::{AudioLevel, AudioMeter};
+#[cfg(all(feature = "native-indicator", target_os = "macos"))]
+pub use preview::poll_recording_audio_levels;
 pub use preview::{start_recording_metering, stop_recording_metering};
 pub use ring_buffer::AudioRingBuffer;
 pub use vad::{

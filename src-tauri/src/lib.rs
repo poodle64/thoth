@@ -490,6 +490,7 @@ pub fn run() {
             // Recording indicator
             recording_indicator::show_recording_indicator,
             recording_indicator::hide_recording_indicator,
+            recording_indicator::native::poll_native_indicator_audio,
             // Tray
             tray::get_tray_state_cmd,
             tray::update_tray_recording_state,

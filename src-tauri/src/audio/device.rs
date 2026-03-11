@@ -124,7 +124,10 @@ pub fn find_input_device_by_id(id_str: &str) -> Option<cpal::Device> {
 /// If a device ID is configured and found, uses that device.
 /// Otherwise falls back to the system default.
 pub fn get_recording_device(device_id: Option<&str>) -> Option<cpal::Device> {
-    tracing::info!("get_recording_device called with device_id: {:?}", device_id);
+    tracing::info!(
+        "get_recording_device called with device_id: {:?}",
+        device_id
+    );
 
     if let Some(id) = device_id {
         if let Some(device) = find_input_device_by_id(id) {
@@ -158,7 +161,10 @@ pub fn get_recording_device(device_id: Option<&str>) -> Option<cpal::Device> {
                 config.sample_format()
             );
         } else {
-            tracing::info!("Using default audio device: '{}' (could not get config)", name);
+            tracing::info!(
+                "Using default audio device: '{}' (could not get config)",
+                name
+            );
         }
     } else {
         tracing::error!("No default input device available!");
