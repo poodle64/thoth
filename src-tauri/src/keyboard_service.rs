@@ -213,6 +213,20 @@ pub fn is_modifier_shortcut(accelerator: &str) -> bool {
 
 /// Register a modifier shortcut for monitoring
 pub fn register_modifier_shortcut(id: String, accelerator: String, description: String) -> bool {
+    // Validate this is actually a modifier key
+    if ModifierKey::from_accelerator(&accelerator).is_none() {
+        return false;
+    }
+
+    // On Wayland, route modifier shortcuts through the portal
+    // (device_query polling doesn't work on Wayland)
+    #[cfg(target_os = "linux")]
+    {
+        if crate::shortcuts::get_display_server() == crate::shortcuts::DisplayServer::Wayland {
+            return crate::shortcuts::portal::register(id, accelerator, description).is_ok();
+        }
+    }
+
     let Some(modifier) = ModifierKey::from_accelerator(&accelerator) else {
         return false;
     };
@@ -459,8 +473,8 @@ pub fn report_key_event(
         return Ok(());
     }
 
-    tracing::debug!(
-        "Webview key event: key={}, code={}, modifiers=({}{}{}{}), type={}",
+    tracing::info!(
+        "Webview key event: key='{}', code='{}', modifiers=({}{}{}{}), type={}",
         key,
         code,
         if ctrl { "Ctrl " } else { "" },
@@ -860,7 +874,20 @@ fn webview_key_to_accelerator(key: &str, code: &str) -> Option<String> {
         " " => Some("Space".to_string()),
         "+" => Some("Plus".to_string()),
         "-" => Some("Minus".to_string()),
-        _ => None,
+        // Media keys (browser key values)
+        "MicrophoneToggleMute" | "AudioVolumeMute" | "AudioVolumeDown" | "AudioVolumeUp"
+        | "MediaPlayPause" | "MediaTrackNext" | "MediaTrackPrevious" | "MediaStop"
+        | "LaunchMail" | "LaunchApplication1" | "LaunchApplication2"
+        | "BrowserHome" | "BrowserBack" | "BrowserForward" | "BrowserRefresh"
+        | "BrowserStop" | "BrowserSearch" | "BrowserFavorites"
+        | "PrintScreen" | "ScrollLock" | "Pause" => {
+            tracing::info!("Media/special key captured: key={}, code={}", key, code);
+            Some(key.to_string())
+        }
+        _ => {
+            tracing::debug!("Unrecognised key ignored: key={}, code={}", key, code);
+            None
+        }
     }
 }
 
@@ -875,13 +902,21 @@ fn webview_key_to_display(key: &str, code: &str) -> String {
         "Enter" => "Return".to_string(),
         "Backspace" => "⌫".to_string(),
         "Tab" => "⇥".to_string(),
-        _ => {
-            if key.len() == 1 {
-                key.to_uppercase()
-            } else {
-                key.to_string()
-            }
-        }
+        _ => match key {
+            "MicrophoneToggleMute" => "🎤 Mic Mute".to_string(),
+            "AudioVolumeMute" => "🔇 Mute".to_string(),
+            "AudioVolumeDown" => "🔉 Vol Down".to_string(),
+            "AudioVolumeUp" => "🔊 Vol Up".to_string(),
+            "MediaPlayPause" => "⏯ Play/Pause".to_string(),
+            "MediaTrackNext" => "⏭ Next".to_string(),
+            "MediaTrackPrevious" => "⏮ Previous".to_string(),
+            "MediaStop" => "⏹ Stop".to_string(),
+            "PrintScreen" => "PrtSc".to_string(),
+            "ScrollLock" => "ScrLk".to_string(),
+            "Pause" => "Pause".to_string(),
+            _ if key.len() == 1 => key.to_uppercase(),
+            _ => key.to_string(),
+        },
     }
 }
 
@@ -1186,6 +1221,15 @@ mod tests {
             "ShiftRight".to_string(),
             "Test".to_string()
         ));
+
+        // On Wayland, modifier shortcuts route to portal, not the internal registry
+        #[cfg(target_os = "linux")]
+        if crate::shortcuts::get_display_server() == crate::shortcuts::DisplayServer::Wayland {
+            // Portal registration succeeded, but keyboard_service registry is empty
+            assert!(!is_modifier_shortcut_registered(id));
+            return;
+        }
+
         assert!(is_modifier_shortcut_registered(id));
 
         assert!(unregister_modifier_shortcut(id));

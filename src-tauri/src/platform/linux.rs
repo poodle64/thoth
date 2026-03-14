@@ -378,6 +378,202 @@ pub fn open_accessibility_settings() {
     tracing::debug!("No accessibility settings needed on Linux");
 }
 
+// =============================================================================
+// Wayland compositor detection
+// =============================================================================
+
+/// Detected Wayland compositor type
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaylandCompositor {
+    /// Hyprland — supports hyprctl for paste, virtual-keyboard for typing
+    Hyprland,
+    /// Sway — supports wtype for both typing and paste
+    Sway,
+    /// GNOME (Mutter) — limited virtual-keyboard support
+    Gnome,
+    /// KDE (KWin) — limited virtual-keyboard support
+    Kde,
+    /// Other/unknown Wayland compositor
+    Other,
+    /// Not running on Wayland (X11 or unknown)
+    None,
+}
+
+/// Detected Linux display session type
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplaySession {
+    Wayland(WaylandCompositor),
+    X11,
+    Unknown,
+}
+
+impl DisplaySession {
+    pub fn is_wayland(&self) -> bool {
+        matches!(self, DisplaySession::Wayland(_))
+    }
+
+    pub fn compositor(&self) -> WaylandCompositor {
+        match self {
+            DisplaySession::Wayland(c) => *c,
+            _ => WaylandCompositor::None,
+        }
+    }
+}
+
+/// Get the detected display session (cached after first call).
+pub fn display_session() -> &'static DisplaySession {
+    use std::sync::OnceLock;
+    static SESSION: OnceLock<DisplaySession> = OnceLock::new();
+    SESSION.get_or_init(detect_display_session)
+}
+
+fn detect_display_session() -> DisplaySession {
+    let session_type = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
+
+    if session_type == "x11" {
+        tracing::info!("Display session: X11");
+        return DisplaySession::X11;
+    }
+
+    let is_wayland = session_type == "wayland"
+        || std::env::var("WAYLAND_DISPLAY").is_ok();
+
+    if !is_wayland {
+        tracing::info!("Display session: Unknown (XDG_SESSION_TYPE={:?})", session_type);
+        return DisplaySession::Unknown;
+    }
+
+    // Detect compositor from XDG_CURRENT_DESKTOP or running processes
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_lowercase();
+
+    let compositor = if desktop.contains("hyprland") || is_process_running("Hyprland") {
+        WaylandCompositor::Hyprland
+    } else if desktop.contains("sway") || is_process_running("sway") {
+        WaylandCompositor::Sway
+    } else if desktop.contains("gnome") || is_process_running("gnome-shell") {
+        WaylandCompositor::Gnome
+    } else if desktop.contains("kde") || desktop.contains("plasma") || is_process_running("kwin") {
+        WaylandCompositor::Kde
+    } else {
+        WaylandCompositor::Other
+    };
+
+    tracing::info!("Display session: Wayland ({:?})", compositor);
+    compositor.log_capabilities();
+    DisplaySession::Wayland(compositor)
+}
+
+fn is_process_running(name: &str) -> bool {
+    Command::new("pgrep")
+        .arg("-x")
+        .arg(name)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+impl std::fmt::Display for WaylandCompositor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WaylandCompositor::Hyprland => write!(f, "Hyprland"),
+            WaylandCompositor::Sway => write!(f, "Sway"),
+            WaylandCompositor::Gnome => write!(f, "GNOME"),
+            WaylandCompositor::Kde => write!(f, "KDE"),
+            WaylandCompositor::Other => write!(f, "Unknown"),
+            WaylandCompositor::None => write!(f, "None"),
+        }
+    }
+}
+
+impl std::fmt::Display for DisplaySession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DisplaySession::Wayland(_) => write!(f, "Wayland"),
+            DisplaySession::X11 => write!(f, "X11"),
+            DisplaySession::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
+impl WaylandCompositor {
+    /// Get the compositor version (best-effort).
+    pub fn version(&self) -> Option<String> {
+        match self {
+            WaylandCompositor::Hyprland => {
+                let output = Command::new("hyprctl")
+                    .args(["version", "-j"])
+                    .output()
+                    .ok()?;
+                if !output.status.success() {
+                    return None;
+                }
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                // Parse JSON: {"branch":"...","commit":"...","tag":"v0.45.0",...}
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                    json.get("tag")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.trim_start_matches('v').to_string())
+                } else {
+                    None
+                }
+            }
+            WaylandCompositor::Sway => {
+                let output = Command::new("sway").args(["--version"]).output().ok()?;
+                if !output.status.success() {
+                    return None;
+                }
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                // "sway version 1.9"
+                stdout
+                    .trim()
+                    .strip_prefix("sway version ")
+                    .map(|s| s.to_string())
+            }
+            _ => None,
+        }
+    }
+
+    /// Describe the paste method used for this compositor.
+    pub fn paste_method(&self) -> &'static str {
+        match self {
+            WaylandCompositor::Hyprland => "wl-copy + hyprctl",
+            WaylandCompositor::Sway => "wl-copy + wtype",
+            WaylandCompositor::Gnome | WaylandCompositor::Kde => "wl-copy + wtype (fallback: enigo)",
+            WaylandCompositor::Other => "wl-copy + wtype (fallback: enigo)",
+            WaylandCompositor::None => "arboard + enigo",
+        }
+    }
+
+    fn log_capabilities(&self) {
+        match self {
+            WaylandCompositor::Hyprland => {
+                tracing::info!("Compositor: Hyprland — using hyprctl for paste, wl-copy for clipboard");
+            }
+            WaylandCompositor::Sway => {
+                tracing::info!("Compositor: Sway — using wtype for paste, wl-copy for clipboard");
+            }
+            WaylandCompositor::Gnome | WaylandCompositor::Kde => {
+                tracing::info!("Compositor: {:?} — using wl-copy for clipboard, enigo fallback for paste", self);
+            }
+            WaylandCompositor::Other => {
+                tracing::info!("Compositor: unknown — will try wtype, fall back to enigo");
+            }
+            WaylandCompositor::None => {}
+        }
+    }
+
+    /// Whether this compositor supports wtype for simulating paste keystrokes
+    /// without side effects (like layout change notifications).
+    pub fn supports_wtype_paste(&self) -> bool {
+        matches!(self, WaylandCompositor::Sway | WaylandCompositor::Other)
+    }
+
+    /// Whether this compositor supports hyprctl for dispatching shortcuts.
+    pub fn supports_hyprctl(&self) -> bool {
+        matches!(self, WaylandCompositor::Hyprland)
+    }
+}
+
 /// Check microphone permission status
 ///
 /// On Linux, microphone access is managed by PulseAudio or PipeWire.

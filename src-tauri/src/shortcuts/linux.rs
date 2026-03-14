@@ -10,6 +10,7 @@
 use tauri::{AppHandle, Runtime};
 
 use super::manager::{self, ShortcutInfo};
+use super::portal;
 
 /// Detected display server type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,8 +79,8 @@ pub fn get_display_server() -> DisplayServer {
 
 /// Register a shortcut on Linux
 ///
-/// Uses Tauri's GlobalShortcut plugin for both X11 and Wayland.
-/// On Wayland, global shortcuts may not work due to security restrictions.
+/// On Wayland, uses XDG Desktop Portal GlobalShortcuts.
+/// On X11, uses Tauri's GlobalShortcut plugin.
 pub fn register<R: Runtime>(
     app: &AppHandle<R>,
     id: String,
@@ -87,35 +88,36 @@ pub fn register<R: Runtime>(
     description: String,
 ) -> Result<(), String> {
     let display_server = get_display_server();
-
     tracing::info!("Registering Linux shortcut '{}' on {}", id, display_server);
 
-    // Warn about Wayland limitations
-    if display_server == DisplayServer::Wayland {
-        tracing::warn!(
-            "Running on Wayland: global shortcuts may not work. \
-             Consider using XWayland or X11 session for full shortcut support."
-        );
+    match display_server {
+        DisplayServer::Wayland => portal::register(id, accelerator, description),
+        _ => manager::register(app, id, accelerator, description),
     }
-
-    // Use Tauri's GlobalShortcut plugin for all display servers
-    // It may have partial Wayland support via XDG Desktop Portal
-    manager::register(app, id, accelerator, description)
 }
 
 /// Unregister a shortcut on Linux
 pub fn unregister<R: Runtime>(app: &AppHandle<R>, id: &str) -> Result<(), String> {
-    manager::unregister(app, id)
+    match get_display_server() {
+        DisplayServer::Wayland => portal::unregister(id),
+        _ => manager::unregister(app, id),
+    }
 }
 
 /// List all registered shortcuts on Linux
 pub fn list_registered() -> Vec<ShortcutInfo> {
-    manager::list_registered()
+    match get_display_server() {
+        DisplayServer::Wayland => portal::list_registered(),
+        _ => manager::list_registered(),
+    }
 }
 
 /// Unregister all shortcuts on Linux
 pub fn unregister_all<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
-    manager::unregister_all(app)
+    match get_display_server() {
+        DisplayServer::Wayland => portal::unregister_all(),
+        _ => manager::unregister_all(app),
+    }
 }
 
 // ============================================================================

@@ -119,7 +119,36 @@ impl TextInsertService {
     fn insert_by_paste(&self, text: &str) -> Result<(), String> {
         debug!("Inserting {} characters by paste", text.len());
 
-        // Set clipboard to new text
+        #[cfg(target_os = "linux")]
+        {
+            use crate::platform::linux::{display_session, WaylandCompositor};
+
+            let session = display_session();
+            if session.is_wayland() {
+                // On Wayland, use wl-copy for clipboard (arboard doesn't reliably
+                // serve content to other clients due to ownership semantics)
+                if !Self::wl_copy_set_clipboard(text) {
+                    return Err("Failed to set clipboard via wl-copy".to_string());
+                }
+
+                // Paste using the best method for this compositor
+                let pasted = match session.compositor() {
+                    WaylandCompositor::Hyprland => Self::paste_with_hyprctl(),
+                    WaylandCompositor::Sway => Self::paste_with_wtype(),
+                    _ => Self::paste_with_wtype() || Self::paste_with_enigo().is_ok(),
+                };
+
+                if pasted {
+                    info!("Inserted {} characters via wl-copy + {:?} paste", text.len(), session.compositor());
+                    return Ok(());
+                }
+                return Err("Failed to paste on Wayland".to_string());
+            }
+
+            // X11: use arboard + enigo
+        }
+
+        // Set clipboard to new text (macOS or X11)
         let mut clipboard =
             arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
 
@@ -130,7 +159,6 @@ impl TextInsertService {
         // Small delay to ensure clipboard is ready
         thread::sleep(Duration::from_millis(10));
 
-        // Perform paste
         #[cfg(target_os = "macos")]
         {
             self.paste_macos()?;
@@ -138,11 +166,8 @@ impl TextInsertService {
 
         #[cfg(target_os = "linux")]
         {
-            self.paste_linux()?;
+            Self::paste_with_enigo()?;
         }
-
-        // Note: Clipboard restoration is handled by the clipboard module
-        // via paste_transcription -> restore_clipboard flow with configurable delay
 
         Ok(())
     }
@@ -332,33 +357,75 @@ impl TextInsertService {
         Ok(())
     }
 
+    /// Set clipboard content via wl-copy.
+    ///
+    /// More reliable than arboard on Wayland because wl-copy forks a background
+    /// process to actively serve clipboard content to other Wayland clients.
     #[cfg(target_os = "linux")]
-    fn paste_linux(&self) -> Result<(), String> {
-        // Try wtype first (native Wayland support, no modifier key issues)
-        if Self::try_paste_with_wtype() {
-            debug!("Pasted via wtype (native Wayland)");
-            return Ok(());
-        }
+    fn wl_copy_set_clipboard(text: &str) -> bool {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
 
-        // Fall back to enigo (X11/XWayland)
-        debug!("wtype not available, falling back to enigo");
-        Self::paste_with_enigo()
+        let mut child = match Command::new("wl-copy")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("Failed to spawn wl-copy: {}", e);
+                return false;
+            }
+        };
+
+        if let Some(ref mut stdin) = child.stdin {
+            if stdin.write_all(text.as_bytes()).is_err() {
+                return false;
+            }
+        }
+        // Close stdin so wl-copy finishes reading
+        drop(child.stdin.take());
+
+        let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+        if ok {
+            // Small delay to ensure wl-copy's background process is serving
+            thread::sleep(Duration::from_millis(20));
+        }
+        ok
     }
 
+    /// Paste via hyprctl dispatch (Hyprland-native, no virtual keyboard device).
+    ///
+    /// Avoids the "keyboard layout changed" notification that wtype triggers
+    /// on Hyprland by using hyprctl's native shortcut dispatch.
     #[cfg(target_os = "linux")]
-    fn try_paste_with_wtype() -> bool {
+    fn paste_with_hyprctl() -> bool {
+        use std::process::{Command, Stdio};
+
+        Command::new("hyprctl")
+            .args(["dispatch", "sendshortcut", "CTRL,V,activewindow"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    /// Paste via wtype (Ctrl+V keystroke simulation).
+    ///
+    /// Works on compositors supporting the virtual-keyboard protocol (Sway, etc.).
+    /// On Hyprland this triggers a "keyboard layout changed" notification,
+    /// so prefer `paste_with_hyprctl` there.
+    #[cfg(target_os = "linux")]
+    fn paste_with_wtype() -> bool {
         use std::process::Command;
 
-        // wtype is a native Wayland tool that avoids modifier key sync issues
-        // Note: Only works on compositors supporting the virtual-keyboard protocol (Sway, Hyprland, etc.)
-        // Falls back to enigo on GNOME which triggers the "Allow Remote Interaction" dialog
-        match Command::new("wtype")
+        Command::new("wtype")
             .args(["-M", "ctrl", "v", "-m", "ctrl"])
             .status()
-        {
-            Ok(status) => status.success(),
-            Err(_) => false,
-        }
+            .map(|s| s.success())
+            .unwrap_or(false)
     }
 
     #[cfg(target_os = "linux")]

@@ -58,6 +58,8 @@ pub fn start_audio_preview(app: AppHandle, device_id: Option<String>) -> Result<
 
     let config = device.default_input_config().map_err(|e| e.to_string())?;
     let channels = config.channels() as usize;
+    let sample_format = config.sample_format();
+    let stream_config: cpal::StreamConfig = config.into();
 
     // Shared state for metering
     let meter = Arc::new(Mutex::new(AudioMeter::new()));
@@ -66,26 +68,54 @@ pub fn start_audio_preview(app: AppHandle, device_id: Option<String>) -> Result<
     // Channel for audio data
     let (tx, rx) = crossbeam_channel::bounded::<Vec<f32>>(16);
 
-    // Build the input stream
+    // Build the input stream using the device's native sample format.
+    // CPAL panics on some backends (ALSA) if the callback type doesn't
+    // match the hardware format.
     let stream = {
         let tx = tx.clone();
-        device
-            .build_input_stream(
-                &config.into(),
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    // Mix to mono and send to emitter thread
-                    let mono: Vec<f32> = data
-                        .chunks(channels)
-                        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
-                        .collect();
-                    let _ = tx.try_send(mono);
-                },
-                |err| {
-                    tracing::error!("Audio preview stream error: {}", err);
-                },
-                None,
-            )
-            .map_err(|e| e.to_string())?
+        match sample_format {
+            cpal::SampleFormat::I16 => device
+                .build_input_stream(
+                    &stream_config,
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        let mono: Vec<f32> = data
+                            .chunks(channels)
+                            .map(|frame| {
+                                frame.iter().map(|&s| s as f32 / i16::MAX as f32).sum::<f32>()
+                                    / channels as f32
+                            })
+                            .collect();
+                        let _ = tx.try_send(mono);
+                    },
+                    |err| {
+                        tracing::error!("Audio preview stream error: {}", err);
+                    },
+                    None,
+                )
+                .map_err(|e| e.to_string())?,
+            cpal::SampleFormat::F32 => device
+                .build_input_stream(
+                    &stream_config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        let mono: Vec<f32> = data
+                            .chunks(channels)
+                            .map(|frame| frame.iter().sum::<f32>() / channels as f32)
+                            .collect();
+                        let _ = tx.try_send(mono);
+                    },
+                    |err| {
+                        tracing::error!("Audio preview stream error: {}", err);
+                    },
+                    None,
+                )
+                .map_err(|e| e.to_string())?,
+            other => {
+                return Err(format!(
+                    "Unsupported sample format for preview: {:?}",
+                    other
+                ));
+            }
+        }
     };
 
     stream.play().map_err(|e| e.to_string())?;
@@ -167,82 +197,35 @@ pub fn is_audio_preview_running() -> bool {
 /// Global recording meter state
 static RECORDING_METER_STATE: Mutex<Option<MeteringState>> = Mutex::new(None);
 
-/// Start recording metering - emits `recording-audio-level` events
+/// Start recording metering from a shared ring buffer.
 ///
-/// This runs alongside recording to provide real-time audio levels for the
-/// recording indicator overlay. Uses the same device as recording.
-pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Result<(), String> {
-    tracing::info!(
-        "Recording metering: starting with device_id={:?}",
-        device_id
-    );
+/// Instead of opening a second audio stream (which fails on ALSA because the
+/// device is already exclusively held by the recorder), this reads audio data
+/// from the recorder's secondary ring buffer.
+///
+/// Emits `recording-audio-level` events to the frontend.
+pub fn start_recording_metering(
+    app: AppHandle,
+    shared_buffer: Arc<super::ring_buffer::AudioRingBuffer>,
+) -> Result<(), String> {
+    tracing::info!("Recording metering: starting from shared buffer");
 
     // Stop any existing metering
     stop_recording_metering_inner();
 
-    // Find the device using stable device IDs
-    let device = get_recording_device(device_id)
-        .ok_or_else(|| "No audio input device available".to_string())?;
-
-    let device_name = get_device_display_name(&device);
-    tracing::info!("Recording metering: using device '{}'", device_name);
-
-    let config = device.default_input_config().map_err(|e| {
-        tracing::error!("Recording metering: failed to get config: {}", e);
-        e.to_string()
-    })?;
-    let channels = config.channels() as usize;
-    tracing::info!(
-        "Recording metering: config {}Hz, {} channels",
-        config.sample_rate(),
-        channels
-    );
-
-    // Shared state for metering
     let meter = Arc::new(Mutex::new(AudioMeter::new()));
     let stop_flag = Arc::new(AtomicBool::new(false));
 
-    // Channel for audio data
-    let (tx, rx) = crossbeam_channel::bounded::<Vec<f32>>(16);
-
-    // Build the input stream
-    let stream = {
-        let tx = tx.clone();
-        device
-            .build_input_stream(
-                &config.into(),
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    let mono: Vec<f32> = data
-                        .chunks(channels)
-                        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
-                        .collect();
-                    let _ = tx.try_send(mono);
-                },
-                |err| {
-                    tracing::error!("Recording meter stream error: {}", err);
-                },
-                None,
-            )
-            .map_err(|e| {
-                tracing::error!("Recording metering: failed to build stream: {}", e);
-                e.to_string()
-            })?
-    };
-
-    stream.play().map_err(|e| {
-        tracing::error!("Recording metering: failed to play stream: {}", e);
-        e.to_string()
-    })?;
-
-    tracing::info!("Recording metering: audio stream active");
-
-    // Spawn emitter thread to send levels to the recording-indicator window
+    // Spawn emitter thread that polls the shared ring buffer
     let emit_stop_flag = stop_flag.clone();
     let emit_handle = std::thread::spawn(move || {
+        let mut read_buf = vec![0.0f32; 4096];
+
         while !emit_stop_flag.load(Ordering::Relaxed) {
-            while let Ok(samples) = rx.try_recv() {
+            let n = shared_buffer.read(&mut read_buf);
+            if n > 0 {
                 let mut meter = meter.lock();
-                let level = meter.process(&samples);
+                let level = meter.process(&read_buf[..n]);
 
                 let event = AudioLevelEvent {
                     rms: level.rms,
@@ -269,15 +252,15 @@ pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Resu
         }
     });
 
-    // Store state
+    // Store state (no stream needed — we read from the shared buffer)
     let mut state_guard = RECORDING_METER_STATE.lock();
     *state_guard = Some(MeteringState {
-        stream: Some(stream),
+        stream: None,
         stop_flag,
         emit_handle: Some(emit_handle),
     });
 
-    tracing::info!("Recording metering started");
+    tracing::info!("Recording metering started (shared buffer)");
     Ok(())
 }
 

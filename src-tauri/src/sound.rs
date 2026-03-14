@@ -59,14 +59,59 @@ pub fn play_sound(event: SoundEvent) {
         play_macos_sound(path);
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = path; // macOS paths not used on Linux
+        play_linux_sound(event);
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         tracing::debug!(
             "System sounds not implemented for this platform, skipping {:?}",
             event
         );
-        let _ = path; // Suppress unused warning
+        let _ = path;
     }
+}
+
+/// Play a sound on Linux using canberra-gtk-play (XDG sound theme)
+///
+/// Uses freedesktop sound-naming-spec event IDs which map to the user's
+/// installed sound theme. Falls back silently if canberra-gtk-play isn't
+/// available.
+#[cfg(target_os = "linux")]
+fn play_linux_sound(event: SoundEvent) {
+    // Map events to freedesktop sound-naming-spec IDs
+    // See: https://specifications.freedesktop.org/sound-naming-spec/latest/
+    let sound_id = match event {
+        SoundEvent::RecordingStart => "message-new-instant",
+        SoundEvent::RecordingStop => "message-sent-instant",
+        SoundEvent::TranscriptionComplete => "completion-success",
+        SoundEvent::Error => "dialog-error",
+    };
+
+    let id = sound_id.to_string();
+    std::thread::spawn(move || {
+        match std::process::Command::new("canberra-gtk-play")
+            .args(["-i", &id, "-d", "Thoth"])
+            .output()
+        {
+            Ok(out) if out.status.success() => {
+                tracing::debug!("Played Linux sound: {}", id);
+            }
+            Ok(out) => {
+                tracing::debug!(
+                    "canberra-gtk-play failed for '{}': {}",
+                    id,
+                    String::from_utf8_lossy(&out.stderr).trim()
+                );
+            }
+            Err(_) => {
+                tracing::debug!("canberra-gtk-play not available, skipping sound");
+            }
+        }
+    });
 }
 
 /// Play a macOS sound file using afplay command

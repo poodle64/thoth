@@ -179,25 +179,35 @@ fn position_pill(app: &AppHandle, indicator: &WebviewWindow) -> Result<(), Strin
         .get_webview_window("main")
         .and_then(|w| w.current_monitor().ok().flatten())
         .or_else(|| indicator.current_monitor().ok().flatten())
-        .or_else(|| indicator.primary_monitor().ok().flatten())
-        .ok_or_else(|| "Could not determine current monitor".to_string())?;
+        .or_else(|| indicator.primary_monitor().ok().flatten());
 
-    let scale = monitor.scale_factor();
-    let mp = monitor.position();
-    let ms = monitor.size();
-    let mx = mp.x as f64 / scale;
-    let my = mp.y as f64 / scale;
-    let mw = ms.width as f64 / scale;
+    if let Some(monitor) = monitor {
+        let scale = monitor.scale_factor();
+        let mp = monitor.position();
+        let ms = monitor.size();
+        let mx = mp.x as f64 / scale;
+        let my = mp.y as f64 / scale;
+        let mw = ms.width as f64 / scale;
 
-    let x = mx + (mw / 2.0) - (PILL_WIDTH / 2.0);
-    let y = my + PILL_EDGE_PADDING + 30.0; // Below menu bar
+        let x = mx + (mw / 2.0) - (PILL_WIDTH / 2.0);
+        let y = my + PILL_EDGE_PADDING + 30.0; // Below menu bar
 
-    indicator
-        .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
-        .map_err(|e| e.to_string())?;
+        indicator
+            .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
+            .map_err(|e| e.to_string())?;
 
-    tracing::debug!("Pill indicator at top-centre ({}, {})", x, y);
-    Ok(())
+        tracing::debug!("Pill indicator at top-centre ({}, {})", x, y);
+        return Ok(());
+    }
+
+    // On Wayland, monitor info may be unavailable — compositor rules handle positioning
+    #[cfg(target_os = "linux")]
+    if is_wayland() {
+        tracing::info!("Monitor info unavailable on Wayland — relying on compositor window rules for positioning");
+        return Ok(());
+    }
+
+    Err("Could not determine current monitor".to_string())
 }
 
 /// Shared logic for showing the recording indicator.
@@ -217,9 +227,13 @@ where
         return Ok(());
     }
 
-    if is_wayland() {
-        tracing::warn!("Running on Wayland - indicator positioning may not work correctly");
-    }
+    // On Wayland, CursorDot can't work (no mouse tracking), so upgrade to Pill.
+    let style = if is_wayland() && style == IndicatorStyle::CursorDot {
+        tracing::info!("Wayland: upgrading CursorDot to Pill (mouse tracking unavailable)");
+        IndicatorStyle::Pill
+    } else {
+        style
+    };
 
     let indicator = get_indicator_window(app)
         .ok_or_else(|| "Recording indicator window not found".to_string())?;
@@ -236,31 +250,53 @@ where
         indicator.show().map_err(|e| e.to_string())?;
     }
 
-    match style {
+    // Position based on style.  On Linux the window is already shown, so if
+    // positioning fails we must hide it again — otherwise it sits visible at
+    // an uncontrolled location and can intercept clicks.
+    let position_result = match style {
         IndicatorStyle::CursorDot => {
             // Position at cursor or use the provided fallback
             if let Some((x, y)) = mouse_tracker::get_initial_position() {
                 indicator
                     .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
-                    .map_err(|e| e.to_string())?;
-                tracing::debug!("Cursor-dot indicator at ({}, {})", x, y);
+                    .map_err(|e| e.to_string())
+                    .map(|_| {
+                        tracing::debug!("Cursor-dot indicator at ({}, {})", x, y);
+                    })
             } else {
                 tracing::info!("No mouse position available, using fallback position");
-                fallback_position(app, &indicator)?;
+                fallback_position(app, &indicator)
             }
         }
         IndicatorStyle::FixedFloat => {
-            position_at_fixed(app, &indicator, style)?;
+            position_at_fixed(app, &indicator, style)
         }
         IndicatorStyle::Pill => {
-            position_pill(app, &indicator)?;
+            position_pill(app, &indicator)
         }
+    };
+
+    // If positioning failed on Linux, hide the already-shown window
+    #[cfg(target_os = "linux")]
+    if let Err(ref e) = position_result {
+        tracing::warn!("Positioning failed ({}), hiding indicator to prevent ghost window", e);
+        let _ = indicator.hide();
     }
+
+    position_result?;
 
     // On macOS, show after positioning
     #[cfg(not(target_os = "linux"))]
     {
         indicator.show().map_err(|e| e.to_string())?;
+    }
+
+    // On Wayland/Hyprland, re-apply window rules after each show.
+    // Properties like bordersize, noshadow, pin, and size/position may not
+    // persist across hide/show cycles.
+    #[cfg(target_os = "linux")]
+    if is_wayland() {
+        spawn_hyprland_rules_reapply();
     }
 
     // Only track mouse for cursor-dot style
@@ -365,8 +401,8 @@ fn position_at_bottom_centre(app: &AppHandle, indicator: &WebviewWindow) -> Resu
 /// On Linux/Wayland, we use actual hide() since the window has been mapped
 /// during pre-warm. Positioning doesn't work (compositor controls it).
 #[tauri::command]
-pub fn hide_recording_indicator(app: AppHandle) -> Result<(), String> {
-    tracing::info!("hide_recording_indicator called");
+pub fn hide_recording_indicator(app: AppHandle, reason: Option<String>) -> Result<(), String> {
+    tracing::info!("hide_recording_indicator called, reason={}", reason.as_deref().unwrap_or("(direct Rust call)"));
 
     // Stop mouse tracking before hiding
     mouse_tracker::stop_tracking();
@@ -423,9 +459,13 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
         return Ok(());
     }
 
-    if is_wayland() {
-        tracing::warn!("Running on Wayland - indicator positioning may not work correctly");
-    }
+    // On Wayland, CursorDot can't work (no mouse tracking), so upgrade to Pill.
+    let style = if is_wayland() && style == IndicatorStyle::CursorDot {
+        tracing::info!("Wayland: upgrading CursorDot to Pill (mouse tracking unavailable)");
+        IndicatorStyle::Pill
+    } else {
+        style
+    };
 
     // Resize window for the current style
     let (w, h) = dimensions_for_style(style);
@@ -440,33 +480,55 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
         indicator.show().map_err(|e| e.to_string())?;
     }
 
-    match style {
+    // Position based on style.  On Linux the window is already shown, so if
+    // positioning fails we must hide it again — otherwise it sits visible at
+    // an uncontrolled location and can intercept clicks (e.g. the tray-click
+    // mouse-up) which triggers the indicator's stop handler.
+    let position_result = match style {
         IndicatorStyle::CursorDot => {
             // Position at cursor or fall back to primary monitor centre-bottom
             if let Some((x, y)) = mouse_tracker::get_initial_position() {
                 indicator
                     .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
-                    .map_err(|e| e.to_string())?;
-                tracing::debug!("Cursor-dot indicator at ({}, {})", x, y);
+                    .map_err(|e| e.to_string())
+                    .map(|_| {
+                        tracing::debug!("Cursor-dot indicator at ({}, {})", x, y);
+                    })
             } else {
                 position_at_primary_monitor(&indicator);
                 tracing::debug!("Cursor-dot indicator at fallback (bottom-centre)");
+                Ok(())
             }
         }
         IndicatorStyle::FixedFloat => {
             // Position at the configured fixed location
-            position_fixed_generic(&indicator)?;
+            position_fixed_generic(&indicator)
         }
         IndicatorStyle::Pill => {
             // Position at top-centre of screen
-            position_pill_generic(&indicator)?;
+            position_pill_generic(&indicator)
         }
+    };
+
+    // If positioning failed on Linux, hide the already-shown window
+    #[cfg(target_os = "linux")]
+    if let Err(ref e) = position_result {
+        tracing::warn!("Positioning failed ({}), hiding indicator to prevent ghost window", e);
+        let _ = indicator.hide();
     }
+
+    position_result?;
 
     // On macOS, show after positioning
     #[cfg(not(target_os = "linux"))]
     {
         indicator.show().map_err(|e| e.to_string())?;
+    }
+
+    // On Wayland/Hyprland, re-apply window rules after each show.
+    #[cfg(target_os = "linux")]
+    if is_wayland() {
+        spawn_hyprland_rules_reapply();
     }
 
     // Only track mouse for cursor-dot style
@@ -486,11 +548,18 @@ fn position_fixed_generic<R: Runtime>(
     let style = cfg.general.indicator_style;
     let (iw, ih) = dimensions_for_style(style);
 
-    let monitor = indicator
-        .primary_monitor()
-        .ok()
-        .flatten()
-        .ok_or_else(|| "Could not determine primary monitor".to_string())?;
+    let monitor = match indicator.primary_monitor().ok().flatten() {
+        Some(m) => m,
+        None => {
+            // On Wayland, primary_monitor() may return None — compositor handles positioning
+            #[cfg(target_os = "linux")]
+            if is_wayland() {
+                tracing::info!("Monitor info unavailable on Wayland — relying on compositor window rules for positioning");
+                return Ok(());
+            }
+            return Err("Could not determine primary monitor".to_string());
+        }
+    };
 
     let scale = monitor.scale_factor();
     let mp = monitor.position();
@@ -527,26 +596,33 @@ fn position_fixed_generic<R: Runtime>(
 fn position_pill_generic<R: Runtime>(
     indicator: &tauri::WebviewWindow<R>,
 ) -> Result<(), String> {
-    let monitor = indicator
-        .primary_monitor()
-        .ok()
-        .flatten()
-        .ok_or_else(|| "Could not determine primary monitor".to_string())?;
+    // Try Tauri's monitor API first
+    if let Some(monitor) = indicator.primary_monitor().ok().flatten() {
+        let scale = monitor.scale_factor();
+        let mp = monitor.position();
+        let ms = monitor.size();
+        let mx = mp.x as f64 / scale;
+        let my = mp.y as f64 / scale;
+        let mw = ms.width as f64 / scale;
 
-    let scale = monitor.scale_factor();
-    let mp = monitor.position();
-    let ms = monitor.size();
-    let mx = mp.x as f64 / scale;
-    let my = mp.y as f64 / scale;
-    let mw = ms.width as f64 / scale;
+        let x = mx + (mw / 2.0) - (PILL_WIDTH / 2.0);
+        let y = my + PILL_EDGE_PADDING + 30.0;
 
-    let x = mx + (mw / 2.0) - (PILL_WIDTH / 2.0);
-    let y = my + PILL_EDGE_PADDING + 30.0;
+        indicator
+            .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
 
-    indicator
-        .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    // Fallback: on Wayland, primary_monitor() may return None.
+    // Hyprland window rules handle positioning, so just log and proceed.
+    #[cfg(target_os = "linux")]
+    if is_wayland() {
+        tracing::info!("primary_monitor() unavailable on Wayland — relying on compositor window rules for positioning");
+        return Ok(());
+    }
+
+    Err("Could not determine primary monitor".to_string())
 }
 
 /// Pre-warm the recording indicator window by loading its content.
@@ -561,11 +637,6 @@ fn position_pill_generic<R: Runtime>(
 /// On Linux/Wayland, we show then hide the window during pre-warm to ensure
 /// it's properly mapped with the compositor. Subsequent hide/show should work.
 pub fn prewarm_indicator_window(app: &AppHandle) {
-    // On Wayland, warn that the indicator may not work well
-    if is_wayland() {
-        tracing::info!("Running on Wayland - recording indicator positioning won't work (compositor controls it). Users can disable in settings.");
-    }
-
     let app_handle = app.clone();
 
     // Spawn async task to pre-warm without blocking startup
@@ -576,19 +647,27 @@ pub fn prewarm_indicator_window(app: &AppHandle) {
         if let Some(window) = app_handle.get_webview_window(INDICATOR_WINDOW_LABEL) {
             tracing::info!("Pre-warming recording indicator window");
 
-            // On Linux/Wayland, show then hide to map the window with compositor.
+            // On Linux, show then hide to map the window with compositor.
             // This ensures subsequent show() calls will work.
             #[cfg(target_os = "linux")]
             {
-                tracing::info!("Pre-warming indicator for Linux/Wayland - showing then hiding");
+                tracing::info!("Pre-warming indicator for Linux - showing then hiding");
 
-                // Show the window to register it with the compositor
+                // On Wayland/Hyprland, register windowrulev2 rules BEFORE
+                // showing the window. These rules apply at window creation
+                // time (first map), so they must be in place before show().
+                if is_wayland() {
+                    register_hyprland_window_rules().await;
+                }
+
+                // Show the window to register it with the compositor.
+                // The windowrulev2 rules apply automatically at first map.
                 if let Err(e) = window.show() {
                     tracing::warn!("Failed to show indicator for pre-warming: {}", e);
                 }
 
-                // Wait for compositor to acknowledge
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                // Wait for compositor to acknowledge and map the window
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
                 // Now hide it - since it's been mapped, show() should work later
                 if let Err(e) = window.hide() {
@@ -624,4 +703,164 @@ pub fn prewarm_indicator_window(app: &AppHandle) {
             tracing::warn!("Recording indicator window not found for pre-warming");
         }
     });
+}
+
+/// Spawn a background task to position the indicator on Hyprland after show.
+///
+/// The persistent windowrulev2 rules (registered during prewarm) handle
+/// float/pin/noborder/size automatically. This only needs to position the
+/// window at top-centre since that requires knowing the monitor resolution.
+#[cfg(target_os = "linux")]
+fn spawn_hyprland_rules_reapply() {
+    tauri::async_runtime::spawn(async {
+        // Wait for compositor to finish mapping the window
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        position_hyprland_indicator().await;
+    });
+}
+
+/// Register persistent Hyprland windowrulev2 rules for the indicator.
+///
+/// These rules match by title "thoth-indicator" and apply automatically
+/// every time the window is shown — no per-show fixup needed. Called once
+/// during prewarm.
+#[cfg(target_os = "linux")]
+async fn register_hyprland_window_rules() {
+    use crate::platform::linux::{display_session, WaylandCompositor};
+
+    if display_session().compositor() != WaylandCompositor::Hyprland {
+        tracing::debug!("Not Hyprland — skipping indicator window rules");
+        return;
+    }
+
+    tracing::info!("Registering Hyprland windowrulev2 rules for indicator");
+
+    // Rules that apply automatically to any window with title "thoth-indicator".
+    // Both size and maxsize are set to prevent WebKitGTK from expanding beyond
+    // the pill dimensions.
+    let rules = [
+        "float",
+        "pin",
+        "noborder",
+        "noshadow 1",
+        "noblur 1",
+        "nodim 1",
+        "noanim 1",
+        "nofocus 1",
+        "opaque override 0",
+        &format!("size {} {}", PILL_WIDTH as i32, PILL_HEIGHT as i32),
+        &format!("maxsize {} {}", PILL_WIDTH as i32, PILL_HEIGHT as i32),
+        &format!("minsize {} {}", PILL_WIDTH as i32, PILL_HEIGHT as i32),
+    ];
+
+    for rule in &rules {
+        let rule_str = format!("{},title:thoth-indicator", rule);
+        run_hyprctl(&["keyword", "windowrulev2", &rule_str]).await;
+    }
+
+    tracing::info!("Hyprland window rules registered for title:thoth-indicator");
+}
+
+/// Position and size the indicator on Hyprland after each show.
+///
+/// Forces the correct size (in case the compositor didn't apply the
+/// windowrulev2 size rule) and positions at top-centre of the focused
+/// monitor.
+#[cfg(target_os = "linux")]
+async fn position_hyprland_indicator() {
+    use crate::platform::linux::{display_session, WaylandCompositor};
+
+    if display_session().compositor() != WaylandCompositor::Hyprland {
+        return;
+    }
+
+    // Force correct size — windowrulev2 size rules may not re-apply on
+    // subsequent show/hide cycles
+    run_hyprctl(&[
+        "dispatch",
+        "resizewindowpixel",
+        &format!(
+            "exact {} {},title:thoth-indicator",
+            PILL_WIDTH as i32, PILL_HEIGHT as i32
+        ),
+    ])
+    .await;
+
+    if let Some((mw, _mh)) = query_hyprland_focused_monitor().await {
+        let x = (mw as f64 / 2.0 - PILL_WIDTH / 2.0) as i32;
+        let y = PILL_EDGE_PADDING as i32;
+
+        run_hyprctl(&[
+            "dispatch",
+            "movewindowpixel",
+            &format!("exact {} {},title:thoth-indicator", x, y),
+        ])
+        .await;
+
+        tracing::debug!(
+            "Hyprland indicator: size {}x{}, position ({}, {})",
+            PILL_WIDTH as i32,
+            PILL_HEIGHT as i32,
+            x,
+            y
+        );
+    }
+}
+
+/// Run a hyprctl command, logging warnings on failure.
+#[cfg(target_os = "linux")]
+async fn run_hyprctl(args: &[&str]) {
+    match tokio::process::Command::new("hyprctl")
+        .args(args)
+        .output()
+        .await
+    {
+        Ok(out) if out.status.success() => {
+            tracing::debug!("hyprctl {}: ok", args.join(" "));
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let detail = if stderr.trim().is_empty() {
+                stdout.trim().to_string()
+            } else {
+                stderr.trim().to_string()
+            };
+            tracing::warn!("hyprctl {} failed: {}", args.join(" "), detail);
+        }
+        Err(e) => {
+            tracing::warn!("Failed to run hyprctl {}: {}", args.join(" "), e);
+        }
+    }
+}
+
+/// Query the focused monitor's resolution from Hyprland.
+///
+/// Returns `(width, height)` in pixels.
+#[cfg(target_os = "linux")]
+async fn query_hyprland_focused_monitor() -> Option<(u32, u32)> {
+    let output = tokio::process::Command::new("hyprctl")
+        .args(["monitors", "-j"])
+        .output()
+        .await
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let monitors = json.as_array()?;
+
+    // Find focused monitor, or fall back to first
+    let monitor = monitors
+        .iter()
+        .find(|m| m["focused"].as_bool() == Some(true))
+        .or_else(|| monitors.first())?;
+
+    let width = monitor["width"].as_u64()? as u32;
+    let height = monitor["height"].as_u64()? as u32;
+
+    tracing::debug!("Hyprland focused monitor: {}x{}", width, height);
+    Some((width, height))
 }

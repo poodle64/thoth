@@ -17,6 +17,7 @@
 		formatTotalDuration
 	} from '../utils/format';
 	import { getUpdaterState, checkForUpdate } from '../stores/updater.svelte';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 
   interface ModelStats {
     name: string;
@@ -49,6 +50,13 @@
     detected_gpus: DetectedGpu[];
   }
 
+  interface LinuxSystemInfo {
+    session_type: string;
+    compositor: string | null;
+    compositor_version: string | null;
+    paste_method: string;
+  }
+
   interface Props {
     /** Callback to navigate to another Settings pane */
     onNavigate: (paneId: string) => void;
@@ -64,6 +72,8 @@
 		'checking'
 	);
 	let gpuInfo = $state<GpuInfo | null>(null);
+	let linuxSystemInfo = $state<LinuxSystemInfo | null>(null);
+	let isLinux = !navigator.platform.includes('Mac');
 
 	const updaterState = getUpdaterState();
 	let currentVersion = $state('');
@@ -94,6 +104,9 @@
   /** Show in Dock state (macOS) */
   let showInDock = $state(false);
   let dockLoading = $state(false);
+
+  /** Window decorations state (Linux) */
+  let windowDecorations = $state(true);
 
   /** Permission states */
   let microphonePermission = $state<'unknown' | 'granted' | 'denied'>('unknown');
@@ -162,6 +175,15 @@
     } finally {
       dockLoading = false;
     }
+  }
+
+  async function handleDecorationToggle() {
+    const newValue = !windowDecorations;
+    windowDecorations = newValue;
+    await getCurrentWindow().setDecorations(newValue);
+    // Update config store (drives reactive showWindowControls in Settings)
+    configStore.updateGeneral('windowDecorations', newValue);
+    await configStore.save();
   }
 
   let permissionPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -353,6 +375,12 @@
   onMount(async () => {
     loadAutostartState();
     loadDockState();
+    // Load decoration state from config (Linux only)
+    if (isLinux) {
+      invoke<any>('get_config')
+        .then((c) => { windowDecorations = c.general.window_decorations ?? true; })
+        .catch(() => {});
+    }
     getVersion().then((v) => { currentVersion = v; }).catch(() => {});
 
     // Listen for stale permission events emitted at startup
@@ -394,6 +422,13 @@
 
     if (gpuResult.status === 'fulfilled') {
       gpuInfo = gpuResult.value;
+    }
+
+    // Fetch Linux system info (non-blocking)
+    if (isLinux) {
+      invoke<LinuxSystemInfo>('get_linux_system_info')
+        .then((info) => { linuxSystemInfo = info; })
+        .catch(() => {});
     }
 
     setupState = transcriptionReady ? 'ready' : 'needed';
@@ -789,6 +824,35 @@
             {/if}
           </span>
         </div>
+        {#if isLinux}
+          <div class="status-row">
+            <span
+              class="status-dot"
+              class:ready={linuxSystemInfo?.compositor != null}
+              class:not-configured={!linuxSystemInfo}
+            ></span>
+            <span class="status-label">Session</span>
+            <span class="status-value">
+              {#if linuxSystemInfo}
+                <span class="gpu-info">
+                  <span class="gpu-backend">{linuxSystemInfo.session_type}</span>
+                  {#if linuxSystemInfo.compositor}
+                    <span class="gpu-name">{linuxSystemInfo.compositor}{linuxSystemInfo.compositor_version ? ` v${linuxSystemInfo.compositor_version}` : ''}</span>
+                  {/if}
+                </span>
+              {:else}
+                Detecting...
+              {/if}
+            </span>
+          </div>
+          {#if linuxSystemInfo}
+            <div class="status-row">
+              <span class="status-dot ready"></span>
+              <span class="status-label">Clipboard</span>
+              <span class="status-value">{linuxSystemInfo.paste_method}</span>
+            </div>
+          {/if}
+        {/if}
         <div class="status-row">
           <span
             class="status-dot"
@@ -919,6 +983,22 @@
             <span class="toggle-slider"></span>
           </label>
         </div>
+        {#if isLinux}
+          <div class="autostart-row">
+            <span class="status-label">Window Decorations</span>
+            <label class="toggle-switch">
+              <input
+                type="checkbox"
+                checked={windowDecorations}
+                onchange={handleDecorationToggle}
+              />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          {#if !windowDecorations}
+            <p class="permission-hint">Title bar hidden. Custom window controls will appear.</p>
+          {/if}
+        {/if}
       </div>
     </div>
   </section>

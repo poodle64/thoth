@@ -106,7 +106,7 @@ pub fn init_whisper_transcription(model_path: String) -> Result<(), String> {
     let mut guard = get_service().lock();
     *guard = Some(service);
 
-    tracing::info!("Whisper transcription service initialised with Metal GPU");
+    tracing::info!("Whisper transcription service initialised");
     Ok(())
 }
 
@@ -172,7 +172,7 @@ pub fn init_transcription(model_path: String) -> Result<(), String> {
             for entry in entries.filter_map(|e| e.ok()) {
                 let entry_path = entry.path();
                 if entry_path.extension().map(|ext| ext == "bin").unwrap_or(false) {
-                    tracing::info!("Found whisper model in directory, using Metal GPU backend");
+                    tracing::info!("Found whisper model in directory, using whisper backend");
                     return init_whisper_transcription(entry_path.to_string_lossy().to_string());
                 }
             }

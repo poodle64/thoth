@@ -48,6 +48,11 @@ fn get_recorder() -> &'static Mutex<AudioRecorder> {
     RECORDER.get_or_init(|| Mutex::new(AudioRecorder::new()))
 }
 
+/// Get the global recorder instance (for setting secondary buffers, etc.)
+pub fn get_global_recorder() -> &'static Mutex<AudioRecorder> {
+    get_recorder()
+}
+
 fn get_vad_recorder() -> &'static Mutex<VadRecorder> {
     VAD_RECORDER.get_or_init(|| Mutex::new(VadRecorder::default()))
 }

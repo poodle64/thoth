@@ -62,17 +62,17 @@ fn get_manager() -> &'static RwLock<ShortcutManagerState> {
 
 /// Get the default shortcuts for Thoth
 pub fn get_defaults() -> Vec<ShortcutInfo> {
-    vec![
+    #[cfg(target_os = "macos")]
+    let (toggle_accel, copy_accel) = ("F13", Some("F14"));
+    #[cfg(not(target_os = "macos"))]
+    let (toggle_accel, copy_accel): (&str, Option<&str>) =
+        ("CommandOrControl+Shift+Space", None);
+
+    let mut defaults = vec![
         ShortcutInfo {
             id: shortcut_ids::TOGGLE_RECORDING.to_string(),
-            accelerator: "F13".to_string(),
+            accelerator: toggle_accel.to_string(),
             description: "Toggle recording (push-to-talk)".to_string(),
-            is_enabled: false,
-        },
-        ShortcutInfo {
-            id: shortcut_ids::COPY_LAST_TRANSCRIPTION.to_string(),
-            accelerator: "F14".to_string(),
-            description: "Copy last transcription to clipboard".to_string(),
             is_enabled: false,
         },
         ShortcutInfo {
@@ -81,7 +81,18 @@ pub fn get_defaults() -> Vec<ShortcutInfo> {
             description: "Toggle recording (alternative)".to_string(),
             is_enabled: false,
         },
-    ]
+    ];
+
+    if let Some(copy) = copy_accel {
+        defaults.push(ShortcutInfo {
+            id: shortcut_ids::COPY_LAST_TRANSCRIPTION.to_string(),
+            accelerator: copy.to_string(),
+            description: "Copy last transcription to clipboard".to_string(),
+            is_enabled: false,
+        });
+    }
+
+    defaults
 }
 
 /// Payload for shortcut events
@@ -194,9 +205,10 @@ pub fn register<R: Runtime>(
 
                     tracing::info!("Shortcut pressed: {}", shortcut_id);
 
-                    // For recording shortcuts, show indicator IMMEDIATELY in Rust
-                    // before emitting to frontend. This eliminates JS round-trip delay.
-                    // Only show when starting (not already recording).
+                    // For recording shortcuts, show indicator and play start sound
+                    // IMMEDIATELY in Rust before emitting to frontend. This
+                    // eliminates JS round-trip delay.
+                    // Only when starting (not already recording).
                     if (shortcut_id == shortcut_ids::TOGGLE_RECORDING
                         || shortcut_id == shortcut_ids::TOGGLE_RECORDING_ALT)
                         && !crate::pipeline::is_pipeline_running()
@@ -208,6 +220,7 @@ pub fn register<R: Runtime>(
                                 e
                             );
                         }
+                        crate::sound::play_sound(crate::sound::SoundEvent::RecordingStart);
                     }
 
                     // Handle copy-last-transcription directly in Rust
@@ -374,25 +387,31 @@ mod tests {
     fn test_get_defaults_returns_expected_shortcuts() {
         let defaults = get_defaults();
 
-        assert_eq!(defaults.len(), 3);
-
         let toggle = defaults
             .iter()
             .find(|s| s.id == shortcut_ids::TOGGLE_RECORDING);
         assert!(toggle.is_some());
+        #[cfg(target_os = "macos")]
         assert_eq!(toggle.unwrap().accelerator, "F13");
-
-        let copy = defaults
-            .iter()
-            .find(|s| s.id == shortcut_ids::COPY_LAST_TRANSCRIPTION);
-        assert!(copy.is_some());
-        assert_eq!(copy.unwrap().accelerator, "F14");
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(toggle.unwrap().accelerator, "CommandOrControl+Shift+Space");
 
         let alt = defaults
             .iter()
             .find(|s| s.id == shortcut_ids::TOGGLE_RECORDING_ALT);
         assert!(alt.is_some());
         assert_eq!(alt.unwrap().accelerator, "ShiftRight");
+
+        let copy = defaults
+            .iter()
+            .find(|s| s.id == shortcut_ids::COPY_LAST_TRANSCRIPTION);
+        #[cfg(target_os = "macos")]
+        {
+            assert!(copy.is_some());
+            assert_eq!(copy.unwrap().accelerator, "F14");
+        }
+        #[cfg(not(target_os = "macos"))]
+        assert!(copy.is_none());
     }
 
     #[test]

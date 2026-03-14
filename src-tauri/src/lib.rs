@@ -126,6 +126,24 @@ fn register_shortcuts_from_config(app: &tauri::AppHandle, cfg: &config::Config) 
 
     // Start the keyboard service if any modifier shortcuts were registered
     keyboard_service::start_monitoring(app.clone());
+
+    // On Wayland, initialize XDG Portal GlobalShortcuts session
+    #[cfg(target_os = "linux")]
+    {
+        if shortcuts::get_display_server() == shortcuts::DisplayServer::Wayland {
+            let app_clone = app.clone();
+            tauri::async_runtime::spawn(async move {
+                match shortcuts::portal::init(app_clone).await {
+                    Ok(()) => tracing::info!("XDG Portal GlobalShortcuts initialized"),
+                    Err(e) => tracing::warn!(
+                        "XDG Portal GlobalShortcuts not available: {}. \
+                         Global shortcuts may not work on this Wayland compositor.",
+                        e
+                    ),
+                }
+            });
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -171,6 +189,10 @@ pub fn run() {
     } else {
         tracing_subscriber::fmt().with_timer(LocalTimer).init();
     }
+
+    // Redirect whisper.cpp C-level logs into the Rust tracing infrastructure
+    // so they respect RUST_LOG filtering instead of polluting stdout directly.
+    whisper_rs::install_logging_hooks();
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -228,6 +250,20 @@ pub fn run() {
                             "toggle"
                         }
                     );
+                }
+            }
+
+            // Linux: apply window decoration preference before window is shown
+            #[cfg(target_os = "linux")]
+            {
+                let decorations = config::get_config()
+                    .map(|c| c.general.window_decorations)
+                    .unwrap_or(true);
+                if !decorations {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.set_decorations(false);
+                        tracing::info!("Window decorations disabled per config");
+                    }
                 }
             }
 
@@ -320,6 +356,7 @@ pub fn run() {
             platform::check_microphone_permission,
             platform::request_microphone_permission,
             platform::get_gpu_info,
+            platform::get_linux_system_info,
             // Audio
             audio::device::list_audio_devices,
             audio::preview::start_audio_preview,
