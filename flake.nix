@@ -40,7 +40,7 @@
 
           cargoRoot = "src-tauri";
           buildAndTestSubdir = "src-tauri";
-          cargoHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+          cargoHash = "sha256-bWRmk1cvPxPqnzhB6KnW586Xhlqd4z6vFUOn/ujsQJk=";
 
           # Disable default features to exclude fluidaudio (macOS-only git dep
           # that fails in Nix sandbox) and parakeet (download-binaries feature)
@@ -48,9 +48,10 @@
           cargoBuildFeatures = [ "cuda" ];
 
           # Pre-fetched pnpm dependencies for the Svelte frontend
-          pnpmDeps = pkgs.pnpm.fetchDeps {
+          pnpmDeps = pkgs.fetchPnpmDeps {
             inherit (finalAttrs) pname version src;
-            hash = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=";
+            fetcherVersion = 3;
+            hash = "sha256-2/TWfSxppLkweslAwlWLRjHJQd44x20FKraY9o5HCGI=";
           };
 
           nativeBuildInputs = with pkgs; [
@@ -60,6 +61,7 @@
             pnpm
             pkg-config
             cmake               # Required by whisper.cpp (whisper-rs dependency)
+            git                 # Required by whisper.cpp CMakeLists.txt
             llvmPackages.libclang  # Required by bindgen for whisper.cpp
             wrapGAppsHook4      # GTK/GLib schema wrapping
             makeWrapper         # For wrapping runtime PATH deps
@@ -76,10 +78,10 @@
             libappindicator-gtk3
             alsa-lib
             librsvg
-            xorg.libX11
-            xorg.libXcursor
-            xorg.libXrandr
-            xorg.libXi
+            libx11
+            libxcursor
+            libxrandr
+            libxi
             vulkan-loader
             vulkan-headers
             shaderc
@@ -102,6 +104,12 @@
                 pkgs.wl-clipboard  # wl-copy, wl-paste
                 pkgs.wtype          # Wayland keyboard simulation
               ]}
+          '';
+
+          # Disable updater artifact signing (no private key in nix sandbox)
+          preBuild = ''
+            substituteInPlace src-tauri/tauri.conf.json \
+              --replace-fail '"createUpdaterArtifacts": true' '"createUpdaterArtifacts": false'
           '';
 
           doCheck = false; # Tests need audio hardware
