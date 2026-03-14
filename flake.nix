@@ -103,6 +103,10 @@
               --prefix PATH : ${pkgs.lib.makeBinPath [
                 pkgs.wl-clipboard  # wl-copy, wl-paste
                 pkgs.wtype          # Wayland keyboard simulation
+              ]} \
+              --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [
+                pkgs.libappindicator-gtk3
+                pkgs.vulkan-loader
               ]}
           '';
 

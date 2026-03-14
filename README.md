@@ -52,9 +52,27 @@ xattr -dr com.apple.quarantine /Applications/Thoth.app
 
 ### First launch (Linux)
 
+**AppImage:**
+
 1. Download the `.AppImage` from the [latest release](https://github.com/poodle64/thoth/releases/latest)
 2. Make it executable: `chmod +x Thoth_*.AppImage`
 3. Run it: `./Thoth_*.AppImage`
+
+**NixOS (flake):**
+
+Add Thoth as a flake input and install the package:
+
+```nix
+# flake.nix
+{
+  inputs.thoth.url = "github:poodle64/thoth";
+
+  # In your system or home-manager config:
+  environment.systemPackages = [ inputs.thoth.packages.${system}.default ];
+}
+```
+
+The flake builds with CUDA support and wraps runtime dependencies (`wl-clipboard`, `wtype`) automatically.
 
 > **NVIDIA users**: Ensure CUDA drivers are installed for GPU-accelerated transcription.
 > Without them, Thoth falls back to CPU.
@@ -141,7 +159,7 @@ The app walks you through three quick steps:
 - macOS native (Apple Silicon)
 - Global keyboard shortcuts
 - Recording indicator near cursor
-- Linux support planned
+- Linux/Wayland support
 
 </td>
 </tr>
