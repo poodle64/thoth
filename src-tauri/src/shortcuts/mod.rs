@@ -14,6 +14,8 @@ pub mod manager;
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "linux")]
+pub mod portal;
+#[cfg(target_os = "linux")]
 pub use linux::{get_display_server, DisplayServer};
 
 pub use conflict::{RegistrationResult, ShortcutConflict};

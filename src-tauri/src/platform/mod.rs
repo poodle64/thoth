@@ -155,6 +155,51 @@ fn get_macos_gpu_name() -> Option<String> {
     None
 }
 
+/// Linux system information for the settings UI
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LinuxSystemInfo {
+    /// "Wayland", "X11", "Unknown", or "macOS"
+    pub session_type: String,
+    /// Compositor name (e.g., "Hyprland", "Sway")
+    pub compositor: Option<String>,
+    /// Compositor version (e.g., "0.45.0")
+    pub compositor_version: Option<String>,
+    /// Paste method description (e.g., "wl-copy + hyprctl")
+    pub paste_method: String,
+}
+
+/// Get Linux system information (compositor, session type, paste method)
+#[tauri::command]
+pub fn get_linux_system_info() -> LinuxSystemInfo {
+    #[cfg(target_os = "linux")]
+    {
+        let session = linux::display_session();
+        let compositor = session.compositor();
+
+        let compositor_name = match compositor {
+            linux::WaylandCompositor::None => None,
+            c => Some(c.to_string()),
+        };
+
+        LinuxSystemInfo {
+            session_type: session.to_string(),
+            compositor: compositor_name,
+            compositor_version: compositor.version(),
+            paste_method: compositor.paste_method().to_string(),
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        LinuxSystemInfo {
+            session_type: "macOS".to_string(),
+            compositor: None,
+            compositor_version: None,
+            paste_method: "Native".to_string(),
+        }
+    }
+}
+
 /// Check if the screen is locked or the screensaver is active.
 ///
 /// Used to suppress global shortcuts when the user is on the lock screen,

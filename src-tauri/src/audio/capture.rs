@@ -104,7 +104,7 @@ impl AudioRecorder {
         );
 
         // Convert to StreamConfig for building the stream
-        let config = supported_config;
+        let stream_config: cpal::StreamConfig = supported_config.into();
 
         // Reset state
         self.stop_signal.store(false, Ordering::SeqCst);
@@ -133,29 +133,61 @@ impl AudioRecorder {
         let callback_buffer = self.ring_buffer.clone();
         let secondary_callback_buffer = self.secondary_buffer.clone();
 
-        // Build input stream
-        let stream = device.build_input_stream(
-            &config.into(),
-            move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                // LOCK-FREE: Ring buffer write does not allocate
-                let written = callback_buffer.write(data);
-                if written < data.len() {
-                    tracing::warn!(
-                        "Audio buffer overflow: dropped {} samples",
-                        data.len() - written
-                    );
-                }
-
-                // Write to secondary buffer if present (for VAD processing)
-                if let Some(ref secondary) = secondary_callback_buffer {
-                    secondary.write(data);
-                }
-            },
-            |err| {
-                tracing::error!("Audio stream error: {}", err);
-            },
-            None,
-        )?;
+        // Build input stream using the device's native sample format.
+        // CPAL panics (not errors) on some backends (ALSA) if the callback
+        // type doesn't match the hardware format, so we must dispatch here.
+        let stream = match sample_format {
+            cpal::SampleFormat::I16 => device.build_input_stream(
+                &stream_config,
+                move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                    // Convert i16 to f32 for the ring buffer
+                    let f32_data: Vec<f32> = data
+                        .iter()
+                        .map(|&s| s as f32 / i16::MAX as f32)
+                        .collect();
+                    let written = callback_buffer.write(&f32_data);
+                    if written < f32_data.len() {
+                        tracing::warn!(
+                            "Audio buffer overflow: dropped {} samples",
+                            f32_data.len() - written
+                        );
+                    }
+                    if let Some(ref secondary) = secondary_callback_buffer {
+                        secondary.write(&f32_data);
+                    }
+                },
+                |err| {
+                    tracing::error!("Audio stream error: {}", err);
+                },
+                None,
+            )?,
+            cpal::SampleFormat::F32 => device.build_input_stream(
+                &stream_config,
+                move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    // LOCK-FREE: Ring buffer write does not allocate
+                    let written = callback_buffer.write(data);
+                    if written < data.len() {
+                        tracing::warn!(
+                            "Audio buffer overflow: dropped {} samples",
+                            data.len() - written
+                        );
+                    }
+                    if let Some(ref secondary) = secondary_callback_buffer {
+                        secondary.write(data);
+                    }
+                },
+                |err| {
+                    tracing::error!("Audio stream error: {}", err);
+                },
+                None,
+            )?,
+            other => {
+                return Err(anyhow!(
+                    "Unsupported sample format: {:?}",
+                    other
+                ));
+            }
+        };
 
         stream.play()?;
         self.stream = Some(stream);
