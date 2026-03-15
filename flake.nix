@@ -101,8 +101,11 @@
           postFixup = ''
             wrapProgram $out/bin/thoth \
               --prefix PATH : ${pkgs.lib.makeBinPath [
-                pkgs.wl-clipboard  # wl-copy, wl-paste
-                pkgs.wtype          # Wayland keyboard simulation
+                pkgs.wl-clipboard       # wl-copy, wl-paste
+                pkgs.wtype              # Wayland keyboard simulation
+                pkgs.glib.bin           # gsettings (theme detection)
+                pkgs.libcanberra-gtk3   # canberra-gtk-play (sound feedback)
+                pkgs.hyprland           # hyprctl (indicator positioning, keybind bridge)
               ]} \
               --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [
                 pkgs.libappindicator-gtk3
