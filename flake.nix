@@ -106,6 +106,7 @@
                 pkgs.glib.bin           # gsettings (theme detection)
                 pkgs.libcanberra-gtk3   # canberra-gtk-play (sound feedback)
                 pkgs.hyprland           # hyprctl (indicator positioning, keybind bridge)
+                pkgs.socat              # Unix socket IPC for Hyprland shortcut delivery
               ]} \
               --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [
                 pkgs.libappindicator-gtk3

@@ -21,6 +21,17 @@ use std::sync::OnceLock;
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 
+/// Path to the Unix socket used for Hyprland shortcut IPC.
+/// Hyprland's `exec` dispatcher writes shortcut IDs here, bypassing
+/// the unreliable portal signal delivery chain.
+fn socket_path() -> String {
+    if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+        format!("{}/thoth-shortcuts.sock", runtime_dir)
+    } else {
+        format!("/tmp/thoth-shortcuts-{}.sock", std::process::id())
+    }
+}
+
 /// Debounce window for portal shortcut events (ms)
 const PRESS_DEBOUNCE_MS: u64 = 50;
 
@@ -127,61 +138,74 @@ pub async fn init(app: AppHandle) -> Result<(), String> {
         }
     }
 
-    // On Hyprland, the portal doesn't auto-assign triggers from preferred_trigger.
-    // We use hyprctl to bind the keys at runtime.
-    hyprland_bind_shortcuts().await;
+    // On Hyprland, portal signal delivery via D-Bus is unreliable (the ashpd
+    // zbus connection silently dies when launched from app launchers like fuzzel).
+    // Instead, we use hyprctl's `exec` dispatcher to write shortcut IDs to a
+    // Unix socket that we control. This bypasses the portal signal chain entirely.
+    //
+    // For non-Hyprland compositors, we still use portal signals as the standard path.
+    let is_hyprland = {
+        use crate::platform::linux::{display_session, DisplaySession, WaylandCompositor};
+        matches!(
+            display_session(),
+            DisplaySession::Wayland(WaylandCompositor::Hyprland)
+        )
+    };
 
-    // Listen for Activated signals
-    let app_activated = app.clone();
-    let mut activated_stream = portal
-        .proxy
-        .receive_activated()
-        .await
-        .map_err(|e| format!("Failed to subscribe to Activated signal: {}", e))?;
+    if is_hyprland {
+        start_socket_listener(app.clone());
+        hyprland_bind_shortcuts().await;
+    } else {
+        // Standard portal signal listeners for other compositors
+        let app_activated = app.clone();
+        let mut activated_stream = portal
+            .proxy
+            .receive_activated()
+            .await
+            .map_err(|e| format!("Failed to subscribe to Activated signal: {}", e))?;
 
-    tokio::spawn(async move {
-        while let Some(event) = activated_stream.next().await {
-            let shortcut_id = event.shortcut_id().to_string();
-            handle_activated(&app_activated, &shortcut_id);
-        }
-        tracing::warn!("Portal Activated signal stream ended");
-    });
-
-    // Listen for Deactivated signals
-    let app_deactivated = app.clone();
-    let mut deactivated_stream = portal
-        .proxy
-        .receive_deactivated()
-        .await
-        .map_err(|e| format!("Failed to subscribe to Deactivated signal: {}", e))?;
-
-    tokio::spawn(async move {
-        while let Some(event) = deactivated_stream.next().await {
-            let shortcut_id = event.shortcut_id().to_string();
-            handle_deactivated(&app_deactivated, &shortcut_id);
-        }
-        tracing::warn!("Portal Deactivated signal stream ended");
-    });
-
-    // Listen for ShortcutsChanged signals (compositor may reassign triggers)
-    let mut changed_stream = portal
-        .proxy
-        .receive_shortcuts_changed()
-        .await
-        .map_err(|e| format!("Failed to subscribe to ShortcutsChanged signal: {}", e))?;
-
-    tokio::spawn(async move {
-        while let Some(event) = changed_stream.next().await {
-            for shortcut in event.shortcuts() {
-                tracing::info!(
-                    "Portal shortcut changed: '{}' → trigger='{}'",
-                    shortcut.id(),
-                    shortcut.trigger_description()
-                );
+        tokio::spawn(async move {
+            while let Some(event) = activated_stream.next().await {
+                let shortcut_id = event.shortcut_id().to_string();
+                handle_activated(&app_activated, &shortcut_id);
             }
-        }
-        tracing::warn!("Portal ShortcutsChanged signal stream ended");
-    });
+            tracing::warn!("Portal Activated signal stream ended");
+        });
+
+        let app_deactivated = app.clone();
+        let mut deactivated_stream = portal
+            .proxy
+            .receive_deactivated()
+            .await
+            .map_err(|e| format!("Failed to subscribe to Deactivated signal: {}", e))?;
+
+        tokio::spawn(async move {
+            while let Some(event) = deactivated_stream.next().await {
+                let shortcut_id = event.shortcut_id().to_string();
+                handle_deactivated(&app_deactivated, &shortcut_id);
+            }
+            tracing::warn!("Portal Deactivated signal stream ended");
+        });
+
+        let mut changed_stream = portal
+            .proxy
+            .receive_shortcuts_changed()
+            .await
+            .map_err(|e| format!("Failed to subscribe to ShortcutsChanged signal: {}", e))?;
+
+        tokio::spawn(async move {
+            while let Some(event) = changed_stream.next().await {
+                for shortcut in event.shortcuts() {
+                    tracing::info!(
+                        "Portal shortcut changed: '{}' → trigger='{}'",
+                        shortcut.id(),
+                        shortcut.trigger_description()
+                    );
+                }
+            }
+            tracing::warn!("Portal ShortcutsChanged signal stream ended");
+        });
+    }
 
     tracing::info!("Portal GlobalShortcuts signal listeners started");
     Ok(())
@@ -413,56 +437,66 @@ async fn rebind() -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
-// Hyprland-specific binding
+// Hyprland socket-based shortcut IPC
 // ---------------------------------------------------------------------------
 
-/// On Hyprland, the portal registers shortcuts but doesn't auto-assign triggers.
-/// We use `hyprctl keyword bind` to map our preferred triggers to the portal
-/// shortcuts at runtime.
-async fn hyprland_bind_shortcuts() {
-    use crate::platform::linux::{display_session, DisplaySession, WaylandCompositor};
+/// Start a Unix socket listener that receives shortcut IDs from hyprctl exec.
+///
+/// This bypasses the XDG Portal signal delivery chain, which is unreliable
+/// on Hyprland when launched from app launchers (the ashpd zbus D-Bus
+/// connection silently dies). Instead, hyprctl binds use `exec` to write
+/// shortcut IDs to this socket.
+fn start_socket_listener(app: AppHandle) {
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::net::UnixListener;
 
-    let session = display_session();
-    if !matches!(session, DisplaySession::Wayland(WaylandCompositor::Hyprland)) {
-        return;
-    }
+    let path = socket_path();
 
-    // First, get the app_id prefix that Hyprland uses for our shortcuts.
-    // Tauri/Chromium registers as "org.chromium.Chromium" by default.
-    // We need to find our actual prefix from `hyprctl globalshortcuts`.
-    let prefix = match tokio::process::Command::new("hyprctl")
-        .args(["globalshortcuts", "-j"])
-        .output()
-        .await
-    {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            // Parse JSON to find our shortcut prefix
-            // Look for an entry containing ":toggle_recording"
-            if let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(&stdout) {
-                entries
-                    .iter()
-                    .find_map(|e| {
-                        let name = e.get("name")?.as_str()?;
-                        if name.ends_with(":toggle_recording") {
-                            // Extract prefix before ":toggle_recording"
-                            Some(name.strip_suffix(":toggle_recording")?.to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_else(|| "org.chromium.Chromium".to_string())
-            } else {
-                "org.chromium.Chromium".to_string()
-            }
-        }
+    // Remove stale socket from previous run
+    let _ = std::fs::remove_file(&path);
+
+    let listener = match UnixListener::bind(&path) {
+        Ok(l) => l,
         Err(e) => {
-            tracing::warn!("Failed to query hyprctl globalshortcuts: {}", e);
+            tracing::error!("Failed to create shortcut socket at {}: {}", path, e);
             return;
         }
     };
 
-    tracing::info!("Hyprland portal shortcut prefix: {}", prefix);
+    tracing::info!("Hyprland shortcut socket listening at {}", path);
+
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            match stream {
+                Ok(stream) => {
+                    let reader = BufReader::new(stream);
+                    for line in reader.lines() {
+                        if let Ok(shortcut_id) = line {
+                            let id = shortcut_id.trim();
+                            if !id.is_empty() {
+                                handle_activated(&app, id);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Shortcut socket accept error: {}", e);
+                }
+            }
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Hyprland-specific binding
+// ---------------------------------------------------------------------------
+
+/// On Hyprland, bind keys via `hyprctl keyword bind` using the `exec` dispatcher
+/// to write shortcut IDs to our Unix socket. This is more reliable than the
+/// portal `global` dispatcher, which requires the ashpd D-Bus connection to
+/// stay alive (it doesn't when launched from app launchers).
+async fn hyprland_bind_shortcuts() {
+    let sock = socket_path();
 
     // Bind each registered shortcut via hyprctl
     let shortcuts: Vec<(String, String)> = {
@@ -476,10 +510,31 @@ async fn hyprland_bind_shortcuts() {
 
     for (id, accelerator) in shortcuts {
         let hypr_bind = accelerator_to_hyprland_bind(&accelerator);
-        let global_name = format!("{}:{}", prefix, id);
+
+        // Remove any stale binds for this key combo from previous app launches.
+        let _ = tokio::process::Command::new("hyprctl")
+            .args(["keyword", "unbind", &hypr_bind])
+            .output()
+            .await;
+
+        // Use `exec` dispatcher to write shortcut ID to our Unix socket.
+        // Resolve socat's absolute path so the exec'd command works regardless
+        // of Hyprland's PATH (the nix wrapper's PATH isn't inherited by exec).
+        let socat_path = std::env::var("PATH")
+            .unwrap_or_default()
+            .split(':')
+            .find_map(|dir| {
+                let p = std::path::PathBuf::from(dir).join("socat");
+                p.exists().then(|| p.to_string_lossy().to_string())
+            })
+            .unwrap_or_else(|| "socat".to_string());
+        let exec_cmd = format!(
+            "echo {} | {} - UNIX-CONNECT:{}",
+            id, socat_path, sock
+        );
 
         let result = tokio::process::Command::new("hyprctl")
-            .args(["keyword", "bind", &format!("{}, global, {}", hypr_bind, global_name)])
+            .args(["keyword", "bind", &format!("{}, exec, {}", hypr_bind, exec_cmd)])
             .output()
             .await;
 
@@ -488,17 +543,12 @@ async fn hyprland_bind_shortcuts() {
                 let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if stdout == "ok" {
                     tracing::info!(
-                        "Hyprland bound '{}' → {} (portal: {})",
+                        "Hyprland bound '{}' → {} (exec → socket)",
                         id,
                         hypr_bind,
-                        global_name
                     );
                 } else {
-                    tracing::warn!(
-                        "Hyprland bind failed for '{}': {}",
-                        id,
-                        stdout
-                    );
+                    tracing::warn!("Hyprland bind failed for '{}': {}", id, stdout);
                 }
             }
             Err(e) => tracing::warn!("Failed to run hyprctl for '{}': {}", id, e),
