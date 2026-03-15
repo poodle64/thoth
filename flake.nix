@@ -44,8 +44,8 @@
 
           # Disable default features to exclude fluidaudio (macOS-only git dep
           # that fails in Nix sandbox) and parakeet (download-binaries feature)
-          cargoBuildNoDefaultFeatures = true;
-          cargoBuildFeatures = [ "cuda" ];
+          buildNoDefaultFeatures = true;
+          buildFeatures = [ "cuda" ];
 
           # Pre-fetched pnpm dependencies for the Svelte frontend
           pnpmDeps = pkgs.fetchPnpmDeps {
@@ -95,7 +95,7 @@
             LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
             WEBKIT_DISABLE_COMPOSITING_MODE = "1";
             CUDA_PATH = "${cudaPackages.cudatoolkit}";
-            RUSTFLAGS = "-C relocation-model=dynamic-no-pic -L /run/opengl-driver/lib";
+            RUSTFLAGS = "-C relocation-model=dynamic-no-pic -L ${cudaPackages.cuda_cudart}/lib/stubs";
           };
 
           postFixup = ''
@@ -107,7 +107,10 @@
               --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [
                 pkgs.libappindicator-gtk3
                 pkgs.vulkan-loader
-              ]}
+                cudaPackages.cuda_cudart
+                cudaPackages.libcublas
+              ]}:/run/opengl-driver/lib \
+              --set WEBKIT_DISABLE_COMPOSITING_MODE 1
           '';
 
           # Disable updater artifact signing (no private key in nix sandbox)
