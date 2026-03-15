@@ -20,6 +20,55 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
 
+/// Read from the system clipboard, using wl-paste on Wayland or arboard elsewhere.
+fn read_system_clipboard() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        // Try wl-paste first (Wayland-native)
+        if let Ok(output) = std::process::Command::new("wl-paste")
+            .arg("--no-newline")
+            .output()
+        {
+            if output.status.success() {
+                return Some(String::from_utf8_lossy(&output.stdout).into_owned());
+            }
+        }
+    }
+    // Fall back to arboard
+    arboard::Clipboard::new()
+        .ok()
+        .and_then(|mut cb| cb.get_text().ok())
+}
+
+/// Write to the system clipboard, using wl-copy on Wayland or arboard elsewhere.
+fn write_system_clipboard(text: &str) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        if let Ok(mut child) = Command::new("wl-copy")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            if let Some(ref mut stdin) = child.stdin {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            drop(child.stdin.take());
+            if let Ok(status) = child.wait() {
+                if status.success() {
+                    return true;
+                }
+            }
+        }
+    }
+    // Fall back to arboard
+    arboard::Clipboard::new()
+        .and_then(|mut cb| cb.set_text(text.to_string()))
+        .is_ok()
+}
+
 /// Pipeline execution state
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -168,7 +217,7 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
         if !transcription::download::check_model_downloaded(None) {
             PIPELINE_RUNNING.store(false, Ordering::SeqCst);
             tracing::warn!("Pipeline: No transcription model downloaded, blocking recording");
-            let _ = crate::recording_indicator::hide_recording_indicator(app.clone());
+            let _ = crate::recording_indicator::hide_recording_indicator(app.clone(), Some("pipeline_start_recording: no model".into()));
             return Err(
                 "No transcription model downloaded. Open Settings \u{2192} Models to get started."
                     .to_string(),
@@ -220,6 +269,15 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
         device_name.clone(),
     );
 
+    // Set up a shared ring buffer for metering (reads from the same audio
+    // stream as recording, avoiding a second ALSA device open which fails
+    // on exclusive-access backends).
+    let metering_buffer = std::sync::Arc::new(crate::audio::AudioRingBuffer::new());
+    {
+        let mut recorder = crate::audio::get_global_recorder().lock();
+        recorder.set_secondary_buffer(metering_buffer.clone());
+    }
+
     tracing::info!("Pipeline: Calling audio::start_recording");
     // Start recording
     match crate::audio::start_recording() {
@@ -233,13 +291,12 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
             // (show_indicator_instant) - no need to show it here again.
             // The indicator window is pre-warmed at startup so no JS init wait needed.
 
-            // Start recording metering AFTER the indicator is visible
-            if let Err(e) =
-                crate::audio::start_recording_metering(app, device_id.as_deref())
-            {
+            // Start recording metering from the shared buffer.
+            if let Err(e) = crate::audio::start_recording_metering(app, metering_buffer) {
                 tracing::warn!("Pipeline: Failed to start recording metering: {}", e);
             }
 
+            tracing::info!("Pipeline: pipeline_start_recording returning Ok({})", path);
             Ok(path)
         }
         Err(e) => {
@@ -270,15 +327,15 @@ pub async fn pipeline_stop_and_process(
     // RAII guard ensures PIPELINE_RUNNING is reset even on early return
     let _guard = PipelineGuard;
 
-    // Stop recording metering
+    // Stop recording metering and detach secondary buffer
     crate::audio::stop_recording_metering();
+    crate::audio::get_global_recorder().lock().clear_secondary_buffer();
 
     // Update tray to show idle state
     tray::set_recording_state(&app, false);
 
-    // Hide the recording indicator (but keep it visible during processing - it will show spinner)
-    // Actually, let's hide it when recording stops since we have processing state in the main window
-    if let Err(e) = crate::recording_indicator::hide_recording_indicator(app.clone()) {
+    // Hide the recording indicator when recording stops
+    if let Err(e) = crate::recording_indicator::hide_recording_indicator(app.clone(), Some("pipeline_stop_and_process".into())) {
         tracing::warn!("Pipeline: Failed to hide recording indicator: {}", e);
     }
 
@@ -325,9 +382,10 @@ pub fn pipeline_cancel(app: AppHandle) -> Result<(), String> {
         return Ok(()); // Nothing to cancel
     }
 
-    // Stop recording metering and hide indicator
+    // Stop recording metering, detach secondary buffer, and hide indicator
     crate::audio::stop_recording_metering();
-    if let Err(e) = crate::recording_indicator::hide_recording_indicator(app.clone()) {
+    crate::audio::get_global_recorder().lock().clear_secondary_buffer();
+    if let Err(e) = crate::recording_indicator::hide_recording_indicator(app.clone(), Some("pipeline_cancel".into())) {
         tracing::warn!("Pipeline: Failed to hide recording indicator on cancel: {}", e);
     }
 
@@ -553,9 +611,7 @@ async fn process_audio(
 
         // Preserve clipboard before paste overwrites it
         let saved_clipboard = if uses_clipboard {
-            arboard::Clipboard::new()
-                .ok()
-                .and_then(|mut cb| cb.get_text().ok())
+            read_system_clipboard()
         } else {
             None
         };
@@ -575,9 +631,20 @@ async fn process_audio(
         // Restore original clipboard after paste completes
         if let Some(original) = saved_clipboard {
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-            match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(original)) {
-                Ok(()) => tracing::debug!("Pipeline: Clipboard restored"),
-                Err(e) => tracing::warn!("Pipeline: Failed to restore clipboard: {}", e),
+            if config.auto_copy {
+                // auto_copy is on: leave the transcription in the clipboard
+                // instead of restoring the original content
+                if write_system_clipboard(&output_text) {
+                    tracing::debug!("Pipeline: Clipboard set to transcription (auto_copy + auto_paste)");
+                } else {
+                    tracing::warn!("Pipeline: Failed to set clipboard to transcription");
+                }
+            } else {
+                if write_system_clipboard(&original) {
+                    tracing::debug!("Pipeline: Clipboard restored");
+                } else {
+                    tracing::warn!("Pipeline: Failed to restore clipboard");
+                }
             }
         }
     }
@@ -951,13 +1018,23 @@ fn emit_progress_with_device(
     message: &str,
     device_name: Option<String>,
 ) {
+    use tauri::Manager;
+
     let progress = PipelineProgress {
         state,
         message: message.to_string(),
         device_name,
     };
+
+    // Emit globally (reaches main window)
     if let Err(e) = app.emit("pipeline-progress", &progress) {
         tracing::warn!("Failed to emit pipeline progress: {}", e);
+    }
+
+    // Also emit directly to the recording indicator window.
+    // On some platforms, global events may not reliably reach secondary windows.
+    if let Some(indicator) = app.get_webview_window("recording-indicator") {
+        let _ = indicator.emit("pipeline-progress", &progress);
     }
 }
 

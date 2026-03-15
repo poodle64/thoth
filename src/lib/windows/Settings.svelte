@@ -34,6 +34,7 @@
 	import AboutDialog from '../components/AboutDialog.svelte';
 	import ShortcutInput from '../components/ShortcutInput.svelte';
 	import UpdateNotificationBanner from '../components/UpdateNotificationBanner.svelte';
+	import WindowControls from '../components/WindowControls.svelte';
 	import { configStore, type RecordingMode, type IndicatorStyle } from '../stores/config.svelte';
 	import { pipelineStore } from '../stores/pipeline.svelte';
 	import { shortcutsStore, type ShortcutInfo } from '../stores/shortcuts.svelte';
@@ -71,10 +72,20 @@
   /** About dialog visibility */
   let showAbout = $state(false);
 
+  /** Show custom window controls when decorations are disabled (Linux) */
+  const showWindowControls = $derived(!configStore.general.windowDecorations);
+
   /** Map of shortcut IDs to their pending (unsaved) accelerators */
   const pendingChanges = $state<Map<string, string>>(new Map());
 
   /** Combined list of all shortcuts (registered + defaults not yet registered) */
+  /** Map shortcut IDs to their configured accelerator from the config store */
+  const configuredAccelerators = $derived<Record<string, string | null>>({
+    toggle_recording: configStore.shortcuts.toggleRecording,
+    toggle_recording_alt: configStore.shortcuts.toggleRecordingAlt,
+    copy_last_transcription: configStore.shortcuts.copyLast,
+  });
+
   const allShortcuts = $derived.by(() => {
     const registered = new Map(shortcutsStore.shortcuts.map((s) => [s.id, s]));
     const combined: ShortcutInfo[] = [];
@@ -84,7 +95,13 @@
       if (reg) {
         combined.push(reg);
       } else {
-        combined.push({ ...def, isEnabled: false });
+        // Use configured value from config store if available, else default
+        const configured = configuredAccelerators[def.id];
+        combined.push({
+          ...def,
+          accelerator: configured ?? def.accelerator,
+          isEnabled: false,
+        });
       }
     }
 
@@ -209,7 +226,7 @@
     // If currently recording, re-show the indicator to apply the new style
     try {
       if (pipelineStore.isRecording && configStore.general.showRecordingIndicator) {
-        await invoke('hide_recording_indicator');
+        await invoke('hide_recording_indicator', { reason: 'frontend:settings_style_change' });
         await invoke('show_recording_indicator');
       }
     } catch (e) {
@@ -257,6 +274,11 @@
       </span>
     {:else if pipelineStore.isProcessing}
       <span class="processing-indicator">Processing...</span>
+    {/if}
+    {#if showWindowControls}
+      <div class="title-bar-controls">
+        <WindowControls />
+      </div>
     {/if}
   </header>
 
@@ -317,6 +339,12 @@
               <p class="section-description">
                 Tap to start recording, tap again to stop. Hold for push-to-talk.
               </p>
+              {#if !navigator.platform.includes('Mac')}
+                <p class="section-description wayland-hint">
+                  On Wayland, shortcuts are managed by your compositor via XDG Desktop Portal.
+                  Your compositor may prompt you to confirm shortcut bindings.
+                </p>
+              {/if}
             </div>
             <div class="section-content">
               <div class="mode-selector">
@@ -414,7 +442,7 @@
                             await invoke('show_recording_indicator');
                           }
                         } else {
-                          await invoke('hide_recording_indicator');
+                          await invoke('hide_recording_indicator', { reason: 'frontend:settings_toggle_off' });
                         }
                       } catch (e) {
                         console.error('Failed to update indicator visibility:', e);
@@ -625,6 +653,15 @@
     user-select: none;
   }
 
+  .title-bar-controls {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+
   .main-area {
     display: flex;
     flex: 1;
@@ -829,5 +866,12 @@
     font-size: var(--text-xs);
     font-weight: 500;
     color: var(--color-accent);
+  }
+
+  .wayland-hint {
+    color: var(--color-text-tertiary);
+    font-style: italic;
+    font-size: var(--text-xs);
+    margin-top: 4px;
   }
 </style>

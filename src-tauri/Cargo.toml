@@ -81,7 +81,7 @@ tauri-plugin-updater = "2.10"
 # macOS-specific
 [target.'cfg(target_os = "macos")'.dependencies]
 # whisper-rs with Metal GPU acceleration on macOS
-whisper-rs = { version = "0.15", features = ["metal"] }
+whisper-rs = { version = "0.15", features = ["metal", "tracing_backend"] }
 cocoa = "0.26"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
@@ -90,7 +90,7 @@ core-foundation = "0.10"
 core-graphics = "0.24"
 
 [features]
-default = ["parakeet", "fluidaudio"]
+default = ["fluidaudio"]
 parakeet = ["sherpa-rs"]
 fluidaudio = ["fluidaudio-rs"]
 # GPU acceleration for whisper.cpp (mutually exclusive, only use one)
@@ -104,7 +104,7 @@ vulkan = ["whisper-rs/vulkan"]
 # Linux-specific
 [target.'cfg(target_os = "linux")'.dependencies]
 # whisper-rs - GPU features enabled via --features flag
-whisper-rs = { version = "0.15", default-features = false }
+whisper-rs = { version = "0.15", default-features = false, features = ["tracing_backend"] }
 # XDG Desktop Portal for Wayland global shortcuts
 ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
 # X11 support for display server detection and mouse tracking
@@ -112,7 +112,7 @@ x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
 
 # Windows - CPU mode with optional GPU via features
 [target.'cfg(target_os = "windows")'.dependencies]
-whisper-rs = { version = "0.15", default-features = false }
+whisper-rs = { version = "0.15", default-features = false, features = ["tracing_backend"] }
 [dev-dependencies]
 tempfile = "3.25"
 

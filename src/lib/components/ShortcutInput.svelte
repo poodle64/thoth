@@ -159,6 +159,24 @@
       webviewMode = mode === 'webview';
       debug(`Capture started in ${mode} mode`);
 
+      // In webview mode, use a window-level listener to catch ALL keys
+      // (button elements swallow Space/Enter for activation)
+      if (webviewMode) {
+        const windowKeyHandler = (e: KeyboardEvent) => {
+          if (!isCapturing) return;
+          handleKeyDown(e);
+        };
+        const windowKeyUpHandler = (e: KeyboardEvent) => {
+          if (isCapturing) e.preventDefault();
+        };
+        window.addEventListener('keydown', windowKeyHandler, true);
+        window.addEventListener('keyup', windowKeyUpHandler, true);
+        unlisteners.push(() => {
+          window.removeEventListener('keydown', windowKeyHandler, true);
+          window.removeEventListener('keyup', windowKeyUpHandler, true);
+        });
+      }
+
       // Focus button for visual feedback
       buttonRef?.focus();
     } catch (e) {
@@ -221,17 +239,18 @@
   async function handleKeyDown(event: KeyboardEvent): Promise<void> {
     if (!isCapturing) return;
 
+    // Always prevent default during capture to stop button activation (Space/Enter)
+    event.preventDefault();
+    event.stopPropagation();
+
     // Escape cancels capture
     if (event.key === 'Escape') {
-      event.preventDefault();
       await cancelCapture();
       return;
     }
 
     // In webview mode, report key events to backend
     if (webviewMode) {
-      event.preventDefault();
-
       // Ignore pure modifier keydowns (they're tracked separately)
       const isModifier = ['Control', 'Shift', 'Alt', 'Meta'].includes(event.key);
       if (isModifier) {
@@ -243,6 +262,8 @@
         pendingKeys = modNames;
         return;
       }
+
+      debug('Reporting key to backend:', event.key, event.code);
 
       try {
         await invoke('report_key_event', {
@@ -300,6 +321,7 @@
     class:disabled
     onclick={startCapture}
     onkeydown={handleKeyDown}
+    onkeyup={(e) => { if (isCapturing) e.preventDefault(); }}
     onblur={handleBlur}
     {disabled}
   >
@@ -369,6 +391,8 @@
 
   {#if validationError}
     <span class="error-message">{validationError}</span>
+  {:else if isCapturing && webviewMode}
+    <span class="hint-message">Media keys (mic, volume) can't be captured on Wayland</span>
   {/if}
 </div>
 
@@ -474,5 +498,13 @@
     margin-top: 4px;
     font-size: var(--text-xs);
     color: var(--color-error);
+  }
+
+  .hint-message {
+    width: 100%;
+    margin-top: 4px;
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
+    font-style: italic;
   }
 </style>

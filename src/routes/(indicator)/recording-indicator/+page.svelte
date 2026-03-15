@@ -102,8 +102,8 @@
       const levelUnlisten = await listen<{ rms: number; peak: number }>(
         'recording-audio-level',
         (event) => {
-          // Normalise and boost for visibility
-          audioLevel = Math.min(1, event.payload.rms * 3);
+          // Normalise and boost for visibility (rms is typically 0.0–0.3 for speech)
+          audioLevel = Math.min(1, event.payload.rms * 8);
 
           // Update waveform history for pill style
           waveformUpdateCounter++;
