@@ -72,6 +72,21 @@ impl Default for AudioConfig {
     }
 }
 
+/// A user-supplied custom speech recognition model
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomModel {
+    /// Unique identifier (UUID)
+    pub id: String,
+    /// User-supplied display name
+    pub name: String,
+    /// Absolute path to the model on disk
+    pub path: String,
+    /// Backend type: "whisper_ggml" or "parakeet"
+    pub backend: String,
+    /// Optional description
+    pub description: Option<String>,
+}
+
 /// Transcription engine configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -87,6 +102,12 @@ pub struct TranscriptionConfig {
     pub auto_paste: bool,
     /// Whether to add space before pasted text
     pub add_leading_space: bool,
+    /// Lightning Whisper MLX model name (e.g., "large-v3")
+    pub lightning_whisper_model: String,
+    /// Lightning Whisper MLX quantization (e.g., "4bit", "8bit", or None for full precision)
+    pub lightning_whisper_quant: Option<String>,
+    /// User-supplied custom models
+    pub custom_models: Vec<CustomModel>,
 }
 
 impl Default for TranscriptionConfig {
@@ -97,6 +118,9 @@ impl Default for TranscriptionConfig {
             auto_copy: false,
             auto_paste: true,
             add_leading_space: false,
+            lightning_whisper_model: "large-v3".to_string(),
+            lightning_whisper_quant: None,
+            custom_models: Vec::new(),
         }
     }
 }
@@ -736,6 +760,9 @@ mod tests {
                 auto_copy: false,
                 auto_paste: true,
                 add_leading_space: true,
+                lightning_whisper_model: "large-v3".to_string(),
+                lightning_whisper_quant: None,
+                custom_models: Vec::new(),
             },
             shortcuts: ShortcutConfig {
                 toggle_recording: "F12".to_string(),

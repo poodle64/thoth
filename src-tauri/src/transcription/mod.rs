@@ -7,6 +7,7 @@ pub mod download;
 pub mod filter;
 #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
 pub mod fluidaudio;
+pub mod lightning_whisper;
 pub mod manifest;
 #[cfg(feature = "parakeet")]
 pub mod parakeet;
@@ -28,6 +29,8 @@ pub enum TranscriptionBackend {
     Parakeet,
     /// FluidAudio with Apple Neural Engine via CoreML (fastest on Apple Silicon)
     FluidAudio,
+    /// Lightning Whisper MLX via Python subprocess (Apple Silicon)
+    LightningWhisper,
 }
 
 impl Default for TranscriptionBackend {
@@ -44,6 +47,7 @@ pub enum TranscriptionService {
     Parakeet(parakeet::TranscriptionService),
     #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
     FluidAudio(fluidaudio::TranscriptionService),
+    LightningWhisper(lightning_whisper::LightningWhisperTranscriptionService),
 }
 
 impl TranscriptionService {
@@ -67,6 +71,12 @@ impl TranscriptionService {
         Ok(Self::FluidAudio(service))
     }
 
+    /// Create a new transcription service with the Lightning Whisper MLX backend
+    pub fn new_lightning_whisper(model: &str, quant: Option<&str>) -> Self {
+        let service = lightning_whisper::LightningWhisperTranscriptionService::new(model, quant);
+        Self::LightningWhisper(service)
+    }
+
     /// Transcribe audio from a WAV file
     pub fn transcribe(&mut self, audio_path: &std::path::Path) -> anyhow::Result<String> {
         match self {
@@ -75,6 +85,7 @@ impl TranscriptionService {
             Self::Parakeet(service) => service.transcribe(audio_path),
             #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
             Self::FluidAudio(service) => service.transcribe(audio_path),
+            Self::LightningWhisper(service) => service.transcribe(audio_path),
         }
     }
 
@@ -86,6 +97,7 @@ impl TranscriptionService {
             Self::Parakeet(_) => TranscriptionBackend::Parakeet,
             #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
             Self::FluidAudio(_) => TranscriptionBackend::FluidAudio,
+            Self::LightningWhisper(_) => TranscriptionBackend::LightningWhisper,
         }
     }
 }
@@ -151,6 +163,26 @@ pub fn init_fluidaudio_transcription() -> Result<(), String> {
 
     #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
     Err("FluidAudio backend not available in this build".to_string())
+}
+
+/// Initialise the transcription service with Lightning Whisper MLX backend
+#[tauri::command]
+pub fn init_lightning_whisper_transcription(
+    model: String,
+    quant: Option<String>,
+) -> Result<(), String> {
+    let service =
+        TranscriptionService::new_lightning_whisper(&model, quant.as_deref());
+
+    let mut guard = get_service().lock();
+    *guard = Some(service);
+
+    tracing::info!(
+        "Lightning Whisper MLX transcription service initialised (model={}, quant={:?})",
+        model,
+        quant
+    );
+    Ok(())
 }
 
 /// Initialise the transcription service (auto-detect best backend)
@@ -442,6 +474,7 @@ pub fn get_transcription_backend() -> Option<String> {
         TranscriptionBackend::Whisper => "whisper".to_string(),
         TranscriptionBackend::Parakeet => "parakeet".to_string(),
         TranscriptionBackend::FluidAudio => "fluidaudio".to_string(),
+        TranscriptionBackend::LightningWhisper => "lightning_whisper".to_string(),
     })
 }
 
@@ -532,4 +565,66 @@ pub fn is_fluidaudio_cached() -> bool {
     }
     #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
     false
+}
+
+// ── Custom model commands ─────────────────────────────────────────────
+
+/// List all custom models from config
+#[tauri::command]
+pub fn list_custom_models() -> Result<Vec<crate::config::CustomModel>, String> {
+    let config = crate::config::get_config().map_err(|e| e.to_string())?;
+    Ok(config.transcription.custom_models.clone())
+}
+
+/// Add a custom model (validates path, assigns UUID, saves to config)
+#[tauri::command]
+pub fn add_custom_model(
+    name: String,
+    path: String,
+    backend: String,
+    description: Option<String>,
+) -> Result<crate::config::CustomModel, String> {
+    // Validate path exists
+    if !std::path::Path::new(&path).exists() {
+        return Err(format!("Model path does not exist: {}", path));
+    }
+
+    // Validate backend
+    if backend != "whisper_ggml" && backend != "parakeet" {
+        return Err(format!(
+            "Invalid backend '{}'. Must be 'whisper_ggml' or 'parakeet'.",
+            backend
+        ));
+    }
+
+    let model = crate::config::CustomModel {
+        id: uuid::Uuid::new_v4().to_string(),
+        name,
+        path,
+        backend,
+        description,
+    };
+
+    let mut config = crate::config::get_config().map_err(|e| e.to_string())?;
+    config.transcription.custom_models.push(model.clone());
+    crate::config::set_config(config).map_err(|e| e.to_string())?;
+
+    tracing::info!("Added custom model: {} ({})", model.name, model.id);
+    Ok(model)
+}
+
+/// Remove a custom model by ID
+#[tauri::command]
+pub fn remove_custom_model(id: String) -> Result<(), String> {
+    let mut config = crate::config::get_config().map_err(|e| e.to_string())?;
+    let before_len = config.transcription.custom_models.len();
+    config.transcription.custom_models.retain(|m| m.id != id);
+
+    if config.transcription.custom_models.len() == before_len {
+        return Err(format!("Custom model not found: {}", id));
+    }
+
+    crate::config::set_config(config).map_err(|e| e.to_string())?;
+    tracing::info!("Removed custom model: {}", id);
+    Ok(())
 }

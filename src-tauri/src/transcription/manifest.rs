@@ -333,9 +333,10 @@ fn dir_size_recursive(path: &std::path::Path) -> u64 {
 /// Check if the backend for a given model type is available in this build
 pub fn is_backend_available(model_type: &str) -> bool {
     match model_type {
-        "whisper_ggml" => true,
-        "nemo_transducer" => cfg!(feature = "parakeet"),
+        "whisper_ggml" | "custom_whisper_ggml" => true,
+        "nemo_transducer" | "custom_parakeet" => cfg!(feature = "parakeet"),
         "fluidaudio_coreml" => cfg!(all(target_os = "macos", feature = "fluidaudio")),
+        "lightning_whisper_mlx" => true, // availability checked at runtime via is_available()
         _ => false,
     }
 }
@@ -424,15 +425,43 @@ pub async fn fetch_model_manifest(force_refresh: bool) -> Result<Vec<ModelInfo>,
         }
     };
 
-    let selected_id = crate::config::get_config()
-        .ok()
+    let config = crate::config::get_config().ok();
+    let selected_id = config
+        .as_ref()
         .and_then(|c| c.transcription.model_id.clone());
 
-    let models: Vec<ModelInfo> = manifest
+    let mut models: Vec<ModelInfo> = manifest
         .models
         .iter()
         .map(|m| to_model_info(m, selected_id.as_deref()))
         .collect();
+
+    // Append custom models from config
+    if let Some(cfg) = &config {
+        for custom in &cfg.transcription.custom_models {
+            let model_type = if custom.backend == "whisper_ggml" {
+                "custom_whisper_ggml"
+            } else {
+                "custom_parakeet"
+            };
+            models.push(ModelInfo {
+                id: custom.id.clone(),
+                name: custom.name.clone(),
+                description: custom.description.clone().unwrap_or_default(),
+                version: String::new(),
+                size_mb: 0,
+                downloaded: true,
+                path: custom.path.clone(),
+                disk_size: std::fs::metadata(&custom.path).ok().map(|m| m.len()),
+                recommended: false,
+                languages: vec![],
+                update_available: false,
+                selected: selected_id.as_deref() == Some(&custom.id),
+                model_type: model_type.to_string(),
+                backend_available: is_backend_available(model_type),
+            });
+        }
+    }
 
     Ok(models)
 }
