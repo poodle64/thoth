@@ -11,7 +11,9 @@ use std::time::Duration;
 use tokio::time::sleep;
 
 /// Default timeout for API requests in seconds
-const DEFAULT_TIMEOUT_SECS: u64 = 30;
+/// Set to 120s to accommodate local models (e.g. oMLX) that may take longer
+/// to generate a response — especially when the model is still warming up.
+const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
 /// Maximum number of retry attempts
 const MAX_RETRY_ATTEMPTS: u32 = 3;

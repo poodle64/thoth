@@ -105,3 +105,45 @@ impl LightningWhisperTranscriptionService {
 pub fn is_lightning_whisper_available() -> bool {
     LightningWhisperTranscriptionService::is_available()
 }
+
+/// Tauri command: Install lightning-whisper-mlx via pip in a terminal window.
+///
+/// Opens a new Terminal.app window (macOS) so the user can see install progress.
+/// Returns immediately; the install runs in the background terminal.
+#[tauri::command]
+pub fn install_lightning_whisper_mlx() -> Result<(), String> {
+    let script = "pip install lightning-whisper-mlx; echo ''; echo '✅ Done. You can close this window.'; read -p 'Press Enter to close...'";
+
+    #[cfg(target_os = "macos")]
+    {
+        // Use osascript to open Terminal with the install command
+        let osa = format!(
+            r#"tell application "Terminal"
+    do script "{}"
+    activate
+end tell"#,
+            script.replace('"', "\\\"")
+        );
+        std::process::Command::new("osascript")
+            .args(["-e", &osa])
+            .spawn()
+            .map_err(|e| format!("Failed to open Terminal: {}", e))?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Linux fallback: try x-terminal-emulator or xterm
+        let tried = std::process::Command::new("x-terminal-emulator")
+            .args(["-e", &format!("bash -c '{script}'")])
+            .spawn();
+        if tried.is_err() {
+            std::process::Command::new("xterm")
+                .args(["-e", &format!("bash -c '{script}'")])
+                .spawn()
+                .map_err(|e| format!("Failed to open terminal: {}", e))?;
+        }
+    }
+
+    tracing::info!("Lightning Whisper MLX install triggered in external terminal");
+    Ok(())
+}

@@ -202,10 +202,11 @@
       drawRoundedSquare(iconX, iconY, 0.7 + pulse * 0.3);
       drawSpinner(w / 2, h / 2, 10, 2.5);
     } else if (visualizerState === 'processing') {
+      spinnerPhase += 0.06;
       processingPhase += 0.04;
       const pulse = Math.sin(processingPhase * Math.PI) * 0.5 + 0.5;
-      drawRoundedSquare(iconX, iconY, 0.6 + pulse * 0.4);
-      drawMicIcon(w, h, 0.6 + pulse * 0.4);
+      drawRoundedSquare(iconX, iconY, 0.7 + pulse * 0.3);
+      drawSpinner(w / 2, h / 2, 10, 2.5);
     } else {
       drawRoundedSquare(iconX, iconY);
       drawMicIcon(w, h);
@@ -306,11 +307,12 @@
       drawSpinner(micAreaWidth / 2 + 4, h / 2, 8, 2.5);
       drawPillEnhancingText(w, h, micAreaWidth);
     } else if (visualizerState === 'processing') {
+      spinnerPhase += 0.06;
       processingPhase += 0.04;
       const pulse = Math.sin(processingPhase * Math.PI) * 0.5 + 0.5;
-      drawPillBackground(w, h, radius, 0.6 + pulse * 0.25);
-      drawPillProcessingDots(w, h);
-      drawPillMicIcon(h, micAreaWidth, 0.6 + pulse * 0.4);
+      drawPillBackground(w, h, radius, 0.65 + pulse * 0.2);
+      drawSpinner(micAreaWidth / 2 + 4, h / 2, 8, 2.5);
+      drawPillProcessingText(w, h, micAreaWidth);
     } else {
       drawPillBackground(w, h, radius);
       drawPillMicIcon(h, micAreaWidth);
@@ -455,6 +457,20 @@
     ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
     ctx.textBaseline = 'middle';
     ctx.fillText('Enhancing…', textX, cy);
+    ctx.restore();
+  }
+
+  function drawPillProcessingText(w: number, h: number, micAreaWidth: number) {
+    if (!ctx) return;
+
+    const textX = micAreaWidth + 8;
+    const cy = h / 2;
+
+    ctx.save();
+    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Processing…', textX, cy);
     ctx.restore();
   }
 

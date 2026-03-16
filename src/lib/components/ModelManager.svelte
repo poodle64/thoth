@@ -55,6 +55,8 @@
 
   // Lightning Whisper MLX state
   let lightningAvailable = $state(false);
+  let lightningInstalling = $state(false);
+  let lightningInstallDone = $state(false);
   let lightningModel = $state('large-v3');
   let lightningQuant = $state<string>('None');
   const lightningModels = [
@@ -62,6 +64,18 @@
     'large', 'large-v2', 'distil-large-v2', 'large-v3', 'distil-large-v3',
   ];
   const lightningQuants = ['None', '4bit', '8bit'];
+
+  // Collapsed state for each category section
+  let collapsedSections = $state<Record<string, boolean>>({
+    parakeet: false,
+    whisperkit: false,
+    lightning: false,
+    custom: false,
+  });
+
+  function toggleSection(key: string) {
+    collapsedSections[key] = !collapsedSections[key];
+  }
 
   // Custom model form state
   let showCustomForm = $state(false);
@@ -306,6 +320,30 @@
     }
   }
 
+  async function installLightningWhisper() {
+    lightningInstalling = true;
+    error = null;
+    try {
+      await invoke('install_lightning_whisper_mlx');
+      lightningInstallDone = true;
+      // Poll availability every 3s up to ~2 minutes so the button auto-updates
+      const poll = setInterval(async () => {
+        const avail = await invoke<boolean>('is_lightning_whisper_available').catch(() => false);
+        if (avail) {
+          lightningAvailable = true;
+          lightningInstalling = false;
+          lightningInstallDone = false;
+          clearInterval(poll);
+        }
+      }, 3000);
+      setTimeout(() => clearInterval(poll), 120_000);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+      lightningInstalling = false;
+      lightningInstallDone = false;
+    }
+  }
+
   function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -444,7 +482,16 @@
     <div class="downloaded-strip">
       {#each downloadedModels() as model (model.id)}
         {@const cat = categories.find((c) => c.key === getCategory(model))}
-        <div class="downloaded-chip" class:active={model.selected}>
+        <!-- svelte-ignore a11y_interactive_supports_focus -->
+        <div
+          class="downloaded-chip"
+          class:active={model.selected}
+          role="button"
+          aria-pressed={model.selected}
+          onclick={() => !model.selected && selectModel(model)}
+          style:cursor={model.selected ? 'default' : 'pointer'}
+          title={model.selected ? 'Active model' : `Switch to ${model.name}`}
+        >
           {#if cat}
             <span class="cat-icon cat-icon-sm" style:background={cat.iconBg}>
               {#if cat.iconEmoji}{cat.iconEmoji}{:else}{cat.iconText}{/if}
@@ -453,6 +500,8 @@
           <span class="chip-name">{model.name}</span>
           {#if model.selected}
             <span class="badge badge-active">Active</span>
+          {:else if initialisingModelId === model.id}
+            <span class="badge badge-loading">Loading…</span>
           {/if}
         </div>
       {/each}
@@ -466,7 +515,8 @@
 
     {#if cat.key !== 'lightning' && cat.key !== 'custom' && catModels.length > 0}
       <div class="category-section">
-        <div class="category-header">
+        <!-- svelte-ignore a11y_interactive_supports_focus -->
+        <div class="category-header collapsible-header" role="button" onclick={() => toggleSection(cat.key)}>
           <span class="cat-icon" style:background={icon.bg}>
             {#if icon.isEmoji}{icon.content}{:else}{icon.content}{/if}
           </span>
@@ -474,8 +524,10 @@
             <span class="category-name">{cat.label}</span>
             <span class="category-desc">{cat.description}</span>
           </div>
+          <span class="collapse-chevron" class:collapsed={collapsedSections[cat.key]}>›</span>
         </div>
 
+        {#if !collapsedSections[cat.key]}
         <div class="model-list">
           {#each catModels as model (model.id)}
             <div
@@ -570,20 +622,24 @@
             </div>
           {/each}
         </div>
+        {/if}
       </div>
     {/if}
   {/each}
 
   <!-- Lightning Whisper MLX category -->
   <div class="category-section">
-    <div class="category-header">
+    <!-- svelte-ignore a11y_interactive_supports_focus -->
+    <div class="category-header collapsible-header" role="button" onclick={() => toggleSection('lightning')}>
       <span class="cat-icon" style:background="#9b59b6">{'\u26A1'}</span>
       <div class="category-info">
         <span class="category-name">Lightning Whisper MLX</span>
         <span class="category-desc">Fast Whisper on Apple Silicon via MLX</span>
       </div>
+      <span class="collapse-chevron" class:collapsed={collapsedSections['lightning']}>›</span>
     </div>
 
+    {#if !collapsedSections['lightning']}
     <div class="model-card lightning-card">
       <div class="model-row">
         <span class="cat-icon cat-icon-sm" style:background="#9b59b6">{'\u26A1'}</span>
@@ -594,8 +650,21 @@
           <p class="model-description">Python-based Whisper transcription optimised for Apple Silicon via MLX framework.</p>
 
           {#if !lightningAvailable}
-            <div class="backend-warning">
-              Not installed. Run: <code>pip install lightning-whisper-mlx</code>
+            <div class="backend-warning install-warning">
+              <span>Not installed.</span>
+              <button
+                class="btn-install"
+                onclick={installLightningWhisper}
+                disabled={lightningInstalling}
+              >
+                {#if lightningInstalling}
+                  Installing… (check Terminal)
+                {:else if lightningInstallDone}
+                  Waiting for install…
+                {:else}
+                  Install
+                {/if}
+              </button>
             </div>
           {/if}
 
@@ -639,18 +708,22 @@
         {/if}
       </div>
     </div>
+    {/if}
   </div>
 
   <!-- Custom Models category -->
   <div class="category-section">
-    <div class="category-header">
+    <!-- svelte-ignore a11y_interactive_supports_focus -->
+    <div class="category-header collapsible-header" role="button" onclick={() => toggleSection('custom')}>
       <span class="cat-icon" style:background="#6b7280">{'\u2699'}</span>
       <div class="category-info">
         <span class="category-name">Custom Models</span>
         <span class="category-desc">User-supplied local models</span>
       </div>
+      <span class="collapse-chevron" class:collapsed={collapsedSections['custom']}>›</span>
     </div>
 
+    {#if !collapsedSections['custom']}
     {#each modelsForCategory('custom') as model (model.id)}
       <div class="model-card" class:selected={model.selected}>
         <div class="model-row">
@@ -718,6 +791,7 @@
       <button class="btn-outline add-custom-btn" onclick={() => (showCustomForm = true)}>
         + Add Custom Model
       </button>
+    {/if}
     {/if}
   </div>
 
@@ -865,6 +939,67 @@
     align-items: center;
     gap: 10px;
     padding: 4px 0;
+  }
+
+  .collapsible-header {
+    cursor: pointer;
+    user-select: none;
+    border-radius: var(--radius-sm);
+    padding: 6px 4px;
+    margin: -2px -4px;
+    transition: background var(--transition-fast);
+  }
+
+  .collapsible-header:hover {
+    background: var(--color-bg-secondary);
+  }
+
+  .collapse-chevron {
+    margin-left: auto;
+    font-size: 18px;
+    color: var(--color-text-tertiary);
+    line-height: 1;
+    transform: rotate(90deg);
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+  }
+
+  .collapse-chevron.collapsed {
+    transform: rotate(0deg);
+  }
+
+  .install-warning {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .btn-install {
+    padding: 4px 12px;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    border-radius: var(--radius-md);
+    background: var(--color-accent);
+    color: white;
+    border: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background var(--transition-fast);
+  }
+
+  .btn-install:hover:not(:disabled) {
+    background: var(--color-accent-hover);
+  }
+
+  .btn-install:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .badge-loading {
+    background: color-mix(in srgb, var(--color-text-tertiary) 15%, transparent);
+    color: var(--color-text-tertiary);
   }
 
   .category-info {
