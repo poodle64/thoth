@@ -106,6 +106,26 @@ pub fn is_lightning_whisper_available() -> bool {
     LightningWhisperTranscriptionService::is_available()
 }
 
+/// Tauri command: Install lightning-whisper-mlx via pip3
+#[tauri::command]
+pub async fn install_lightning_whisper() -> Result<String, String> {
+    let output = tokio::task::spawn_blocking(|| {
+        std::process::Command::new("pip3")
+            .args(["install", "lightning-whisper-mlx"])
+            .output()
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
+    .map_err(|e| format!("Failed to run pip3: {}", e))?;
+
+    if output.status.success() {
+        Ok("lightning-whisper-mlx installed successfully".to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("Installation failed: {}", stderr.trim()))
+    }
+}
+
 /// Tauri command: Install lightning-whisper-mlx via pip in a terminal window.
 ///
 /// Opens a new Terminal.app window (macOS) so the user can see install progress.

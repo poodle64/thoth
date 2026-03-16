@@ -56,7 +56,8 @@
   // Lightning Whisper MLX state
   let lightningAvailable = $state(false);
   let lightningInstalling = $state(false);
-  let lightningInstallDone = $state(false);
+  let lightningInstallResult = $state<string | null>(null);
+  let lightningInstallError = $state<string | null>(null);
   let lightningModel = $state('large-v3');
   let lightningQuant = $state<string>('None');
   const lightningModels = [
@@ -322,25 +323,17 @@
 
   async function installLightningWhisper() {
     lightningInstalling = true;
-    error = null;
+    lightningInstallResult = null;
+    lightningInstallError = null;
     try {
-      await invoke('install_lightning_whisper_mlx');
-      lightningInstallDone = true;
-      // Poll availability every 3s up to ~2 minutes so the button auto-updates
-      const poll = setInterval(async () => {
-        const avail = await invoke<boolean>('is_lightning_whisper_available').catch(() => false);
-        if (avail) {
-          lightningAvailable = true;
-          lightningInstalling = false;
-          lightningInstallDone = false;
-          clearInterval(poll);
-        }
-      }, 3000);
-      setTimeout(() => clearInterval(poll), 120_000);
+      await invoke('install_lightning_whisper');
+      lightningAvailable = true;
+      lightningInstallResult = 'Installed successfully!';
+      setTimeout(() => { lightningInstallResult = null; }, 3000);
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      lightningInstallError = e instanceof Error ? e.message : String(e);
+    } finally {
       lightningInstalling = false;
-      lightningInstallDone = false;
     }
   }
 
@@ -482,15 +475,12 @@
     <div class="downloaded-strip">
       {#each downloadedModels() as model (model.id)}
         {@const cat = categories.find((c) => c.key === getCategory(model))}
-        <!-- svelte-ignore a11y_interactive_supports_focus -->
-        <div
+        <button
           class="downloaded-chip"
           class:active={model.selected}
-          role="button"
-          aria-pressed={model.selected}
-          onclick={() => !model.selected && selectModel(model)}
-          style:cursor={model.selected ? 'default' : 'pointer'}
-          title={model.selected ? 'Active model' : `Switch to ${model.name}`}
+          onclick={() => { if (!model.selected && model.backend_available) selectModel(model); }}
+          disabled={isDownloading() || initialisingModelId !== null || !model.backend_available}
+          title={model.selected ? 'Active model' : 'Switch to this model'}
         >
           {#if cat}
             <span class="cat-icon cat-icon-sm" style:background={cat.iconBg}>
@@ -503,7 +493,7 @@
           {:else if initialisingModelId === model.id}
             <span class="badge badge-loading">Loading…</span>
           {/if}
-        </div>
+        </button>
       {/each}
     </div>
   {/if}
@@ -650,19 +640,23 @@
           <p class="model-description">Python-based Whisper transcription optimised for Apple Silicon via MLX framework.</p>
 
           {#if !lightningAvailable}
-            <div class="backend-warning install-warning">
-              <span>Not installed.</span>
+            <div class="install-section">
+              {#if lightningInstallError}
+                <div class="backend-warning">{lightningInstallError}</div>
+              {:else if lightningInstallResult}
+                <div class="install-success">{lightningInstallResult}</div>
+              {:else}
+                <div class="backend-warning">lightning-whisper-mlx is not installed.</div>
+              {/if}
               <button
-                class="btn-install"
+                class="btn-primary install-btn"
                 onclick={installLightningWhisper}
                 disabled={lightningInstalling}
               >
                 {#if lightningInstalling}
-                  Installing… (check Terminal)
-                {:else if lightningInstallDone}
-                  Waiting for install…
+                  <span class="btn-spinner"></span> Installing...
                 {:else}
-                  Install
+                  Install lightning-whisper-mlx
                 {/if}
               </button>
             </div>
@@ -890,12 +884,27 @@
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-full);
     font-size: var(--text-sm);
+    font-family: inherit;
     color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+
+  .downloaded-chip:hover:not(:disabled):not(.active) {
+    border-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-secondary));
+    color: var(--color-text-primary);
+  }
+
+  .downloaded-chip:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
   }
 
   .downloaded-chip.active {
     border-color: var(--color-accent);
     background: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg-secondary));
+    cursor: default;
   }
 
   .chip-name {
@@ -1428,5 +1437,35 @@
 
   .confirm-delete-btn:hover {
     background: color-mix(in srgb, var(--color-error) 85%, white);
+  }
+
+  .install-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .install-btn {
+    align-self: flex-start;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .install-success {
+    font-size: var(--text-xs);
+    color: #4caf50;
+    padding: 4px 8px;
+    background: color-mix(in srgb, #4caf50 10%, transparent);
+    border-radius: var(--radius-sm);
+  }
+  .btn-spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
   }
 </style>

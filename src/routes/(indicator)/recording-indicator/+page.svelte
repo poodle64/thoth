@@ -305,14 +305,14 @@
       const pulse = Math.sin(processingPhase * Math.PI) * 0.5 + 0.5;
       drawPillBackground(w, h, radius, 0.65 + pulse * 0.2);
       drawSpinner(micAreaWidth / 2 + 4, h / 2, 8, 2.5);
-      drawPillEnhancingText(w, h, micAreaWidth);
+      drawPillStatusText(w, h, micAreaWidth, 'Enhancing...');
     } else if (visualizerState === 'processing') {
       spinnerPhase += 0.06;
       processingPhase += 0.04;
       const pulse = Math.sin(processingPhase * Math.PI) * 0.5 + 0.5;
       drawPillBackground(w, h, radius, 0.65 + pulse * 0.2);
       drawSpinner(micAreaWidth / 2 + 4, h / 2, 8, 2.5);
-      drawPillProcessingText(w, h, micAreaWidth);
+      drawPillStatusText(w, h, micAreaWidth, 'Processing...');
     } else {
       drawPillBackground(w, h, radius);
       drawPillMicIcon(h, micAreaWidth);
@@ -403,27 +403,6 @@
     }
   }
 
-  function drawPillProcessingDots(w: number, h: number) {
-    if (!ctx) return;
-
-    const cy = h / 2;
-    const cx = w / 2 + 10;
-    const dotRadius = 3;
-    const dotSpacing = 14;
-
-    for (let i = 0; i < 3; i++) {
-      const phase = processingPhase + i * 0.7;
-      const bounce = Math.sin(phase * Math.PI) * 0.5 + 0.5;
-      const y = cy - bounce * 6;
-      const alpha = 0.5 + bounce * 0.5;
-
-      ctx.beginPath();
-      ctx.arc(cx + (i - 1) * dotSpacing, y, dotRadius, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-      ctx.fill();
-    }
-  }
-
   function drawSpinner(cx: number, cy: number, radius: number, lineWidth: number) {
     if (!ctx) return;
 
@@ -446,31 +425,15 @@
     ctx.stroke();
   }
 
-  function drawPillEnhancingText(w: number, h: number, micAreaWidth: number) {
+  function drawPillStatusText(w: number, h: number, micAreaWidth: number, label: string) {
     if (!ctx) return;
-
     const textX = micAreaWidth + 8;
     const cy = h / 2;
-
     ctx.save();
     ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
     ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
     ctx.textBaseline = 'middle';
-    ctx.fillText('Enhancing…', textX, cy);
-    ctx.restore();
-  }
-
-  function drawPillProcessingText(w: number, h: number, micAreaWidth: number) {
-    if (!ctx) return;
-
-    const textX = micAreaWidth + 8;
-    const cy = h / 2;
-
-    ctx.save();
-    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('Processing…', textX, cy);
+    ctx.fillText(label, textX, cy);
     ctx.restore();
   }
 

@@ -370,6 +370,7 @@ pub fn run() {
             transcription::is_fluidaudio_available,
             transcription::is_fluidaudio_cached,
             transcription::lightning_whisper::is_lightning_whisper_available,
+            transcription::lightning_whisper::install_lightning_whisper,
             transcription::lightning_whisper::install_lightning_whisper_mlx,
             transcription::list_custom_models,
             transcription::add_custom_model,

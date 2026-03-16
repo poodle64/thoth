@@ -16,7 +16,7 @@ use tokio::time::sleep;
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
 /// Maximum number of retry attempts
-const MAX_RETRY_ATTEMPTS: u32 = 3;
+const MAX_RETRY_ATTEMPTS: u32 = 2;
 
 /// Base delay for exponential backoff in milliseconds
 const BASE_RETRY_DELAY_MS: u64 = 100;
