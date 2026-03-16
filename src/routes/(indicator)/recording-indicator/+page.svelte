@@ -14,7 +14,7 @@
   indicatorLog('===== PAGE SCRIPT EXECUTING =====');
 
   // State
-  let visualizerState = $state<'idle' | 'recording' | 'processing'>('idle');
+  let visualizerState = $state<'idle' | 'recording' | 'processing' | 'enhancing'>('idle');
   let audioLevel = $state(0);
   let indicatorStyle = $state<IndicatorStyle>('cursor-dot');
 
@@ -28,6 +28,9 @@
 
   // Processing animation
   let processingPhase = 0;
+
+  // Spinner animation for enhancing state
+  let spinnerPhase = 0;
 
   // Waveform history for pill style (circular buffer)
   const WAVEFORM_BARS = 32;
@@ -74,13 +77,15 @@
     unlisteners.push(shownUnlisten);
 
     // Listen for pipeline progress
-    const progressUnlisten = await listen<{ state: string; message: string; deviceName?: string }>(
+    const progressUnlisten = await listen<{ state: string; message: string; deviceName?: string; enhancementEnabled?: boolean }>(
       'pipeline-progress',
       (event) => {
         const state = event.payload.state;
         indicatorLog('Pipeline state:', state);
         if (state === 'recording') {
           visualizerState = 'recording';
+        } else if (state === 'enhancing' && event.payload.enhancementEnabled) {
+          visualizerState = 'enhancing';
         } else if (
           state === 'transcribing' ||
           state === 'filtering' ||
@@ -190,6 +195,12 @@
       drawDotGlow(w, h, iconX, iconY);
       drawRoundedSquare(iconX, iconY);
       drawMicIcon(w, h);
+    } else if (visualizerState === 'enhancing') {
+      spinnerPhase += 0.06;
+      processingPhase += 0.04;
+      const pulse = Math.sin(processingPhase * Math.PI) * 0.5 + 0.5;
+      drawRoundedSquare(iconX, iconY, 0.7 + pulse * 0.3);
+      drawSpinner(w / 2, h / 2, 10, 2.5);
     } else if (visualizerState === 'processing') {
       processingPhase += 0.04;
       const pulse = Math.sin(processingPhase * Math.PI) * 0.5 + 0.5;
@@ -287,6 +298,13 @@
       drawWaveformBars(w, h, micAreaWidth);
       // Mic icon on the left
       drawPillMicIcon(h, micAreaWidth);
+    } else if (visualizerState === 'enhancing') {
+      spinnerPhase += 0.06;
+      processingPhase += 0.04;
+      const pulse = Math.sin(processingPhase * Math.PI) * 0.5 + 0.5;
+      drawPillBackground(w, h, radius, 0.65 + pulse * 0.2);
+      drawSpinner(micAreaWidth / 2 + 4, h / 2, 8, 2.5);
+      drawPillEnhancingText(w, h, micAreaWidth);
     } else if (visualizerState === 'processing') {
       processingPhase += 0.04;
       const pulse = Math.sin(processingPhase * Math.PI) * 0.5 + 0.5;
@@ -402,6 +420,42 @@
       ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
       ctx.fill();
     }
+  }
+
+  function drawSpinner(cx: number, cy: number, radius: number, lineWidth: number) {
+    if (!ctx) return;
+
+    // Track arc (full circle, faint)
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.lineWidth = lineWidth;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // Spinning arc (~270° sweep)
+    const startAngle = spinnerPhase;
+    const sweepAngle = Math.PI * 1.5; // 270°
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, startAngle, startAngle + sweepAngle);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.lineWidth = lineWidth;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  }
+
+  function drawPillEnhancingText(w: number, h: number, micAreaWidth: number) {
+    if (!ctx) return;
+
+    const textX = micAreaWidth + 8;
+    const cy = h / 2;
+
+    ctx.save();
+    ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Enhancing…', textX, cy);
+    ctx.restore();
   }
 
   async function handleStop() {

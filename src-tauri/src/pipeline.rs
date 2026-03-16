@@ -129,6 +129,9 @@ pub struct PipelineProgress {
     /// Audio device name (only present when state is Recording)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_name: Option<String>,
+    /// Whether AI enhancement is enabled in the current pipeline run
+    #[serde(default)]
+    pub enhancement_enabled: bool,
 }
 
 /// Track if pipeline is currently running
@@ -462,7 +465,7 @@ async fn run_transcription_pipeline(
     let mut enhancement_duration_seconds: Option<f64> = None;
 
     let is_enhanced = if config.enhancement_enabled && !config.enhancement_model.is_empty() {
-        emit_progress(app, PipelineState::Enhancing, "Enhancing with AI...");
+        emit_progress_ext(app, PipelineState::Enhancing, "Enhancing with AI...", None, true);
 
         let enhancement_start = std::time::Instant::now();
         match enhancement::enhance_text(
@@ -941,7 +944,7 @@ pub async fn pipeline_retranscribe(
 
 /// Emit a pipeline progress event
 fn emit_progress(app: &AppHandle, state: PipelineState, message: &str) {
-    emit_progress_with_device(app, state, message, None);
+    emit_progress_ext(app, state, message, None, false);
 }
 
 /// Emit a pipeline progress event with optional device name
@@ -951,10 +954,22 @@ fn emit_progress_with_device(
     message: &str,
     device_name: Option<String>,
 ) {
+    emit_progress_ext(app, state, message, device_name, false);
+}
+
+/// Emit a pipeline progress event with all optional fields
+fn emit_progress_ext(
+    app: &AppHandle,
+    state: PipelineState,
+    message: &str,
+    device_name: Option<String>,
+    enhancement_enabled: bool,
+) {
     let progress = PipelineProgress {
         state,
         message: message.to_string(),
         device_name,
+        enhancement_enabled,
     };
     if let Err(e) = app.emit("pipeline-progress", &progress) {
         tracing::warn!("Failed to emit pipeline progress: {}", e);
