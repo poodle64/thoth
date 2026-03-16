@@ -143,12 +143,16 @@ impl Default for ShortcutConfig {
 pub struct EnhancementConfig {
     /// Whether AI enhancement is enabled
     pub enabled: bool,
-    /// Ollama model to use for enhancement
+    /// Model to use for enhancement
     pub model: String,
     /// Selected prompt template ID
     pub prompt_id: String,
-    /// Ollama server URL
+    /// Server URL (used for both Ollama and OpenAI-compatible backends)
     pub ollama_url: String,
+    /// Backend type: "ollama" or "openai_compat"
+    pub backend: String,
+    /// Optional API key for OpenAI-compatible backends
+    pub api_key: Option<String>,
 }
 
 impl Default for EnhancementConfig {
@@ -158,6 +162,8 @@ impl Default for EnhancementConfig {
             model: "llama3.2".to_string(),
             prompt_id: "fix-grammar".to_string(),
             ollama_url: "http://localhost:11434".to_string(),
+            backend: "ollama".to_string(),
+            api_key: None,
         }
     }
 }
@@ -612,6 +618,8 @@ mod tests {
         assert_eq!(enhancement.model, "llama3.2");
         assert_eq!(enhancement.prompt_id, "fix-grammar");
         assert_eq!(enhancement.ollama_url, "http://localhost:11434");
+        assert_eq!(enhancement.backend, "ollama");
+        assert_eq!(enhancement.api_key, None);
     }
 
     #[test]
@@ -740,6 +748,8 @@ mod tests {
                 model: "mistral".to_string(),
                 prompt_id: "custom".to_string(),
                 ollama_url: "http://custom:8080".to_string(),
+                backend: "openai_compat".to_string(),
+                api_key: Some("sk-test".to_string()),
             },
             general: GeneralConfig {
                 launch_at_login: true,
@@ -828,9 +838,20 @@ mod tests {
             model: "custom-model".to_string(),
             prompt_id: "summarise".to_string(),
             ollama_url: "http://192.168.1.100:11434".to_string(),
+            backend: "ollama".to_string(),
+            api_key: None,
         };
 
         assert!(enhancement.enabled);
         assert_eq!(enhancement.ollama_url, "http://192.168.1.100:11434");
+    }
+
+    #[test]
+    fn test_enhancement_config_backward_compat() {
+        // Old config without backend/api_key fields should deserialise with defaults
+        let json = r#"{"enabled": true, "model": "llama3.2", "prompt_id": "fix-grammar", "ollama_url": "http://localhost:11434"}"#;
+        let enhancement: EnhancementConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(enhancement.backend, "ollama");
+        assert_eq!(enhancement.api_key, None);
     }
 }
