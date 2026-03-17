@@ -137,18 +137,39 @@ impl Default for ShortcutConfig {
     }
 }
 
+fn default_anthropic_model() -> String {
+    "claude-haiku-4-5-20251001".to_string()
+}
+
+fn default_anthropic_url() -> String {
+    "https://api.anthropic.com".to_string()
+}
+
 /// AI enhancement configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EnhancementConfig {
     /// Whether AI enhancement is enabled
     pub enabled: bool,
-    /// Ollama model to use for enhancement
+    /// Model to use for enhancement
     pub model: String,
     /// Selected prompt template ID
     pub prompt_id: String,
-    /// Ollama server URL
+    /// Server URL (used for both Ollama and OpenAI-compatible backends)
     pub ollama_url: String,
+    /// Backend type: "ollama" | "openai_compat" | "anthropic"
+    pub backend: String,
+    /// Optional API key for OpenAI-compatible backends
+    pub api_key: Option<String>,
+    /// Anthropic API key (persists independently)
+    #[serde(default)]
+    pub anthropic_api_key: Option<String>,
+    /// Anthropic model (e.g. "claude-haiku-4-5-20251001")
+    #[serde(default = "default_anthropic_model")]
+    pub anthropic_model: String,
+    /// Anthropic API base URL
+    #[serde(default = "default_anthropic_url")]
+    pub anthropic_url: String,
 }
 
 impl Default for EnhancementConfig {
@@ -158,6 +179,11 @@ impl Default for EnhancementConfig {
             model: "llama3.2".to_string(),
             prompt_id: "fix-grammar".to_string(),
             ollama_url: "http://localhost:11434".to_string(),
+            backend: "ollama".to_string(),
+            api_key: None,
+            anthropic_api_key: None,
+            anthropic_model: default_anthropic_model(),
+            anthropic_url: default_anthropic_url(),
         }
     }
 }
@@ -319,7 +345,14 @@ fn save_to_disk(config: &Config) -> Result<(), String> {
     let contents = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialise config: {}", e))?;
 
-    fs::write(&path, contents).map_err(|e| format!("Failed to write config file: {}", e))?;
+    fs::write(&path, &contents).map_err(|e| format!("Failed to write config file: {}", e))?;
+
+    // Restrict permissions to owner-only (0600) — config may contain API keys
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
 
     tracing::info!(
         "Config saved to disk: device_id={:?}, toggle_recording_alt={:?}",
@@ -612,6 +645,8 @@ mod tests {
         assert_eq!(enhancement.model, "llama3.2");
         assert_eq!(enhancement.prompt_id, "fix-grammar");
         assert_eq!(enhancement.ollama_url, "http://localhost:11434");
+        assert_eq!(enhancement.backend, "ollama");
+        assert_eq!(enhancement.api_key, None);
     }
 
     #[test]
@@ -740,6 +775,11 @@ mod tests {
                 model: "mistral".to_string(),
                 prompt_id: "custom".to_string(),
                 ollama_url: "http://custom:8080".to_string(),
+                backend: "openai_compat".to_string(),
+                api_key: Some("sk-test".to_string()),
+                anthropic_api_key: None,
+                anthropic_model: default_anthropic_model(),
+                anthropic_url: default_anthropic_url(),
             },
             general: GeneralConfig {
                 launch_at_login: true,
@@ -828,9 +868,23 @@ mod tests {
             model: "custom-model".to_string(),
             prompt_id: "summarise".to_string(),
             ollama_url: "http://192.168.1.100:11434".to_string(),
+            backend: "ollama".to_string(),
+            api_key: None,
+            anthropic_api_key: None,
+            anthropic_model: default_anthropic_model(),
+            anthropic_url: default_anthropic_url(),
         };
 
         assert!(enhancement.enabled);
         assert_eq!(enhancement.ollama_url, "http://192.168.1.100:11434");
+    }
+
+    #[test]
+    fn test_enhancement_config_backward_compat() {
+        // Old config without backend/api_key fields should deserialise with defaults
+        let json = r#"{"enabled": true, "model": "llama3.2", "prompt_id": "fix-grammar", "ollama_url": "http://localhost:11434"}"#;
+        let enhancement: EnhancementConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(enhancement.backend, "ollama");
+        assert_eq!(enhancement.api_key, None);
     }
 }

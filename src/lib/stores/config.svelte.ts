@@ -44,16 +44,29 @@ export interface ShortcutConfig {
   recordingMode: RecordingMode;
 }
 
+/** AI enhancement backend type */
+export type EnhancementBackend = 'ollama' | 'openai_compat' | 'anthropic';
+
 /** AI enhancement configuration */
 export interface EnhancementConfig {
   /** Whether AI enhancement is enabled */
   enabled: boolean;
-  /** Ollama model to use for enhancement */
+  /** Model to use for enhancement */
   model: string;
   /** Selected prompt template ID */
   promptId: string;
-  /** Ollama server URL */
+  /** Server URL (used for both Ollama and OpenAI-compatible backends) */
   ollamaUrl: string;
+  /** Backend type: "ollama" | "openai_compat" | "anthropic" */
+  backend: EnhancementBackend;
+  /** Optional API key for OpenAI-compatible backends */
+  apiKey: string;
+  /** Anthropic API key (persists independently) */
+  anthropicApiKey: string;
+  /** Anthropic model */
+  anthropicModel: string;
+  /** Anthropic API base URL */
+  anthropicUrl: string;
 }
 
 /** Recording indicator visual style */
@@ -140,6 +153,11 @@ interface ConfigRaw {
     model: string;
     prompt_id: string;
     ollama_url: string;
+    backend: EnhancementBackend;
+    api_key: string | null;
+    anthropic_api_key: string | null;
+    anthropic_model: string;
+    anthropic_url: string;
   };
   general: {
     launch_at_login: boolean;
@@ -183,6 +201,11 @@ function parseConfig(raw: ConfigRaw): Config {
       model: raw.enhancement.model,
       promptId: raw.enhancement.prompt_id,
       ollamaUrl: raw.enhancement.ollama_url,
+      backend: raw.enhancement.backend ?? 'ollama',
+      apiKey: raw.enhancement.api_key ?? '',
+      anthropicApiKey: raw.enhancement.anthropic_api_key ?? '',
+      anthropicModel: raw.enhancement.anthropic_model ?? 'claude-haiku-4-5-20251001',
+      anthropicUrl: raw.enhancement.anthropic_url ?? 'https://api.anthropic.com',
     },
     general: {
       launchAtLogin: raw.general.launch_at_login,
@@ -227,6 +250,11 @@ function serialiseConfig(config: Config): ConfigRaw {
       model: config.enhancement.model,
       prompt_id: config.enhancement.promptId,
       ollama_url: config.enhancement.ollamaUrl,
+      backend: config.enhancement.backend,
+      api_key: config.enhancement.apiKey || null,
+      anthropic_api_key: config.enhancement.anthropicApiKey || null,
+      anthropic_model: config.enhancement.anthropicModel,
+      anthropic_url: config.enhancement.anthropicUrl,
     },
     general: {
       launch_at_login: config.general.launchAtLogin,
@@ -271,6 +299,11 @@ function getDefaultConfig(): Config {
       model: 'llama3.2',
       promptId: 'fix-grammar',
       ollamaUrl: 'http://localhost:11434',
+      backend: 'ollama',
+      apiKey: '',
+      anthropicApiKey: '',
+      anthropicModel: 'claude-haiku-4-5-20251001',
+      anthropicUrl: 'https://api.anthropic.com',
     },
     general: {
       launchAtLogin: false,

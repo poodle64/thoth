@@ -2,13 +2,14 @@
   /**
    * AI Enhancement Settings component
    *
-   * Provides UI for configuring AI enhancement including Ollama connection,
-   * model selection, and prompt template management.
+   * Provides UI for configuring AI enhancement including Cloud AI (Anthropic)
+   * and Local AI (Ollama / OpenAI-compatible) backends, model selection,
+   * and prompt template management.
    */
 
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
-  import { configStore } from '../stores/config.svelte';
+  import { configStore, type EnhancementBackend } from '../stores/config.svelte';
   import { toastStore } from '../stores/toast.svelte';
 
   /** Prompt template matching Rust PromptTemplate struct */
@@ -34,6 +35,26 @@
   let newPromptTemplate = $state('');
   let promptError = $state<string | null>(null);
 
+  // Track last local backend for toggle memory
+  let lastLocalBackend = $state<'ollama' | 'openai_compat'>('ollama');
+
+  // Anthropic-specific state
+  let anthropicKeyDetected = $state<string | null>(null);
+  let anthropicKeyVisible = $state(false);
+
+  /** Check if the current backend is cloud-based */
+  function isCloudBackend(): boolean {
+    return configStore.config.enhancement.backend === 'anthropic';
+  }
+
+  /** Check if the current backend is local */
+  function isLocalBackend(): boolean {
+    return (
+      configStore.config.enhancement.backend === 'ollama' ||
+      configStore.config.enhancement.backend === 'openai_compat'
+    );
+  }
+
   /** Check if Ollama server is available */
   async function checkOllama(): Promise<void> {
     isCheckingOllama = true;
@@ -45,7 +66,7 @@
         await loadModels();
       }
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to check Ollama connection';
+      error = e instanceof Error ? e.message : 'Failed to check connection';
       ollamaAvailable = false;
     } finally {
       isCheckingOllama = false;
@@ -59,7 +80,7 @@
     try {
       ollamaModels = await invoke<string[]>('list_ollama_models');
     } catch (e) {
-      console.error('Failed to load Ollama models:', e);
+      console.error('Failed to load models:', e);
       ollamaModels = [];
     } finally {
       isLoadingModels = false;
@@ -120,9 +141,115 @@
     configStore.updateEnhancement('ollamaUrl', input.value);
   }
 
-  /** Handle Ollama URL blur (save and re-check) */
+  /** Handle URL blur (save, update backend, and re-check) */
   async function handleUrlBlur(): Promise<void> {
     await saveSettings();
+    await applyBackend();
+    await checkOllama();
+  }
+
+  /** Handle backend selection change */
+  async function handleBackendChange(event: Event): Promise<void> {
+    const select = event.target as HTMLSelectElement;
+    configStore.updateEnhancement('backend', select.value as EnhancementBackend);
+    await saveSettings();
+    await applyBackend();
+    await checkOllama();
+  }
+
+  /** Handle API key change */
+  function handleApiKeyChange(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    configStore.updateEnhancement('apiKey', input.value);
+  }
+
+  /** Handle API key blur (save and re-check) */
+  async function handleApiKeyBlur(): Promise<void> {
+    await saveSettings();
+    await applyBackend();
+    await checkOllama();
+  }
+
+  /** Notify the backend of the current enhancement backend config */
+  async function applyBackend(): Promise<void> {
+    try {
+      await invoke('set_enhancement_backend', {
+        backend: configStore.config.enhancement.backend,
+        baseUrl: configStore.config.enhancement.ollamaUrl,
+        apiKey: configStore.config.enhancement.apiKey || null,
+        anthropicApiKey: configStore.config.enhancement.anthropicApiKey || null,
+        anthropicModel: configStore.config.enhancement.anthropicModel || null,
+        anthropicBaseUrl: configStore.config.enhancement.anthropicUrl || null,
+      });
+      invoke('refresh_tray_menu').catch(() => {});
+    } catch (e) {
+      console.error('Failed to set enhancement backend:', e);
+    }
+  }
+
+  /** Detect Anthropic API key from environment */
+  async function detectAnthropicKey(): Promise<void> {
+    try {
+      const key = await invoke<string | null>('detect_anthropic_api_key');
+      if (key) {
+        anthropicKeyDetected = key;
+        if (!configStore.config.enhancement.anthropicApiKey) {
+          configStore.updateEnhancement('anthropicApiKey', key);
+          await saveSettings();
+        }
+      }
+    } catch (e) {
+      console.error('Failed to detect Anthropic key:', e);
+    }
+  }
+
+  /** Open Anthropic console in browser */
+  async function openAnthropicConsole(): Promise<void> {
+    await invoke('open_anthropic_console');
+  }
+
+  /** Handle Anthropic API key change */
+  function handleAnthropicKeyChange(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    configStore.updateEnhancement('anthropicApiKey', input.value);
+  }
+
+  /** Handle Anthropic API key blur */
+  async function handleAnthropicKeyBlur(): Promise<void> {
+    await saveSettings();
+    if (configStore.config.enhancement.backend === 'anthropic') {
+      await applyBackend();
+      await checkOllama();
+    }
+  }
+
+  /** Handle Anthropic model change */
+  async function handleAnthropicModelChange(event: Event): Promise<void> {
+    const select = event.target as HTMLSelectElement;
+    configStore.updateEnhancement('anthropicModel', select.value);
+    await saveSettings();
+    if (configStore.config.enhancement.backend === 'anthropic') {
+      await applyBackend();
+    }
+  }
+
+  /** Switch to cloud backend */
+  async function switchToCloud(): Promise<void> {
+    // Remember what local backend was before switching
+    if (isLocalBackend()) {
+      lastLocalBackend = configStore.config.enhancement.backend as 'ollama' | 'openai_compat';
+    }
+    configStore.updateEnhancement('backend', 'anthropic');
+    await saveSettings();
+    await applyBackend();
+    await checkOllama();
+  }
+
+  /** Switch to local backend */
+  async function switchToLocal(): Promise<void> {
+    configStore.updateEnhancement('backend', lastLocalBackend);
+    await saveSettings();
+    await applyBackend();
     await checkOllama();
   }
 
@@ -233,8 +360,13 @@
 
   onMount(async () => {
     await configStore.load();
+    // Remember the last local backend
+    if (isLocalBackend()) {
+      lastLocalBackend = configStore.config.enhancement.backend as 'ollama' | 'openai_compat';
+    }
     await loadPrompts();
     await checkOllama();
+    await detectAnthropicKey();
   });
 </script>
 
@@ -247,7 +379,7 @@
         <div class="setting-info">
           <span class="setting-label">Enable AI enhancement</span>
           <span class="setting-description">
-            Use Ollama to enhance transcriptions with grammar correction, formatting, and more
+            Use AI to enhance transcriptions with grammar correction, formatting, and more
           </span>
         </div>
         <label class="toggle-switch">
@@ -262,78 +394,251 @@
     </div>
 
     <div class="setting-group">
-      <h3>Ollama Connection</h3>
+      <h3>AI Source</h3>
 
-      <div class="setting-row card vertical">
-        <div class="setting-info">
-          <span class="setting-label">Server URL</span>
-          <span class="setting-description">The URL of your local Ollama server</span>
-        </div>
-        <div class="url-input-row">
-          <input
-            type="url"
-            class="url-input"
-            value={configStore.config.enhancement.ollamaUrl}
-            oninput={handleUrlChange}
-            onblur={handleUrlBlur}
-            placeholder="http://localhost:11434"
-          />
-          <button class="test-btn" onclick={checkOllama} disabled={isCheckingOllama}>
-            {isCheckingOllama ? 'Testing...' : 'Test Connection'}
-          </button>
-        </div>
-        <div
-          class="connection-inline"
-          class:connected={ollamaAvailable}
-          class:disconnected={!ollamaAvailable && !isCheckingOllama}
+      <!-- Cloud / Local slider toggle -->
+      <div class="backend-toggle-row">
+        <span class="toggle-label-left" class:active={isLocalBackend()}>
+          &#128187; Local AI
+        </span>
+        <button
+          class="slide-toggle"
+          class:cloud-active={isCloudBackend()}
+          onclick={isCloudBackend() ? switchToLocal : switchToCloud}
+          title={isCloudBackend() ? 'Switch to Local AI' : 'Switch to Cloud AI'}
+          aria-label={isCloudBackend() ? 'Currently: Cloud AI. Click to switch to Local' : 'Currently: Local AI. Click to switch to Cloud'}
         >
-          {#if isCheckingOllama}
-            <span class="status-indicator checking"></span>
-            <span>Checking connection...</span>
-          {:else if ollamaAvailable}
-            <span class="status-indicator connected"></span>
-            <span>Connected to Ollama</span>
-          {:else}
-            <span class="status-indicator disconnected"></span>
-            <span>Not connected. Make sure Ollama is running.</span>
-          {/if}
-        </div>
+          <span class="slide-thumb"></span>
+        </button>
+        <span class="toggle-label-right" class:active={isCloudBackend()}>
+          &#9729; Cloud AI
+        </span>
       </div>
 
-      {#if error}
-        <div class="error-message">{error}</div>
+      <!-- Active backend indicator pill -->
+      <div class="active-backend-pill" class:cloud={isCloudBackend()} class:local={isLocalBackend()}>
+        {#if isCloudBackend()}
+          <span class="pill-icon anthropic-icon-sm">A</span>
+          Anthropic &middot; {configStore.config.enhancement.anthropicModel.replace('claude-', 'Claude ').replace('-20251001','').replace('-20241022','')}
+        {:else if configStore.config.enhancement.backend === 'openai_compat'}
+          <span class="pill-dot"></span>
+          OpenAI-compat &middot; {configStore.config.enhancement.ollamaUrl}
+        {:else}
+          <span class="pill-dot"></span>
+          Ollama &middot; {configStore.config.enhancement.model || 'No model selected'}
+        {/if}
+      </div>
+
+      <!-- Cloud AI section (Anthropic) -->
+      {#if isCloudBackend()}
+        <div class="backend-section cloud-section">
+          <div class="section-label">
+            <span class="section-icon anthropic-icon">A</span>
+            <span>Anthropic Claude</span>
+          </div>
+
+          <!-- Model selector -->
+          <div class="setting-row card">
+            <div class="setting-info">
+              <span class="setting-label">Model</span>
+            </div>
+            <select
+              class="select-control"
+              value={configStore.config.enhancement.anthropicModel}
+              onchange={handleAnthropicModelChange}
+            >
+              <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (fast)</option>
+              <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (balanced)</option>
+              <option value="claude-opus-4-6">Claude Opus 4.6 (most capable)</option>
+            </select>
+          </div>
+
+          <!-- API Key -->
+          <div class="setting-row card vertical">
+            <div class="setting-info">
+              <span class="setting-label">API Key</span>
+              <span class="setting-description">
+                {#if anthropicKeyDetected}
+                  <span class="key-detected">Detected from environment</span>
+                {:else}
+                  From console.anthropic.com
+                {/if}
+              </span>
+            </div>
+            <div class="key-input-group">
+              <input
+                type={anthropicKeyVisible ? 'text' : 'password'}
+                class="url-input key-input"
+                value={configStore.config.enhancement.anthropicApiKey}
+                placeholder="sk-ant-..."
+                oninput={handleAnthropicKeyChange}
+                onblur={handleAnthropicKeyBlur}
+                autocomplete="off"
+              />
+              <button
+                class="btn-icon toggle-visibility-btn"
+                title={anthropicKeyVisible ? 'Hide key' : 'Show key'}
+                onclick={() => (anthropicKeyVisible = !anthropicKeyVisible)}
+              >
+                {#if anthropicKeyVisible}
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                    <line x1="1" y1="1" x2="23" y2="23"/>
+                  </svg>
+                {:else}
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                {/if}
+              </button>
+            </div>
+          </div>
+
+          <!-- Get API Key button -->
+          {#if !configStore.config.enhancement.anthropicApiKey}
+            <div class="get-key-row">
+              <button class="btn-outline get-key-btn" onclick={openAnthropicConsole}>
+                Get API Key from Anthropic Console &#8599;
+              </button>
+            </div>
+          {/if}
+
+          <!-- Connection status -->
+          <div class="connection-status">
+            {#if isCheckingOllama}
+              <span class="status-checking">Checking...</span>
+            {:else if ollamaAvailable}
+              <span class="status-connected">Connected</span>
+            {:else if configStore.config.enhancement.anthropicApiKey}
+              <span class="status-error">Not connected &mdash; check your API key</span>
+            {:else}
+              <span class="status-warning">Add API key to connect</span>
+            {/if}
+            <button class="test-btn" onclick={checkOllama} disabled={isCheckingOllama}>
+              {isCheckingOllama ? 'Checking...' : 'Test Connection'}
+            </button>
+          </div>
+        </div>
       {/if}
 
-      <div class="setting-row card">
-        <div class="setting-info">
-          <span class="setting-label">Model</span>
-          <span class="setting-description">The Ollama model used for text enhancement</span>
-        </div>
-        <select
-          class="select-control"
-          value={configStore.config.enhancement.model}
-          onchange={handleModelChange}
-          disabled={!ollamaAvailable || isLoadingModels}
-        >
-          {#if isLoadingModels}
-            <option>Loading models...</option>
-          {:else if ollamaModels.length === 0}
-            <option value={configStore.config.enhancement.model}>
-              {configStore.config.enhancement.model} (not available)
-            </option>
-          {:else}
-            {#each ollamaModels as model}
-              <option value={model}>{model}</option>
-            {/each}
-          {/if}
-        </select>
-      </div>
+      <!-- Local AI section (Ollama / OpenAI-compat) -->
+      {#if isLocalBackend()}
+        <div class="backend-section local-section">
+          <div class="setting-row card">
+            <div class="setting-info">
+              <span class="setting-label">Backend</span>
+              <span class="setting-description">Choose the AI server type</span>
+            </div>
+            <select
+              class="select-control"
+              value={configStore.config.enhancement.backend}
+              onchange={handleBackendChange}
+            >
+              <option value="ollama">Ollama</option>
+              <option value="openai_compat">OpenAI Compatible</option>
+            </select>
+          </div>
 
-      {#if !ollamaAvailable}
-        <p class="hint">
-          Connect to Ollama to see available models. You can download models using
-          <code>ollama pull &lt;model&gt;</code> in your terminal.
-        </p>
+          <div class="setting-row card vertical">
+            <div class="setting-info">
+              <span class="setting-label">Server URL</span>
+              <span class="setting-description">
+                {configStore.config.enhancement.backend === 'openai_compat'
+                  ? 'The base URL of your OpenAI-compatible server'
+                  : 'The URL of your local Ollama server'}
+              </span>
+            </div>
+            <div class="url-input-row">
+              <input
+                type="url"
+                class="url-input"
+                value={configStore.config.enhancement.ollamaUrl}
+                oninput={handleUrlChange}
+                onblur={handleUrlBlur}
+                placeholder="http://localhost:11434"
+              />
+              <button class="test-btn" onclick={checkOllama} disabled={isCheckingOllama}>
+                {isCheckingOllama ? 'Testing...' : 'Test Connection'}
+              </button>
+            </div>
+            <div
+              class="connection-inline"
+              class:connected={ollamaAvailable}
+              class:disconnected={!ollamaAvailable && !isCheckingOllama}
+            >
+              {#if isCheckingOllama}
+                <span class="status-indicator checking"></span>
+                <span>Checking connection...</span>
+              {:else if ollamaAvailable}
+                <span class="status-indicator connected"></span>
+                <span>Connected to server</span>
+              {:else}
+                <span class="status-indicator disconnected"></span>
+                <span>Not connected. Make sure your AI server is running.</span>
+              {/if}
+            </div>
+          </div>
+
+          {#if configStore.config.enhancement.backend === 'openai_compat'}
+            <div class="setting-row card vertical">
+              <div class="setting-info">
+                <span class="setting-label">API Key</span>
+                <span class="setting-description">Optional Bearer token for authentication</span>
+              </div>
+              <input
+                type="password"
+                class="url-input"
+                value={configStore.config.enhancement.apiKey}
+                oninput={handleApiKeyChange}
+                onblur={handleApiKeyBlur}
+                placeholder="sk-... (leave empty if not required)"
+                autocomplete="off"
+              />
+            </div>
+          {/if}
+
+          {#if error}
+            <div class="error-message">{error}</div>
+          {/if}
+
+          <div class="setting-row card">
+            <div class="setting-info">
+              <span class="setting-label">Model</span>
+              <span class="setting-description">The model used for text enhancement</span>
+            </div>
+            <select
+              class="select-control"
+              value={configStore.config.enhancement.model}
+              onchange={handleModelChange}
+              disabled={!ollamaAvailable || isLoadingModels}
+            >
+              {#if isLoadingModels}
+                <option>Loading models...</option>
+              {:else if ollamaModels.length === 0}
+                <option value={configStore.config.enhancement.model}>
+                  {configStore.config.enhancement.model} (not available)
+                </option>
+              {:else}
+                {#each ollamaModels as model}
+                  <option value={model}>{model}</option>
+                {/each}
+              {/if}
+            </select>
+          </div>
+
+          {#if !ollamaAvailable}
+            <p class="hint">
+              {#if configStore.config.enhancement.backend === 'ollama'}
+                Connect to Ollama to see available models. You can download models using
+                <code>ollama pull &lt;model&gt;</code> in your terminal.
+              {:else}
+                Connect to your OpenAI-compatible server to see available models.
+              {/if}
+            </p>
+          {/if}
+        </div>
       {/if}
     </div>
 
@@ -472,6 +777,230 @@
     color: var(--color-text-secondary);
     padding: 24px;
     text-align: center;
+  }
+
+  /* ── Backend Toggle ──────────────────────────────────────── */
+  .backend-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 8px 0;
+  }
+
+  .toggle-label-left,
+  .toggle-label-right {
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--color-text-tertiary);
+    transition: color 0.2s;
+    white-space: nowrap;
+  }
+
+  .toggle-label-left.active,
+  .toggle-label-right.active {
+    color: var(--color-text-primary);
+    font-weight: 600;
+  }
+
+  .slide-toggle {
+    position: relative;
+    width: 56px;
+    height: 30px;
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: 15px;
+    cursor: pointer;
+    transition: background 0.25s, border-color 0.25s;
+    flex-shrink: 0;
+    padding: 0;
+  }
+
+  .slide-toggle.cloud-active {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+
+  .slide-thumb {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 22px;
+    height: 22px;
+    background: white;
+    border-radius: 50%;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .slide-toggle.cloud-active .slide-thumb {
+    transform: translateX(26px);
+  }
+
+  .active-backend-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: var(--radius-full);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    align-self: center;
+    margin: 0 auto;
+  }
+
+  .active-backend-pill.cloud {
+    background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-secondary));
+    color: var(--color-accent);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  }
+
+  .active-backend-pill.local {
+    background: var(--color-bg-secondary);
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border-subtle);
+  }
+
+  .pill-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    color: white;
+  }
+
+  .anthropic-icon-sm {
+    background: #cc785c;
+  }
+
+  .pill-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4caf50;
+    flex-shrink: 0;
+  }
+
+  /* Backend section wrapper */
+  .backend-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border-subtle);
+  }
+
+  .section-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  .section-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: white;
+  }
+
+  .anthropic-icon {
+    background: #cc785c;
+  }
+
+  /* API key input group */
+  .key-input-group {
+    display: flex;
+    gap: 4px;
+    flex: 1;
+  }
+
+  .key-input {
+    flex: 1;
+    font-family: monospace;
+    font-size: 12px;
+  }
+
+  .btn-icon {
+    padding: 4px 8px;
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  .toggle-visibility-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-secondary);
+  }
+
+  .toggle-visibility-btn:hover {
+    color: var(--color-text-primary);
+  }
+
+  .key-detected {
+    color: #4caf50;
+    font-size: var(--text-xs);
+  }
+
+  .get-key-row {
+    display: flex;
+  }
+
+  .get-key-btn {
+    font-size: var(--text-xs);
+    padding: 5px 12px;
+  }
+
+  .btn-outline {
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+  }
+
+  .btn-outline:hover {
+    background: var(--color-bg-tertiary);
+  }
+
+  /* Cloud connection status */
+  .connection-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--text-xs);
+  }
+
+  .status-checking {
+    color: var(--color-text-tertiary);
+  }
+  .status-connected {
+    color: #4caf50;
+  }
+  .status-error {
+    color: var(--color-error);
+  }
+  .status-warning {
+    color: var(--color-warning);
   }
 
   /* URL input row */
@@ -720,7 +1249,9 @@
     background: transparent;
     font-size: var(--text-xs);
     cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
+    transition:
+      background var(--transition-fast),
+      color var(--transition-fast);
   }
 
   .edit-btn-small {

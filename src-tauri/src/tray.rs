@@ -400,13 +400,22 @@ fn build_ai_submenu(
         MenuItemBuilder::with_id(menu_ids::AI_ENHANCEMENT_TOGGLE, toggle_label).build(app)?;
 
     // Show configured model (read from config cache)
-    let model_name = config::get_config()
-        .map(|c| c.enhancement.model.clone())
-        .unwrap_or_default();
+    let (model_name, backend_prefix) = config::get_config()
+        .map(|c| {
+            if c.enhancement.backend == "anthropic" {
+                (c.enhancement.anthropic_model.clone(), "Cloud: ")
+            } else if c.enhancement.backend == "openai_compat" {
+                (c.enhancement.model.clone(), "Local (OMLX): ")
+            } else {
+                (c.enhancement.model.clone(), "Local: ")
+            }
+        })
+        .unwrap_or_else(|_| (String::new(), ""));
+
     let model_label = if model_name.is_empty() {
-        "Model: Not Set".to_string()
+        "AI Model: Not Set".to_string()
     } else {
-        format!("Model: {}", model_name)
+        format!("{}{}", backend_prefix, model_name)
     };
     let model_item = MenuItemBuilder::with_id("ai_model_info", &model_label)
         .enabled(false)
