@@ -111,7 +111,9 @@ async function getDefaultConfig(): Promise<PipelineConfig> {
     applyDictionary: true,
     applyFiltering: true,
     enhancementEnabled: config.enhancement.enabled,
-    enhancementModel: config.enhancement.model,
+    enhancementModel: config.enhancement.backend === 'anthropic'
+      ? config.enhancement.anthropicModel
+      : config.enhancement.model,
     enhancementPrompt,
     autoCopy: config.transcription.autoCopy,
     autoPaste: config.transcription.autoPaste && settingsStore.autoPaste,

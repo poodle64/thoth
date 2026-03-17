@@ -146,8 +146,6 @@ pub async fn list_ollama_models() -> Result<Vec<String>, String> {
             "claude-haiku-4-5-20251001".to_string(),
             "claude-sonnet-4-6".to_string(),
             "claude-opus-4-6".to_string(),
-            "claude-3-5-haiku-20241022".to_string(),
-            "claude-3-5-sonnet-20241022".to_string(),
         ]),
     }
 }

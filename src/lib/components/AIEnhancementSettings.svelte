@@ -35,6 +35,9 @@
   let newPromptTemplate = $state('');
   let promptError = $state<string | null>(null);
 
+  // Track last local backend for toggle memory
+  let lastLocalBackend = $state<'ollama' | 'openai_compat'>('ollama');
+
   // Anthropic-specific state
   let anthropicKeyDetected = $state<string | null>(null);
   let anthropicKeyVisible = $state(false);
@@ -178,6 +181,7 @@
         anthropicModel: configStore.config.enhancement.anthropicModel || null,
         anthropicBaseUrl: configStore.config.enhancement.anthropicUrl || null,
       });
+      invoke('refresh_tray_menu').catch(() => {});
     } catch (e) {
       console.error('Failed to set enhancement backend:', e);
     }
@@ -231,6 +235,10 @@
 
   /** Switch to cloud backend */
   async function switchToCloud(): Promise<void> {
+    // Remember what local backend was before switching
+    if (isLocalBackend()) {
+      lastLocalBackend = configStore.config.enhancement.backend as 'ollama' | 'openai_compat';
+    }
     configStore.updateEnhancement('backend', 'anthropic');
     await saveSettings();
     await applyBackend();
@@ -239,10 +247,7 @@
 
   /** Switch to local backend */
   async function switchToLocal(): Promise<void> {
-    const localBackend = configStore.config.enhancement.ollamaUrl.includes('11434')
-      ? 'ollama'
-      : 'openai_compat';
-    configStore.updateEnhancement('backend', localBackend as EnhancementBackend);
+    configStore.updateEnhancement('backend', lastLocalBackend);
     await saveSettings();
     await applyBackend();
     await checkOllama();
@@ -355,6 +360,10 @@
 
   onMount(async () => {
     await configStore.load();
+    // Remember the last local backend
+    if (isLocalBackend()) {
+      lastLocalBackend = configStore.config.enhancement.backend as 'ollama' | 'openai_compat';
+    }
     await loadPrompts();
     await checkOllama();
     await detectAnthropicKey();
@@ -387,26 +396,37 @@
     <div class="setting-group">
       <h3>AI Source</h3>
 
-      <!-- Cloud vs Local tabs -->
-      <div class="source-tabs">
+      <!-- Cloud / Local slider toggle -->
+      <div class="backend-toggle-row">
+        <span class="toggle-label-left" class:active={isLocalBackend()}>
+          &#128187; Local AI
+        </span>
         <button
-          class="source-tab"
-          class:active={isCloudBackend()}
-          onclick={switchToCloud}
+          class="slide-toggle"
+          class:cloud-active={isCloudBackend()}
+          onclick={isCloudBackend() ? switchToLocal : switchToCloud}
+          title={isCloudBackend() ? 'Switch to Local AI' : 'Switch to Cloud AI'}
+          aria-label={isCloudBackend() ? 'Currently: Cloud AI. Click to switch to Local' : 'Currently: Local AI. Click to switch to Cloud'}
         >
-          <span class="tab-icon">&#9729;</span>
-          Cloud AI
-          {#if isCloudBackend()}<span class="tab-active-dot"></span>{/if}
+          <span class="slide-thumb"></span>
         </button>
-        <button
-          class="source-tab"
-          class:active={isLocalBackend()}
-          onclick={switchToLocal}
-        >
-          <span class="tab-icon">&#128187;</span>
-          Local AI
-          {#if isLocalBackend()}<span class="tab-active-dot"></span>{/if}
-        </button>
+        <span class="toggle-label-right" class:active={isCloudBackend()}>
+          &#9729; Cloud AI
+        </span>
+      </div>
+
+      <!-- Active backend indicator pill -->
+      <div class="active-backend-pill" class:cloud={isCloudBackend()} class:local={isLocalBackend()}>
+        {#if isCloudBackend()}
+          <span class="pill-icon anthropic-icon-sm">A</span>
+          Anthropic &middot; {configStore.config.enhancement.anthropicModel.replace('claude-', 'Claude ').replace('-20251001','').replace('-20241022','')}
+        {:else if configStore.config.enhancement.backend === 'openai_compat'}
+          <span class="pill-dot"></span>
+          OpenAI-compat &middot; {configStore.config.enhancement.ollamaUrl}
+        {:else}
+          <span class="pill-dot"></span>
+          Ollama &middot; {configStore.config.enhancement.model || 'No model selected'}
+        {/if}
       </div>
 
       <!-- Cloud AI section (Anthropic) -->
@@ -427,11 +447,9 @@
               value={configStore.config.enhancement.anthropicModel}
               onchange={handleAnthropicModelChange}
             >
-              <option value="claude-haiku-4-5-20251001">Claude Haiku (fast, cheap)</option>
-              <option value="claude-3-5-haiku-20241022">Claude Haiku 3.5</option>
-              <option value="claude-sonnet-4-6">Claude Sonnet (balanced)</option>
-              <option value="claude-3-5-sonnet-20241022">Claude Sonnet 3.5</option>
-              <option value="claude-opus-4-6">Claude Opus (most capable)</option>
+              <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (fast)</option>
+              <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (balanced)</option>
+              <option value="claude-opus-4-6">Claude Opus 4.6 (most capable)</option>
             </select>
           </div>
 
@@ -458,11 +476,22 @@
                 autocomplete="off"
               />
               <button
-                class="btn-icon"
+                class="btn-icon toggle-visibility-btn"
                 title={anthropicKeyVisible ? 'Hide key' : 'Show key'}
                 onclick={() => (anthropicKeyVisible = !anthropicKeyVisible)}
               >
-                {anthropicKeyVisible ? '&#128584;' : '&#128065;'}
+                {#if anthropicKeyVisible}
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                    <line x1="1" y1="1" x2="23" y2="23"/>
+                  </svg>
+                {:else}
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                {/if}
               </button>
             </div>
           </div>
@@ -750,50 +779,110 @@
     text-align: center;
   }
 
-  /* Source tabs (Cloud / Local) */
-  .source-tabs {
-    display: flex;
-    gap: 4px;
-    padding: 4px;
-    background: var(--color-bg-secondary);
-    border-radius: var(--radius-lg);
-    margin-bottom: 4px;
-  }
-
-  .source-tab {
-    flex: 1;
+  /* ── Backend Toggle ──────────────────────────────────────── */
+  .backend-toggle-row {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    padding: 8px 12px;
-    border-radius: var(--radius-md);
+    gap: 14px;
+    padding: 8px 0;
+  }
+
+  .toggle-label-left,
+  .toggle-label-right {
     font-size: var(--text-sm);
     font-weight: 500;
-    color: var(--color-text-secondary);
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    transition: all 0.15s;
-    position: relative;
+    color: var(--color-text-tertiary);
+    transition: color 0.2s;
+    white-space: nowrap;
   }
 
-  .source-tab:hover {
+  .toggle-label-left.active,
+  .toggle-label-right.active {
     color: var(--color-text-primary);
+    font-weight: 600;
+  }
+
+  .slide-toggle {
+    position: relative;
+    width: 56px;
+    height: 30px;
     background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: 15px;
+    cursor: pointer;
+    transition: background 0.25s, border-color 0.25s;
+    flex-shrink: 0;
+    padding: 0;
   }
 
-  .source-tab.active {
-    background: var(--color-bg-primary);
-    color: var(--color-accent);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-  }
-
-  .tab-active-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
+  .slide-toggle.cloud-active {
     background: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+
+  .slide-thumb {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 22px;
+    height: 22px;
+    background: white;
+    border-radius: 50%;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .slide-toggle.cloud-active .slide-thumb {
+    transform: translateX(26px);
+  }
+
+  .active-backend-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: var(--radius-full);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    align-self: center;
+    margin: 0 auto;
+  }
+
+  .active-backend-pill.cloud {
+    background: color-mix(in srgb, var(--color-accent) 12%, var(--color-bg-secondary));
+    color: var(--color-accent);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  }
+
+  .active-backend-pill.local {
+    background: var(--color-bg-secondary);
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border-subtle);
+  }
+
+  .pill-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    color: white;
+  }
+
+  .anthropic-icon-sm {
+    background: #cc785c;
+  }
+
+  .pill-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4caf50;
+    flex-shrink: 0;
   }
 
   /* Backend section wrapper */
@@ -853,6 +942,17 @@
     cursor: pointer;
     font-size: 14px;
     line-height: 1;
+  }
+
+  .toggle-visibility-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-secondary);
+  }
+
+  .toggle-visibility-btn:hover {
+    color: var(--color-text-primary);
   }
 
   .key-detected {
