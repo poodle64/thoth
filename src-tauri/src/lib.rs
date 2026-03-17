@@ -211,6 +211,13 @@ pub fn run() {
 
             // Load config and register shortcuts
             if let Ok(cfg) = config::get_config() {
+                // Configure enhancement backend from saved config
+                enhancement::configure_backend(
+                    &cfg.enhancement.backend,
+                    &cfg.enhancement.ollama_url,
+                    cfg.enhancement.api_key.as_deref(),
+                );
+
                 // Register shortcuts from config
                 let app_handle = app.handle().clone();
                 register_shortcuts_from_config(&app_handle, &cfg);
@@ -373,6 +380,7 @@ pub fn run() {
             enhancement::check_ollama_available,
             enhancement::list_ollama_models,
             enhancement::enhance_text,
+            enhancement::set_enhancement_backend,
             enhancement::context::get_clipboard_context,
             enhancement::context::build_enhancement_context,
             // Prompt Templates

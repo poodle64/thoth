@@ -8,7 +8,7 @@
 
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
-  import { configStore } from '../stores/config.svelte';
+  import { configStore, type EnhancementBackend } from '../stores/config.svelte';
   import { toastStore } from '../stores/toast.svelte';
 
   /** Prompt template matching Rust PromptTemplate struct */
@@ -120,10 +120,46 @@
     configStore.updateEnhancement('ollamaUrl', input.value);
   }
 
-  /** Handle Ollama URL blur (save and re-check) */
+  /** Handle URL blur (save, update backend, and re-check) */
   async function handleUrlBlur(): Promise<void> {
     await saveSettings();
+    await applyBackend();
     await checkOllama();
+  }
+
+  /** Handle backend selection change */
+  async function handleBackendChange(event: Event): Promise<void> {
+    const select = event.target as HTMLSelectElement;
+    configStore.updateEnhancement('backend', select.value as EnhancementBackend);
+    await saveSettings();
+    await applyBackend();
+    await checkOllama();
+  }
+
+  /** Handle API key change */
+  function handleApiKeyChange(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    configStore.updateEnhancement('apiKey', input.value);
+  }
+
+  /** Handle API key blur (save and re-check) */
+  async function handleApiKeyBlur(): Promise<void> {
+    await saveSettings();
+    await applyBackend();
+    await checkOllama();
+  }
+
+  /** Notify the backend of the current enhancement backend config */
+  async function applyBackend(): Promise<void> {
+    try {
+      await invoke('set_enhancement_backend', {
+        backend: configStore.config.enhancement.backend,
+        baseUrl: configStore.config.enhancement.ollamaUrl,
+        apiKey: configStore.config.enhancement.apiKey || null,
+      });
+    } catch (e) {
+      console.error('Failed to set enhancement backend:', e);
+    }
   }
 
   /** Start creating a new custom prompt */
@@ -247,7 +283,7 @@
         <div class="setting-info">
           <span class="setting-label">Enable AI enhancement</span>
           <span class="setting-description">
-            Use Ollama to enhance transcriptions with grammar correction, formatting, and more
+            Use a local AI server to enhance transcriptions with grammar correction, formatting, and more
           </span>
         </div>
         <label class="toggle-switch">
@@ -262,12 +298,31 @@
     </div>
 
     <div class="setting-group">
-      <h3>Ollama Connection</h3>
+      <h3>Server Connection</h3>
+
+      <div class="setting-row card">
+        <div class="setting-info">
+          <span class="setting-label">Backend</span>
+          <span class="setting-description">Choose the AI server type</span>
+        </div>
+        <select
+          class="select-control"
+          value={configStore.config.enhancement.backend}
+          onchange={handleBackendChange}
+        >
+          <option value="ollama">Ollama</option>
+          <option value="openai_compat">OpenAI Compatible</option>
+        </select>
+      </div>
 
       <div class="setting-row card vertical">
         <div class="setting-info">
           <span class="setting-label">Server URL</span>
-          <span class="setting-description">The URL of your local Ollama server</span>
+          <span class="setting-description">
+            {configStore.config.enhancement.backend === 'openai_compat'
+              ? 'The base URL of your OpenAI-compatible server'
+              : 'The URL of your local Ollama server'}
+          </span>
         </div>
         <div class="url-input-row">
           <input
@@ -292,13 +347,31 @@
             <span>Checking connection...</span>
           {:else if ollamaAvailable}
             <span class="status-indicator connected"></span>
-            <span>Connected to Ollama</span>
+            <span>Connected to server</span>
           {:else}
             <span class="status-indicator disconnected"></span>
-            <span>Not connected. Make sure Ollama is running.</span>
+            <span>Not connected. Make sure your AI server is running.</span>
           {/if}
         </div>
       </div>
+
+      {#if configStore.config.enhancement.backend === 'openai_compat'}
+        <div class="setting-row card vertical">
+          <div class="setting-info">
+            <span class="setting-label">API Key</span>
+            <span class="setting-description">Optional Bearer token for authentication</span>
+          </div>
+          <input
+            type="password"
+            class="url-input"
+            value={configStore.config.enhancement.apiKey}
+            oninput={handleApiKeyChange}
+            onblur={handleApiKeyBlur}
+            placeholder="sk-... (leave empty if not required)"
+            autocomplete="off"
+          />
+        </div>
+      {/if}
 
       {#if error}
         <div class="error-message">{error}</div>
@@ -307,7 +380,7 @@
       <div class="setting-row card">
         <div class="setting-info">
           <span class="setting-label">Model</span>
-          <span class="setting-description">The Ollama model used for text enhancement</span>
+          <span class="setting-description">The model used for text enhancement</span>
         </div>
         <select
           class="select-control"
@@ -331,8 +404,12 @@
 
       {#if !ollamaAvailable}
         <p class="hint">
-          Connect to Ollama to see available models. You can download models using
-          <code>ollama pull &lt;model&gt;</code> in your terminal.
+          {#if configStore.config.enhancement.backend === 'ollama'}
+            Connect to Ollama to see available models. You can download models using
+            <code>ollama pull &lt;model&gt;</code> in your terminal.
+          {:else}
+            Connect to your OpenAI-compatible server to see available models.
+          {/if}
         </p>
       {/if}
     </div>

@@ -44,16 +44,23 @@ export interface ShortcutConfig {
   recordingMode: RecordingMode;
 }
 
+/** AI enhancement backend type */
+export type EnhancementBackend = 'ollama' | 'openai_compat';
+
 /** AI enhancement configuration */
 export interface EnhancementConfig {
   /** Whether AI enhancement is enabled */
   enabled: boolean;
-  /** Ollama model to use for enhancement */
+  /** Model to use for enhancement */
   model: string;
   /** Selected prompt template ID */
   promptId: string;
-  /** Ollama server URL */
+  /** Server URL (used for both Ollama and OpenAI-compatible backends) */
   ollamaUrl: string;
+  /** Backend type: "ollama" or "openai_compat" */
+  backend: EnhancementBackend;
+  /** Optional API key for OpenAI-compatible backends */
+  apiKey: string;
 }
 
 /** Recording indicator visual style */
@@ -140,6 +147,8 @@ interface ConfigRaw {
     model: string;
     prompt_id: string;
     ollama_url: string;
+    backend: EnhancementBackend;
+    api_key: string | null;
   };
   general: {
     launch_at_login: boolean;
@@ -183,6 +192,8 @@ function parseConfig(raw: ConfigRaw): Config {
       model: raw.enhancement.model,
       promptId: raw.enhancement.prompt_id,
       ollamaUrl: raw.enhancement.ollama_url,
+      backend: raw.enhancement.backend ?? 'ollama',
+      apiKey: raw.enhancement.api_key ?? '',
     },
     general: {
       launchAtLogin: raw.general.launch_at_login,
@@ -227,6 +238,8 @@ function serialiseConfig(config: Config): ConfigRaw {
       model: config.enhancement.model,
       prompt_id: config.enhancement.promptId,
       ollama_url: config.enhancement.ollamaUrl,
+      backend: config.enhancement.backend,
+      api_key: config.enhancement.apiKey || null,
     },
     general: {
       launch_at_login: config.general.launchAtLogin,
@@ -271,6 +284,8 @@ function getDefaultConfig(): Config {
       model: 'llama3.2',
       promptId: 'fix-grammar',
       ollamaUrl: 'http://localhost:11434',
+      backend: 'ollama',
+      apiKey: '',
     },
     general: {
       launchAtLogin: false,
