@@ -530,7 +530,7 @@
             <div class="section-header">
               <h2 class="section-title">AI Enhancement</h2>
               <p class="section-description">
-                Configure AI-powered text enhancement using Ollama for grammar correction,
+                Configure AI-powered text enhancement using local or cloud AI for grammar correction,
                 formatting, and more.
               </p>
             </div>
