@@ -47,6 +47,16 @@ pub struct AnthropicClient {
 
 impl AnthropicClient {
     pub fn new(api_key: String, model: String, base_url: Option<String>) -> Self {
+        let resolved_url = base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string());
+
+        // Warn if sending API key over non-HTTPS — potential credential exposure
+        if !resolved_url.starts_with("https://") && !resolved_url.starts_with("http://localhost") {
+            tracing::warn!(
+                "Anthropic: base_url is not HTTPS ({}). API key may be transmitted in plaintext.",
+                resolved_url
+            );
+        }
+
         let timeout = Duration::from_secs(DEFAULT_TIMEOUT_SECS);
         let client = reqwest::Client::builder()
             .timeout(timeout)
@@ -54,7 +64,7 @@ impl AnthropicClient {
             .expect("Failed to create HTTP client");
         Self {
             api_key,
-            base_url: base_url.unwrap_or_else(|| "https://api.anthropic.com".to_string()),
+            base_url: resolved_url,
             model,
             client,
         }

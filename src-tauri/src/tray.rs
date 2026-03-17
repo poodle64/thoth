@@ -410,7 +410,7 @@ fn build_ai_submenu(
                 (c.enhancement.model.clone(), "Local: ")
             }
         })
-        .unwrap_or_else(|| (String::new(), ""));
+        .unwrap_or_else(|_| (String::new(), ""));
 
     let model_label = if model_name.is_empty() {
         "AI Model: Not Set".to_string()

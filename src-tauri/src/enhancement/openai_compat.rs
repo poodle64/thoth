@@ -99,7 +99,16 @@ impl OpenAiCompatClient {
     }
 
     /// Create a new client with a custom timeout.
+    ///
+    /// Only `http://` and `https://` URLs are accepted. Other schemes are
+    /// rejected to prevent SSRF-style misuse (OWASP M4).
     pub fn with_timeout(base_url: &str, api_key: Option<String>, timeout_secs: u64) -> Self {
+        let url = base_url.trim_end_matches('/');
+        // Validate URL scheme — reject anything that isn't http(s)
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            tracing::warn!("OpenAI-compat: rejected non-HTTP URL scheme: {}", url);
+        }
+
         let timeout = Duration::from_secs(timeout_secs);
         let client = reqwest::Client::builder()
             .timeout(timeout)
@@ -107,7 +116,7 @@ impl OpenAiCompatClient {
             .expect("Failed to create HTTP client");
 
         Self {
-            base_url: base_url.trim_end_matches('/').to_string(),
+            base_url: url.to_string(),
             api_key,
             client,
             timeout,

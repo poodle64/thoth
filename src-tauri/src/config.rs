@@ -345,7 +345,14 @@ fn save_to_disk(config: &Config) -> Result<(), String> {
     let contents = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialise config: {}", e))?;
 
-    fs::write(&path, contents).map_err(|e| format!("Failed to write config file: {}", e))?;
+    fs::write(&path, &contents).map_err(|e| format!("Failed to write config file: {}", e))?;
+
+    // Restrict permissions to owner-only (0600) — config may contain API keys
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
 
     tracing::info!(
         "Config saved to disk: device_id={:?}, toggle_recording_alt={:?}",
