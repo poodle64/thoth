@@ -45,7 +45,7 @@ export interface ShortcutConfig {
 }
 
 /** AI enhancement backend type */
-export type EnhancementBackend = 'ollama' | 'openai_compat';
+export type EnhancementBackend = 'ollama' | 'openai_compat' | 'anthropic';
 
 /** AI enhancement configuration */
 export interface EnhancementConfig {
@@ -57,10 +57,16 @@ export interface EnhancementConfig {
   promptId: string;
   /** Server URL (used for both Ollama and OpenAI-compatible backends) */
   ollamaUrl: string;
-  /** Backend type: "ollama" or "openai_compat" */
+  /** Backend type: "ollama" | "openai_compat" | "anthropic" */
   backend: EnhancementBackend;
   /** Optional API key for OpenAI-compatible backends */
   apiKey: string;
+  /** Anthropic API key (persists independently) */
+  anthropicApiKey: string;
+  /** Anthropic model */
+  anthropicModel: string;
+  /** Anthropic API base URL */
+  anthropicUrl: string;
 }
 
 /** Recording indicator visual style */
@@ -149,6 +155,9 @@ interface ConfigRaw {
     ollama_url: string;
     backend: EnhancementBackend;
     api_key: string | null;
+    anthropic_api_key: string | null;
+    anthropic_model: string;
+    anthropic_url: string;
   };
   general: {
     launch_at_login: boolean;
@@ -194,6 +203,9 @@ function parseConfig(raw: ConfigRaw): Config {
       ollamaUrl: raw.enhancement.ollama_url,
       backend: raw.enhancement.backend ?? 'ollama',
       apiKey: raw.enhancement.api_key ?? '',
+      anthropicApiKey: raw.enhancement.anthropic_api_key ?? '',
+      anthropicModel: raw.enhancement.anthropic_model ?? 'claude-haiku-4-5-20251001',
+      anthropicUrl: raw.enhancement.anthropic_url ?? 'https://api.anthropic.com',
     },
     general: {
       launchAtLogin: raw.general.launch_at_login,
@@ -240,6 +252,9 @@ function serialiseConfig(config: Config): ConfigRaw {
       ollama_url: config.enhancement.ollamaUrl,
       backend: config.enhancement.backend,
       api_key: config.enhancement.apiKey || null,
+      anthropic_api_key: config.enhancement.anthropicApiKey || null,
+      anthropic_model: config.enhancement.anthropicModel,
+      anthropic_url: config.enhancement.anthropicUrl,
     },
     general: {
       launch_at_login: config.general.launchAtLogin,
@@ -286,6 +301,9 @@ function getDefaultConfig(): Config {
       ollamaUrl: 'http://localhost:11434',
       backend: 'ollama',
       apiKey: '',
+      anthropicApiKey: '',
+      anthropicModel: 'claude-haiku-4-5-20251001',
+      anthropicUrl: 'https://api.anthropic.com',
     },
     general: {
       launchAtLogin: false,

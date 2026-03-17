@@ -212,10 +212,17 @@ pub fn run() {
             // Load config and register shortcuts
             if let Ok(cfg) = config::get_config() {
                 // Configure enhancement backend from saved config
+                let effective_key = if cfg.enhancement.backend == "anthropic" {
+                    cfg.enhancement.anthropic_api_key.as_deref()
+                } else {
+                    cfg.enhancement.api_key.as_deref()
+                };
                 enhancement::configure_backend(
                     &cfg.enhancement.backend,
                     &cfg.enhancement.ollama_url,
-                    cfg.enhancement.api_key.as_deref(),
+                    effective_key,
+                    Some(cfg.enhancement.anthropic_model.as_str()),
+                    Some(cfg.enhancement.anthropic_url.as_str()),
                 );
 
                 // Register shortcuts from config
@@ -381,6 +388,8 @@ pub fn run() {
             enhancement::list_ollama_models,
             enhancement::enhance_text,
             enhancement::set_enhancement_backend,
+            enhancement::anthropic::detect_anthropic_api_key,
+            enhancement::anthropic::open_anthropic_console,
             enhancement::context::get_clipboard_context,
             enhancement::context::build_enhancement_context,
             // Prompt Templates

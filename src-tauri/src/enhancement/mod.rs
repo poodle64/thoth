@@ -4,11 +4,13 @@
 //! OpenAI-compatible server, with context capture support for clipboard and
 //! selected text.
 
+pub mod anthropic;
 pub mod context;
 pub mod ollama;
 pub mod openai_compat;
 pub mod prompts;
 
+pub use anthropic::AnthropicClient;
 pub use context::{
     build_context, build_enhancement_context, get_clipboard_context, ContextCapture,
 };
@@ -27,12 +29,14 @@ use std::sync::OnceLock;
 pub enum BackendType {
     Ollama,
     OpenAiCompat,
+    Anthropic,
 }
 
 impl BackendType {
     pub fn from_str(s: &str) -> Self {
         match s {
             "openai_compat" => BackendType::OpenAiCompat,
+            "anthropic" => BackendType::Anthropic,
             _ => BackendType::Ollama,
         }
     }
@@ -44,6 +48,7 @@ struct EnhancementBackend {
     backend_type: BackendType,
     ollama: OllamaClient,
     openai_compat: Option<OpenAiCompatClient>,
+    anthropic: Option<AnthropicClient>,
 }
 
 impl Default for EnhancementBackend {
@@ -52,6 +57,7 @@ impl Default for EnhancementBackend {
             backend_type: BackendType::Ollama,
             ollama: OllamaClient::new(),
             openai_compat: None,
+            anthropic: None,
         }
     }
 }
@@ -64,7 +70,13 @@ fn get_backend() -> &'static Mutex<EnhancementBackend> {
 }
 
 /// Configure the enhancement backend. Called when config is applied.
-pub fn configure_backend(backend: &str, base_url: &str, api_key: Option<&str>) {
+pub fn configure_backend(
+    backend: &str,
+    base_url: &str,
+    api_key: Option<&str>,
+    anthropic_model: Option<&str>,
+    anthropic_base_url: Option<&str>,
+) {
     let backend_type = BackendType::from_str(backend);
     let mut state = get_backend().lock();
 
@@ -80,6 +92,17 @@ pub fn configure_backend(backend: &str, base_url: &str, api_key: Option<&str>) {
                 api_key.map(|k| k.to_string()),
             ));
         }
+        BackendType::Anthropic => {
+            if let Some(key) = api_key.filter(|k| !k.is_empty()) {
+                state.anthropic = Some(AnthropicClient::new(
+                    key.to_string(),
+                    anthropic_model
+                        .unwrap_or("claude-haiku-4-5-20251001")
+                        .to_string(),
+                    anthropic_base_url.map(|u| u.to_string()),
+                ));
+            }
+        }
     }
 
     tracing::info!("Enhancement backend configured: {:?}", backend_type);
@@ -92,6 +115,10 @@ pub async fn check_ollama_available() -> bool {
     match state.backend_type {
         BackendType::Ollama => state.ollama.is_available().await,
         BackendType::OpenAiCompat => match &state.openai_compat {
+            Some(client) => client.is_available().await,
+            None => false,
+        },
+        BackendType::Anthropic => match &state.anthropic {
             Some(client) => client.is_available().await,
             None => false,
         },
@@ -115,6 +142,13 @@ pub async fn list_ollama_models() -> Result<Vec<String>, String> {
             }),
             None => Err("OpenAI-compatible backend not configured".to_string()),
         },
+        BackendType::Anthropic => Ok(vec![
+            "claude-haiku-4-5-20251001".to_string(),
+            "claude-sonnet-4-6".to_string(),
+            "claude-opus-4-6".to_string(),
+            "claude-3-5-haiku-20241022".to_string(),
+            "claude-3-5-sonnet-20241022".to_string(),
+        ]),
     }
 }
 
@@ -157,6 +191,20 @@ pub async fn enhance_text(text: String, model: String, prompt: String) -> Result
                 })?,
             None => return Err("OpenAI-compatible backend not configured".to_string()),
         },
+        BackendType::Anthropic => match &state.anthropic {
+            Some(client) => client
+                .enhance_text(&text, &prompt)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Anthropic enhancement failed: {}", e);
+                    format!("Enhancement failed: {}", e)
+                })?,
+            None => {
+                return Err(
+                    "Anthropic backend not configured. Please add your API key.".to_string(),
+                )
+            }
+        },
     };
 
     tracing::info!(
@@ -174,8 +222,22 @@ pub fn set_enhancement_backend(
     backend: String,
     base_url: String,
     api_key: Option<String>,
+    anthropic_api_key: Option<String>,
+    anthropic_model: Option<String>,
+    anthropic_base_url: Option<String>,
 ) -> Result<(), String> {
-    configure_backend(&backend, &base_url, api_key.as_deref());
+    let effective_key = if backend == "anthropic" {
+        anthropic_api_key.as_deref()
+    } else {
+        api_key.as_deref()
+    };
+    configure_backend(
+        &backend,
+        &base_url,
+        effective_key,
+        anthropic_model.as_deref(),
+        anthropic_base_url.as_deref(),
+    );
     Ok(())
 }
 
@@ -190,6 +252,10 @@ mod tests {
             BackendType::from_str("openai_compat"),
             BackendType::OpenAiCompat
         );
+        assert_eq!(
+            BackendType::from_str("anthropic"),
+            BackendType::Anthropic
+        );
         assert_eq!(BackendType::from_str("unknown"), BackendType::Ollama);
     }
 
@@ -198,5 +264,6 @@ mod tests {
         let backend = EnhancementBackend::default();
         assert_eq!(backend.backend_type, BackendType::Ollama);
         assert!(backend.openai_compat.is_none());
+        assert!(backend.anthropic.is_none());
     }
 }

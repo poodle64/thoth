@@ -137,6 +137,14 @@ impl Default for ShortcutConfig {
     }
 }
 
+fn default_anthropic_model() -> String {
+    "claude-haiku-4-5-20251001".to_string()
+}
+
+fn default_anthropic_url() -> String {
+    "https://api.anthropic.com".to_string()
+}
+
 /// AI enhancement configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -149,10 +157,19 @@ pub struct EnhancementConfig {
     pub prompt_id: String,
     /// Server URL (used for both Ollama and OpenAI-compatible backends)
     pub ollama_url: String,
-    /// Backend type: "ollama" or "openai_compat"
+    /// Backend type: "ollama" | "openai_compat" | "anthropic"
     pub backend: String,
     /// Optional API key for OpenAI-compatible backends
     pub api_key: Option<String>,
+    /// Anthropic API key (persists independently)
+    #[serde(default)]
+    pub anthropic_api_key: Option<String>,
+    /// Anthropic model (e.g. "claude-haiku-4-5-20251001")
+    #[serde(default = "default_anthropic_model")]
+    pub anthropic_model: String,
+    /// Anthropic API base URL
+    #[serde(default = "default_anthropic_url")]
+    pub anthropic_url: String,
 }
 
 impl Default for EnhancementConfig {
@@ -164,6 +181,9 @@ impl Default for EnhancementConfig {
             ollama_url: "http://localhost:11434".to_string(),
             backend: "ollama".to_string(),
             api_key: None,
+            anthropic_api_key: None,
+            anthropic_model: default_anthropic_model(),
+            anthropic_url: default_anthropic_url(),
         }
     }
 }
@@ -750,6 +770,9 @@ mod tests {
                 ollama_url: "http://custom:8080".to_string(),
                 backend: "openai_compat".to_string(),
                 api_key: Some("sk-test".to_string()),
+                anthropic_api_key: None,
+                anthropic_model: default_anthropic_model(),
+                anthropic_url: default_anthropic_url(),
             },
             general: GeneralConfig {
                 launch_at_login: true,
@@ -840,6 +863,9 @@ mod tests {
             ollama_url: "http://192.168.1.100:11434".to_string(),
             backend: "ollama".to_string(),
             api_key: None,
+            anthropic_api_key: None,
+            anthropic_model: default_anthropic_model(),
+            anthropic_url: default_anthropic_url(),
         };
 
         assert!(enhancement.enabled);

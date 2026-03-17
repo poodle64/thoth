@@ -2,8 +2,9 @@
   /**
    * AI Enhancement Settings component
    *
-   * Provides UI for configuring AI enhancement including Ollama connection,
-   * model selection, and prompt template management.
+   * Provides UI for configuring AI enhancement including Cloud AI (Anthropic)
+   * and Local AI (Ollama / OpenAI-compatible) backends, model selection,
+   * and prompt template management.
    */
 
   import { invoke } from '@tauri-apps/api/core';
@@ -34,6 +35,23 @@
   let newPromptTemplate = $state('');
   let promptError = $state<string | null>(null);
 
+  // Anthropic-specific state
+  let anthropicKeyDetected = $state<string | null>(null);
+  let anthropicKeyVisible = $state(false);
+
+  /** Check if the current backend is cloud-based */
+  function isCloudBackend(): boolean {
+    return configStore.config.enhancement.backend === 'anthropic';
+  }
+
+  /** Check if the current backend is local */
+  function isLocalBackend(): boolean {
+    return (
+      configStore.config.enhancement.backend === 'ollama' ||
+      configStore.config.enhancement.backend === 'openai_compat'
+    );
+  }
+
   /** Check if Ollama server is available */
   async function checkOllama(): Promise<void> {
     isCheckingOllama = true;
@@ -45,7 +63,7 @@
         await loadModels();
       }
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to check Ollama connection';
+      error = e instanceof Error ? e.message : 'Failed to check connection';
       ollamaAvailable = false;
     } finally {
       isCheckingOllama = false;
@@ -59,7 +77,7 @@
     try {
       ollamaModels = await invoke<string[]>('list_ollama_models');
     } catch (e) {
-      console.error('Failed to load Ollama models:', e);
+      console.error('Failed to load models:', e);
       ollamaModels = [];
     } finally {
       isLoadingModels = false;
@@ -156,10 +174,78 @@
         backend: configStore.config.enhancement.backend,
         baseUrl: configStore.config.enhancement.ollamaUrl,
         apiKey: configStore.config.enhancement.apiKey || null,
+        anthropicApiKey: configStore.config.enhancement.anthropicApiKey || null,
+        anthropicModel: configStore.config.enhancement.anthropicModel || null,
+        anthropicBaseUrl: configStore.config.enhancement.anthropicUrl || null,
       });
     } catch (e) {
       console.error('Failed to set enhancement backend:', e);
     }
+  }
+
+  /** Detect Anthropic API key from environment */
+  async function detectAnthropicKey(): Promise<void> {
+    try {
+      const key = await invoke<string | null>('detect_anthropic_api_key');
+      if (key) {
+        anthropicKeyDetected = key;
+        if (!configStore.config.enhancement.anthropicApiKey) {
+          configStore.updateEnhancement('anthropicApiKey', key);
+          await saveSettings();
+        }
+      }
+    } catch (e) {
+      console.error('Failed to detect Anthropic key:', e);
+    }
+  }
+
+  /** Open Anthropic console in browser */
+  async function openAnthropicConsole(): Promise<void> {
+    await invoke('open_anthropic_console');
+  }
+
+  /** Handle Anthropic API key change */
+  function handleAnthropicKeyChange(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    configStore.updateEnhancement('anthropicApiKey', input.value);
+  }
+
+  /** Handle Anthropic API key blur */
+  async function handleAnthropicKeyBlur(): Promise<void> {
+    await saveSettings();
+    if (configStore.config.enhancement.backend === 'anthropic') {
+      await applyBackend();
+      await checkOllama();
+    }
+  }
+
+  /** Handle Anthropic model change */
+  async function handleAnthropicModelChange(event: Event): Promise<void> {
+    const select = event.target as HTMLSelectElement;
+    configStore.updateEnhancement('anthropicModel', select.value);
+    await saveSettings();
+    if (configStore.config.enhancement.backend === 'anthropic') {
+      await applyBackend();
+    }
+  }
+
+  /** Switch to cloud backend */
+  async function switchToCloud(): Promise<void> {
+    configStore.updateEnhancement('backend', 'anthropic');
+    await saveSettings();
+    await applyBackend();
+    await checkOllama();
+  }
+
+  /** Switch to local backend */
+  async function switchToLocal(): Promise<void> {
+    const localBackend = configStore.config.enhancement.ollamaUrl.includes('11434')
+      ? 'ollama'
+      : 'openai_compat';
+    configStore.updateEnhancement('backend', localBackend as EnhancementBackend);
+    await saveSettings();
+    await applyBackend();
+    await checkOllama();
   }
 
   /** Start creating a new custom prompt */
@@ -271,6 +357,7 @@
     await configStore.load();
     await loadPrompts();
     await checkOllama();
+    await detectAnthropicKey();
   });
 </script>
 
@@ -283,7 +370,7 @@
         <div class="setting-info">
           <span class="setting-label">Enable AI enhancement</span>
           <span class="setting-description">
-            Use a local AI server to enhance transcriptions with grammar correction, formatting, and more
+            Use AI to enhance transcriptions with grammar correction, formatting, and more
           </span>
         </div>
         <label class="toggle-switch">
@@ -298,119 +385,231 @@
     </div>
 
     <div class="setting-group">
-      <h3>Server Connection</h3>
+      <h3>AI Source</h3>
 
-      <div class="setting-row card">
-        <div class="setting-info">
-          <span class="setting-label">Backend</span>
-          <span class="setting-description">Choose the AI server type</span>
-        </div>
-        <select
-          class="select-control"
-          value={configStore.config.enhancement.backend}
-          onchange={handleBackendChange}
+      <!-- Cloud vs Local tabs -->
+      <div class="source-tabs">
+        <button
+          class="source-tab"
+          class:active={isCloudBackend()}
+          onclick={switchToCloud}
         >
-          <option value="ollama">Ollama</option>
-          <option value="openai_compat">OpenAI Compatible</option>
-        </select>
+          <span class="tab-icon">&#9729;</span>
+          Cloud AI
+          {#if isCloudBackend()}<span class="tab-active-dot"></span>{/if}
+        </button>
+        <button
+          class="source-tab"
+          class:active={isLocalBackend()}
+          onclick={switchToLocal}
+        >
+          <span class="tab-icon">&#128187;</span>
+          Local AI
+          {#if isLocalBackend()}<span class="tab-active-dot"></span>{/if}
+        </button>
       </div>
 
-      <div class="setting-row card vertical">
-        <div class="setting-info">
-          <span class="setting-label">Server URL</span>
-          <span class="setting-description">
-            {configStore.config.enhancement.backend === 'openai_compat'
-              ? 'The base URL of your OpenAI-compatible server'
-              : 'The URL of your local Ollama server'}
-          </span>
-        </div>
-        <div class="url-input-row">
-          <input
-            type="url"
-            class="url-input"
-            value={configStore.config.enhancement.ollamaUrl}
-            oninput={handleUrlChange}
-            onblur={handleUrlBlur}
-            placeholder="http://localhost:11434"
-          />
-          <button class="test-btn" onclick={checkOllama} disabled={isCheckingOllama}>
-            {isCheckingOllama ? 'Testing...' : 'Test Connection'}
-          </button>
-        </div>
-        <div
-          class="connection-inline"
-          class:connected={ollamaAvailable}
-          class:disconnected={!ollamaAvailable && !isCheckingOllama}
-        >
-          {#if isCheckingOllama}
-            <span class="status-indicator checking"></span>
-            <span>Checking connection...</span>
-          {:else if ollamaAvailable}
-            <span class="status-indicator connected"></span>
-            <span>Connected to server</span>
-          {:else}
-            <span class="status-indicator disconnected"></span>
-            <span>Not connected. Make sure your AI server is running.</span>
-          {/if}
-        </div>
-      </div>
-
-      {#if configStore.config.enhancement.backend === 'openai_compat'}
-        <div class="setting-row card vertical">
-          <div class="setting-info">
-            <span class="setting-label">API Key</span>
-            <span class="setting-description">Optional Bearer token for authentication</span>
+      <!-- Cloud AI section (Anthropic) -->
+      {#if isCloudBackend()}
+        <div class="backend-section cloud-section">
+          <div class="section-label">
+            <span class="section-icon anthropic-icon">A</span>
+            <span>Anthropic Claude</span>
           </div>
-          <input
-            type="password"
-            class="url-input"
-            value={configStore.config.enhancement.apiKey}
-            oninput={handleApiKeyChange}
-            onblur={handleApiKeyBlur}
-            placeholder="sk-... (leave empty if not required)"
-            autocomplete="off"
-          />
+
+          <!-- Model selector -->
+          <div class="setting-row card">
+            <div class="setting-info">
+              <span class="setting-label">Model</span>
+            </div>
+            <select
+              class="select-control"
+              value={configStore.config.enhancement.anthropicModel}
+              onchange={handleAnthropicModelChange}
+            >
+              <option value="claude-haiku-4-5-20251001">Claude Haiku (fast, cheap)</option>
+              <option value="claude-3-5-haiku-20241022">Claude Haiku 3.5</option>
+              <option value="claude-sonnet-4-6">Claude Sonnet (balanced)</option>
+              <option value="claude-3-5-sonnet-20241022">Claude Sonnet 3.5</option>
+              <option value="claude-opus-4-6">Claude Opus (most capable)</option>
+            </select>
+          </div>
+
+          <!-- API Key -->
+          <div class="setting-row card vertical">
+            <div class="setting-info">
+              <span class="setting-label">API Key</span>
+              <span class="setting-description">
+                {#if anthropicKeyDetected}
+                  <span class="key-detected">Detected from environment</span>
+                {:else}
+                  From console.anthropic.com
+                {/if}
+              </span>
+            </div>
+            <div class="key-input-group">
+              <input
+                type={anthropicKeyVisible ? 'text' : 'password'}
+                class="url-input key-input"
+                value={configStore.config.enhancement.anthropicApiKey}
+                placeholder="sk-ant-..."
+                oninput={handleAnthropicKeyChange}
+                onblur={handleAnthropicKeyBlur}
+                autocomplete="off"
+              />
+              <button
+                class="btn-icon"
+                title={anthropicKeyVisible ? 'Hide key' : 'Show key'}
+                onclick={() => (anthropicKeyVisible = !anthropicKeyVisible)}
+              >
+                {anthropicKeyVisible ? '&#128584;' : '&#128065;'}
+              </button>
+            </div>
+          </div>
+
+          <!-- Get API Key button -->
+          {#if !configStore.config.enhancement.anthropicApiKey}
+            <div class="get-key-row">
+              <button class="btn-outline get-key-btn" onclick={openAnthropicConsole}>
+                Get API Key from Anthropic Console &#8599;
+              </button>
+            </div>
+          {/if}
+
+          <!-- Connection status -->
+          <div class="connection-status">
+            {#if isCheckingOllama}
+              <span class="status-checking">Checking...</span>
+            {:else if ollamaAvailable}
+              <span class="status-connected">Connected</span>
+            {:else if configStore.config.enhancement.anthropicApiKey}
+              <span class="status-error">Not connected &mdash; check your API key</span>
+            {:else}
+              <span class="status-warning">Add API key to connect</span>
+            {/if}
+            <button class="test-btn" onclick={checkOllama} disabled={isCheckingOllama}>
+              {isCheckingOllama ? 'Checking...' : 'Test Connection'}
+            </button>
+          </div>
         </div>
       {/if}
 
-      {#if error}
-        <div class="error-message">{error}</div>
-      {/if}
+      <!-- Local AI section (Ollama / OpenAI-compat) -->
+      {#if isLocalBackend()}
+        <div class="backend-section local-section">
+          <div class="setting-row card">
+            <div class="setting-info">
+              <span class="setting-label">Backend</span>
+              <span class="setting-description">Choose the AI server type</span>
+            </div>
+            <select
+              class="select-control"
+              value={configStore.config.enhancement.backend}
+              onchange={handleBackendChange}
+            >
+              <option value="ollama">Ollama</option>
+              <option value="openai_compat">OpenAI Compatible</option>
+            </select>
+          </div>
 
-      <div class="setting-row card">
-        <div class="setting-info">
-          <span class="setting-label">Model</span>
-          <span class="setting-description">The model used for text enhancement</span>
+          <div class="setting-row card vertical">
+            <div class="setting-info">
+              <span class="setting-label">Server URL</span>
+              <span class="setting-description">
+                {configStore.config.enhancement.backend === 'openai_compat'
+                  ? 'The base URL of your OpenAI-compatible server'
+                  : 'The URL of your local Ollama server'}
+              </span>
+            </div>
+            <div class="url-input-row">
+              <input
+                type="url"
+                class="url-input"
+                value={configStore.config.enhancement.ollamaUrl}
+                oninput={handleUrlChange}
+                onblur={handleUrlBlur}
+                placeholder="http://localhost:11434"
+              />
+              <button class="test-btn" onclick={checkOllama} disabled={isCheckingOllama}>
+                {isCheckingOllama ? 'Testing...' : 'Test Connection'}
+              </button>
+            </div>
+            <div
+              class="connection-inline"
+              class:connected={ollamaAvailable}
+              class:disconnected={!ollamaAvailable && !isCheckingOllama}
+            >
+              {#if isCheckingOllama}
+                <span class="status-indicator checking"></span>
+                <span>Checking connection...</span>
+              {:else if ollamaAvailable}
+                <span class="status-indicator connected"></span>
+                <span>Connected to server</span>
+              {:else}
+                <span class="status-indicator disconnected"></span>
+                <span>Not connected. Make sure your AI server is running.</span>
+              {/if}
+            </div>
+          </div>
+
+          {#if configStore.config.enhancement.backend === 'openai_compat'}
+            <div class="setting-row card vertical">
+              <div class="setting-info">
+                <span class="setting-label">API Key</span>
+                <span class="setting-description">Optional Bearer token for authentication</span>
+              </div>
+              <input
+                type="password"
+                class="url-input"
+                value={configStore.config.enhancement.apiKey}
+                oninput={handleApiKeyChange}
+                onblur={handleApiKeyBlur}
+                placeholder="sk-... (leave empty if not required)"
+                autocomplete="off"
+              />
+            </div>
+          {/if}
+
+          {#if error}
+            <div class="error-message">{error}</div>
+          {/if}
+
+          <div class="setting-row card">
+            <div class="setting-info">
+              <span class="setting-label">Model</span>
+              <span class="setting-description">The model used for text enhancement</span>
+            </div>
+            <select
+              class="select-control"
+              value={configStore.config.enhancement.model}
+              onchange={handleModelChange}
+              disabled={!ollamaAvailable || isLoadingModels}
+            >
+              {#if isLoadingModels}
+                <option>Loading models...</option>
+              {:else if ollamaModels.length === 0}
+                <option value={configStore.config.enhancement.model}>
+                  {configStore.config.enhancement.model} (not available)
+                </option>
+              {:else}
+                {#each ollamaModels as model}
+                  <option value={model}>{model}</option>
+                {/each}
+              {/if}
+            </select>
+          </div>
+
+          {#if !ollamaAvailable}
+            <p class="hint">
+              {#if configStore.config.enhancement.backend === 'ollama'}
+                Connect to Ollama to see available models. You can download models using
+                <code>ollama pull &lt;model&gt;</code> in your terminal.
+              {:else}
+                Connect to your OpenAI-compatible server to see available models.
+              {/if}
+            </p>
+          {/if}
         </div>
-        <select
-          class="select-control"
-          value={configStore.config.enhancement.model}
-          onchange={handleModelChange}
-          disabled={!ollamaAvailable || isLoadingModels}
-        >
-          {#if isLoadingModels}
-            <option>Loading models...</option>
-          {:else if ollamaModels.length === 0}
-            <option value={configStore.config.enhancement.model}>
-              {configStore.config.enhancement.model} (not available)
-            </option>
-          {:else}
-            {#each ollamaModels as model}
-              <option value={model}>{model}</option>
-            {/each}
-          {/if}
-        </select>
-      </div>
-
-      {#if !ollamaAvailable}
-        <p class="hint">
-          {#if configStore.config.enhancement.backend === 'ollama'}
-            Connect to Ollama to see available models. You can download models using
-            <code>ollama pull &lt;model&gt;</code> in your terminal.
-          {:else}
-            Connect to your OpenAI-compatible server to see available models.
-          {/if}
-        </p>
       {/if}
     </div>
 
@@ -549,6 +748,159 @@
     color: var(--color-text-secondary);
     padding: 24px;
     text-align: center;
+  }
+
+  /* Source tabs (Cloud / Local) */
+  .source-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-lg);
+    margin-bottom: 4px;
+  }
+
+  .source-tab {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+  }
+
+  .source-tab:hover {
+    color: var(--color-text-primary);
+    background: var(--color-bg-tertiary);
+  }
+
+  .source-tab.active {
+    background: var(--color-bg-primary);
+    color: var(--color-accent);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  }
+
+  .tab-active-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-accent);
+  }
+
+  /* Backend section wrapper */
+  .backend-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border-subtle);
+  }
+
+  .section-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  .section-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: white;
+  }
+
+  .anthropic-icon {
+    background: #cc785c;
+  }
+
+  /* API key input group */
+  .key-input-group {
+    display: flex;
+    gap: 4px;
+    flex: 1;
+  }
+
+  .key-input {
+    flex: 1;
+    font-family: monospace;
+    font-size: 12px;
+  }
+
+  .btn-icon {
+    padding: 4px 8px;
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  .key-detected {
+    color: #4caf50;
+    font-size: var(--text-xs);
+  }
+
+  .get-key-row {
+    display: flex;
+  }
+
+  .get-key-btn {
+    font-size: var(--text-xs);
+    padding: 5px 12px;
+  }
+
+  .btn-outline {
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+  }
+
+  .btn-outline:hover {
+    background: var(--color-bg-tertiary);
+  }
+
+  /* Cloud connection status */
+  .connection-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--text-xs);
+  }
+
+  .status-checking {
+    color: var(--color-text-tertiary);
+  }
+  .status-connected {
+    color: #4caf50;
+  }
+  .status-error {
+    color: var(--color-error);
+  }
+  .status-warning {
+    color: var(--color-warning);
   }
 
   /* URL input row */
@@ -797,7 +1149,9 @@
     background: transparent;
     font-size: var(--text-xs);
     cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
+    transition:
+      background var(--transition-fast),
+      color var(--transition-fast);
   }
 
   .edit-btn-small {
