@@ -73,6 +73,17 @@ jobs:
           choco install llvm -y
           echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
 
+      - name: Patch version for Windows (MSI requires each component <= 255)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          # Strip century: 2026.2.11 -> 26.2.11
+          VERSION=$(grep '^version' src-tauri/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          WIN_VERSION=$(echo "$VERSION" | sed 's/^20//')
+          echo "Patching version $VERSION -> $WIN_VERSION for Windows"
+          sed -i "s/version = \"$VERSION\"/version = \"$WIN_VERSION\"/" src-tauri/Cargo.toml
+          sed -i "s/\"version\": \"$VERSION\"/\"version\": \"$WIN_VERSION\"/" package.json
+
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
@@ -89,7 +100,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           CFLAGS: ${{ matrix.platform == 'macos-15' && '-march=armv8-a' || '' }}
           CXXFLAGS: ${{ matrix.platform == 'macos-15' && '-march=armv8-a' || '' }}
-          LIBCLANG_PATH: ${{ matrix.platform == 'windows-latest' && 'C:\Program Files\LLVM\bin' || '' }}
+
           RUSTFLAGS: ${{ matrix.rustflags }}
         with:
           tagName: v__VERSION__
