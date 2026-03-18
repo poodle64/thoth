@@ -111,6 +111,15 @@
         "priority": "optional",
         "desktopTemplate": "linux/thoth.desktop"
       }
+    },
+    "windows": {
+      "nsis": {
+        "displayVersion": "2026.2.11"
+      },
+      "wix": {
+        "version": "26.2.11"
+      },
+      "version": "26.2.11.0"
     }
   }
 }
