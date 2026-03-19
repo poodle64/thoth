@@ -16,8 +16,11 @@ jobs:
         include:
           # macOS ARM64 (all backends: Whisper Metal + Parakeet + FluidAudio Neural Engine)
           # macos-15 required for Swift 6.0+ (FluidAudio dependency)
+          # DMG bundling skipped in CI (requires create-dmg + Apple signing cert).
+          # The .app.tar.gz updater artifact is built via --bundles app,updater.
+          # DMG is produced locally via scripts/release.sh for distribution.
           - platform: macos-15
-            args: '--target aarch64-apple-darwin'
+            args: '--target aarch64-apple-darwin --bundles app,updater'
             rustflags: ''
           # Linux x86_64 (Whisper only; Parakeet excluded — upstream sherpa-onnx
           # Linux static archive lacks .a libs; FluidAudio is macOS-only)
