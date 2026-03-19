@@ -1,0 +1,36 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly on Monday at 06:00 UTC
+    - cron: '0 6 * * 1'
+
+jobs:
+  cargo-audit:
+    name: Cargo Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      - name: Run cargo audit
+        working-directory: src-tauri
+        run: cargo audit
+
+  npm-audit:
+    name: npm Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      # Thoth is a Tauri desktop app — SSR is not used.
+      # Known low/moderate SVelte/SvelteKit SSR-only advisories (GHSA-pxg6-pf52-xh8x etc.)
+      # cannot be exploited at runtime. Fail only on critical severity.
+      - run: npm audit --audit-level=critical

@@ -37,28 +37,15 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: lts/*
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
+          node-version: '22'
+          cache: 'npm'
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Add macOS ARM64 target
+        if: matrix.platform == 'macos-15'
+        run: rustup target add aarch64-apple-darwin
 
       - name: Install system dependencies (Linux)
         if: matrix.platform == 'ubuntu-22.04'
@@ -72,7 +59,7 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Install frontend dependencies
-        run: pnpm install
+        run: npm ci
 
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
@@ -90,3 +77,13 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      # Attach the permission-reset helper to every release
+      - name: Upload fix-permissions.sh
+        if: matrix.platform == 'macos-15'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          VERSION=$(grep '^version' src-tauri/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          gh release upload "v${VERSION}" scripts/fix-permissions.sh --clobber
