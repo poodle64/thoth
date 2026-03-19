@@ -150,6 +150,9 @@
       case 'copy_last_transcription':
         configStore.updateShortcuts('copyLast', accelerator);
         break;
+      case 'add_to_dictionary':
+        configStore.updateShortcuts('addToDictionary', accelerator);
+        break;
     }
   }
 
@@ -165,6 +168,7 @@
           toggle_recording: configStore.shortcuts.toggleRecording,
           toggle_recording_alt: configStore.shortcuts.toggleRecordingAlt,
           copy_last: configStore.shortcuts.copyLast,
+          add_to_dictionary: configStore.shortcuts.addToDictionary,
           recording_mode: configStore.shortcuts.recordingMode,
         },
       });

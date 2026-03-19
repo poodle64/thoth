@@ -122,6 +122,9 @@ pub struct ShortcutConfig {
     pub toggle_recording_alt: Option<String>,
     /// Copy last transcription shortcut
     pub copy_last: Option<String>,
+    /// Quick-add selected text to dictionary shortcut
+    #[serde(default)]
+    pub add_to_dictionary: Option<String>,
     /// Recording mode: toggle or push-to-talk
     pub recording_mode: RecordingMode,
 }
@@ -132,6 +135,7 @@ impl Default for ShortcutConfig {
             toggle_recording: "F13".to_string(),
             toggle_recording_alt: Some("ShiftRight".to_string()),
             copy_last: Some("F14".to_string()),
+            add_to_dictionary: None,
             recording_mode: RecordingMode::default(),
         }
     }
