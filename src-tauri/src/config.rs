@@ -200,6 +200,9 @@ pub struct GeneralConfig {
     pub show_recording_indicator: bool,
     /// Visual style for the recording indicator
     pub indicator_style: IndicatorStyle,
+    /// Override the update check endpoint (None = use built-in default)
+    #[serde(default)]
+    pub update_endpoint_override: Option<String>,
 }
 
 impl Default for GeneralConfig {
@@ -211,6 +214,7 @@ impl Default for GeneralConfig {
             check_for_updates: true,
             show_recording_indicator: true,
             indicator_style: IndicatorStyle::default(),
+            update_endpoint_override: None,
         }
     }
 }
@@ -752,6 +756,7 @@ mod tests {
                 check_for_updates: true,
                 show_recording_indicator: true,
                 indicator_style: IndicatorStyle::CursorDot,
+                update_endpoint_override: None,
             },
             recorder: RecorderConfig {
                 position: RecorderPosition::Centre,

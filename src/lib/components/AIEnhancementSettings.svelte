@@ -199,7 +199,8 @@
   }
 
   /** Delete a custom prompt */
-  async function deletePrompt(promptId: string): Promise<void> {
+  async function deletePrompt(promptId: string, promptName: string): Promise<void> {
+    if (!confirm(`Delete prompt "${promptName}"?`)) return;
     try {
       await invoke('delete_custom_prompt_cmd', { promptId: promptId });
       await loadPrompts();
@@ -210,10 +211,12 @@
         await saveSettings();
       }
 
+      toastStore.success(`Deleted "${promptName}"`);
       // Rebuild tray so the prompt submenu stays in sync
       invoke('refresh_tray_menu').catch(() => {});
     } catch (e) {
       console.error('Failed to delete prompt:', e);
+      toastStore.error(`Delete failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -439,7 +442,7 @@
                 </button>
                 <button
                   class="delete-btn-small"
-                  onclick={() => deletePrompt(prompt.id)}
+                  onclick={() => deletePrompt(prompt.id, prompt.name)}
                   title="Delete prompt"
                 >
                   Delete

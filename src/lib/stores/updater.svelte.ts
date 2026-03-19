@@ -47,9 +47,10 @@ const updaterState = $state<UpdaterState>({
 });
 
 /**
- * Check for available updates
+ * Check for available updates.
+ * @param endpointOverride Optional URL to use instead of the built-in endpoint.
  */
-export async function checkForUpdate(): Promise<void> {
+export async function checkForUpdate(endpointOverride?: string | null): Promise<void> {
   // Reset state
   updaterState.state = 'checking';
   updaterState.error = null;
@@ -58,7 +59,7 @@ export async function checkForUpdate(): Promise<void> {
   updaterState.releaseNotes = null;
 
   try {
-    const update = await check();
+    const update = await check(endpointOverride ? { headers: {}, url: endpointOverride } : undefined);
 
     if (update) {
       // Update available

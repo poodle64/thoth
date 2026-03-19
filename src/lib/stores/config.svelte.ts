@@ -75,6 +75,8 @@ export interface GeneralConfig {
   showRecordingIndicator: boolean;
   /** Visual style for the recording indicator */
   indicatorStyle: IndicatorStyle;
+  /** Override the update check endpoint URL (null = use built-in default) */
+  updateEndpointOverride: string | null;
 }
 
 /** Recorder window position options */
@@ -151,6 +153,7 @@ interface ConfigRaw {
     check_for_updates: boolean;
     show_recording_indicator: boolean;
     indicator_style: IndicatorStyle;
+    update_endpoint_override: string | null;
   };
   recorder: {
     position: RecorderPosition;
@@ -195,6 +198,7 @@ function parseConfig(raw: ConfigRaw): Config {
       checkForUpdates: raw.general.check_for_updates,
       showRecordingIndicator: raw.general.show_recording_indicator,
       indicatorStyle: raw.general.indicator_style,
+      updateEndpointOverride: raw.general.update_endpoint_override ?? null,
     },
     recorder: {
       position: raw.recorder.position,
@@ -240,6 +244,7 @@ function serialiseConfig(config: Config): ConfigRaw {
       check_for_updates: config.general.checkForUpdates,
       show_recording_indicator: config.general.showRecordingIndicator,
       indicator_style: config.general.indicatorStyle,
+      update_endpoint_override: config.general.updateEndpointOverride,
     },
     recorder: {
       position: config.recorder.position,
@@ -285,6 +290,7 @@ function getDefaultConfig(): Config {
       checkForUpdates: true,
       showRecordingIndicator: true,
       indicatorStyle: 'cursor-dot',
+      updateEndpointOverride: null,
     },
     recorder: {
       position: 'top-right',
