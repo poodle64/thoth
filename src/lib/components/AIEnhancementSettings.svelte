@@ -205,7 +205,7 @@
       await loadPrompts();
 
       // If the deleted prompt was selected, reset to default
-      if (configStore.enhancement.promptId === promptId) {
+      if (configStore.config.enhancement.promptId === promptId) {
         configStore.updateEnhancement('promptId', 'fix-grammar');
         await saveSettings();
       }
@@ -219,7 +219,7 @@
 
   /** Get the currently selected prompt */
   function getSelectedPrompt(): PromptTemplate | undefined {
-    return prompts.find((p) => p.id === configStore.enhancement.promptId);
+    return prompts.find((p) => p.id === configStore.config.enhancement.promptId);
   }
 
   /** Open the prompt writing guide window */
