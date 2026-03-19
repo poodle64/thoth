@@ -13,6 +13,7 @@
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { onMount, onDestroy } from 'svelte';
   import Settings from './lib/windows/Settings.svelte';
+  import DictionaryAddModal from './lib/components/DictionaryAddModal.svelte';
   import { configStore } from './lib/stores/config.svelte';
   import { pipelineStore } from './lib/stores/pipeline.svelte';
   import { settingsStore } from './lib/stores/settings.svelte';
@@ -26,9 +27,14 @@
     : () => {};
 
   let indicatorLogUnlisten: UnlistenFn | null = null;
+  let dictAddUnlisten: UnlistenFn | null = null;
 
   let isInitialising = $state(true);
   let initError = $state<string | null>(null);
+
+  // Dictionary quick-add modal state
+  let dictModalOpen = $state(false);
+  let dictModalWord = $state('');
 
   async function initialise() {
     try {
@@ -105,14 +111,19 @@
       debug(event.payload.message);
     });
 
+    // Listen for dictionary quick-add events (from shortcut handler in pipeline store)
+    dictAddUnlisten = await listen<{ word: string }>('show-dictionary-add', (event) => {
+      dictModalWord = event.payload.word ?? '';
+      dictModalOpen = true;
+    });
+
     initialise();
   });
 
   onDestroy(() => {
     pipelineStore.cleanup();
-    if (indicatorLogUnlisten) {
-      indicatorLogUnlisten();
-    }
+    if (indicatorLogUnlisten) indicatorLogUnlisten();
+    if (dictAddUnlisten) dictAddUnlisten();
   });
 </script>
 
@@ -129,6 +140,12 @@
 {:else}
   <Settings />
 {/if}
+
+<DictionaryAddModal
+  open={dictModalOpen}
+  word={dictModalWord}
+  onclose={() => (dictModalOpen = false)}
+/>
 
 <style>
   .loading-container {

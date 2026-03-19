@@ -361,56 +361,17 @@ function createPipelineStore() {
    */
   async function handleQuickAddToDictionary(): Promise<void> {
     try {
-      // Get clipboard text — user should have the word copied/selected
       const { readText } = await import('@tauri-apps/plugin-clipboard-manager');
+
+      // Read clipboard — user should have the word copied
       const clipText = (await readText()) ?? '';
       const fromWord = clipText.trim();
 
-      if (!fromWord) {
-        // Fallback: prompt for the word if clipboard is empty
-        const word = window.prompt('Word or phrase to add to dictionary:');
-        if (!word?.trim()) return;
-        await quickAddEntry(word.trim());
-        return;
-      }
-
-      await quickAddEntry(fromWord);
+      // Emit to the main window — it will show an inline modal with a text input
+      // (window.prompt is disabled in WKWebView; plugin-dialog has no text input type)
+      emit('show-dictionary-add', { word: fromWord }).catch(() => {});
     } catch (e) {
       console.error('[Pipeline] Quick-add to dictionary failed:', e);
-    }
-  }
-
-  async function quickAddEntry(fromWord: string): Promise<void> {
-    // Show replacement prompt
-    const replacement = window.prompt(
-      `Add to dictionary\n\nReplace: "${fromWord}"\nWith:`,
-      fromWord
-    );
-
-    if (replacement === null) return; // cancelled
-    if (replacement.trim() === fromWord) {
-      // No change — ask again or abort
-      const confirmed = window.confirm(
-        `"${fromWord}" → "${replacement.trim()}" — replacement is the same as the original. Add anyway?`
-      );
-      if (!confirmed) return;
-    }
-
-    try {
-      await invoke('add_dictionary_entry', {
-        entry: {
-          from: fromWord,
-          to: replacement.trim(),
-          caseSensitive: false,
-        },
-      });
-      // Notify the UI to refresh dictionary if it's open
-      emit('dictionary-updated', { from: fromWord, to: replacement.trim() }).catch(() => {});
-      // Brief visual confirmation via a native notification isn't available,
-      // so we emit an event the main window can pick up
-      emit('toast', { kind: 'success', message: `Added "${fromWord}" → "${replacement.trim()}" to dictionary` }).catch(() => {});
-    } catch (e) {
-      window.alert(`Failed to add entry: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
