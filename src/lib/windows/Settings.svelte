@@ -106,6 +106,17 @@
   }
 
   async function handleShortcutChange(shortcut: ShortcutInfo, newAccelerator: string) {
+    // Guard: check if this key is already assigned to a different shortcut.
+    // Assigning the same key to two shortcuts breaks both — the OS only allows
+    // one registration per accelerator.
+    const conflict = findShortcutConflict(shortcut.id, newAccelerator);
+    if (conflict) {
+      alert(
+        `"${newAccelerator}" is already used by "${conflict}". Please choose a different key.`
+      );
+      return;
+    }
+
     // Update in-memory config, then save directly via set_shortcut_config
     // which bypasses the preservation logic in set_config. This ensures
     // the shortcut value is saved even when it matches the default.
@@ -118,6 +129,26 @@
     // onchange fires before stopCapture/exit_capture_mode, so we defer
     // the reload to run after the full async chain finishes.
     setTimeout(() => shortcutsStore.loadRegistered(), 100);
+  }
+
+  /**
+   * Check if a given accelerator is already used by another shortcut.
+   * Returns the description of the conflicting shortcut, or null if free.
+   */
+  function findShortcutConflict(currentId: string, accelerator: string): string | null {
+    const shortcuts = configStore.shortcuts;
+    const map: { id: string; label: string; value: string | null }[] = [
+      { id: 'toggle_recording',     label: 'Toggle Recording',             value: shortcuts.toggleRecording },
+      { id: 'toggle_recording_alt', label: 'Toggle Recording (Alt)',       value: shortcuts.toggleRecordingAlt },
+      { id: 'copy_last',            label: 'Copy Last Transcription',      value: shortcuts.copyLast },
+      { id: 'add_to_dictionary',    label: 'Quick-Add to Dictionary',      value: shortcuts.addToDictionary },
+    ];
+    for (const s of map) {
+      if (s.id !== currentId && s.value && s.value === accelerator) {
+        return s.label;
+      }
+    }
+    return null;
   }
 
   async function handleShortcutClear(shortcut: ShortcutInfo) {

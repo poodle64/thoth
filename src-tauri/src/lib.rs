@@ -117,6 +117,26 @@ fn register_shortcuts_from_config(app: &tauri::AppHandle, cfg: &config::Config) 
     .filter(|(_, accel, _)| !accel.is_empty())
     .collect();
 
+    // Deduplicate: if two shortcuts share the same accelerator, only the first wins.
+    // Without this, the second registration attempt fails and can corrupt the first
+    // registration, leaving all shortcuts broken.
+    let mut seen_accels: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let shortcuts: Vec<(&str, &str, &str)> = shortcuts
+        .into_iter()
+        .filter(|(id, accel, _)| {
+            if seen_accels.contains(*accel) {
+                tracing::warn!(
+                    "Skipping duplicate shortcut '{}' for '{}' — accelerator already registered by another shortcut",
+                    id, accel
+                );
+                false
+            } else {
+                seen_accels.insert(accel.to_string());
+                true
+            }
+        })
+        .collect();
+
     for (id, accelerator, description) in shortcuts {
         match register_single_shortcut(app, id, accelerator, description) {
             Ok(()) => tracing::info!("Registered {} shortcut: {}", id, accelerator),
