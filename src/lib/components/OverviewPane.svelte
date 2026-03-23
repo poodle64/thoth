@@ -67,6 +67,8 @@
 
 	const updaterState = getUpdaterState();
 	let currentVersion = $state('');
+	let showUpdateEndpointEditor = $state(false);
+	let updateEndpointDraft = $state('');
 
   /** Average recording duration */
   let avgRecordingDuration = $derived(
@@ -724,14 +726,46 @@
               Check Now
             {/if}
           </span>
-          <button
-            class="btn-small"
-            onclick={() => checkForUpdate()}
-            disabled={updaterState.state === 'checking'}
-          >
-            {updaterState.state === 'checking' ? 'Checking...' : 'Check for Updates'}
-          </button>
+          <div class="update-btn-group">
+            <button
+              class="btn-small"
+              onclick={() => checkForUpdate(configStore.general.updateEndpointOverride)}
+              disabled={updaterState.state === 'checking'}
+            >
+              {updaterState.state === 'checking' ? 'Checking...' : 'Check for Updates'}
+            </button>
+            <button
+              class="btn-small btn-icon"
+              title="Configure update source"
+              onclick={() => {
+                updateEndpointDraft = configStore.general.updateEndpointOverride ?? '';
+                showUpdateEndpointEditor = !showUpdateEndpointEditor;
+              }}
+            >⋯</button>
+          </div>
         </div>
+        {#if showUpdateEndpointEditor}
+          <div class="update-endpoint-editor">
+            <div class="endpoint-editor-label">Update source URL <span class="endpoint-hint">(leave blank to use default)</span></div>
+            <div class="endpoint-input-row">
+              <input
+                type="url"
+                class="endpoint-input"
+                placeholder="https://github.com/sk8ersquare/thoth/releases/latest/download/latest.json"
+                bind:value={updateEndpointDraft}
+              />
+              <button class="btn-small" onclick={async () => {
+                configStore.general.updateEndpointOverride = updateEndpointDraft.trim() || null;
+                await configStore.save();
+                showUpdateEndpointEditor = false;
+              }}>Save</button>
+              <button class="btn-small" onclick={() => showUpdateEndpointEditor = false}>Cancel</button>
+            </div>
+            <div class="endpoint-current">
+              Currently checking: <code>{configStore.general.updateEndpointOverride ?? 'https://github.com/poodle64/thoth/releases/latest/download/latest.json (default)'}</code>
+            </div>
+          </div>
+        {/if}
       </div>
     </div>
   </section>
@@ -1378,6 +1412,69 @@
     color: var(--color-warning);
     text-transform: uppercase;
     letter-spacing: 0.3px;
+  }
+
+  .update-btn-group {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+
+  .btn-icon {
+    padding: 4px 8px;
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  .update-endpoint-editor {
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .endpoint-editor-label {
+    font-size: var(--text-xs);
+    color: var(--color-text-primary);
+    font-weight: 500;
+  }
+
+  .endpoint-hint {
+    font-weight: 400;
+    color: var(--color-text-secondary);
+    margin-left: 4px;
+  }
+
+  .endpoint-input-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .endpoint-input {
+    flex: 1;
+    padding: 5px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-secondary);
+    color: var(--color-text-primary);
+    font-size: var(--text-xs);
+    font-family: var(--font-mono);
+  }
+
+  .endpoint-current {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+
+  .endpoint-current code {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    word-break: break-all;
   }
 
   .btn-setup.warning,

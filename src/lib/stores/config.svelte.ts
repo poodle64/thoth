@@ -40,6 +40,8 @@ export interface ShortcutConfig {
   toggleRecordingAlt: string | null;
   /** Copy last transcription shortcut */
   copyLast: string | null;
+  /** Quick-add selected text to dictionary shortcut */
+  addToDictionary: string | null;
   /** Recording mode: toggle or push-to-talk */
   recordingMode: RecordingMode;
 }
@@ -73,6 +75,8 @@ export interface GeneralConfig {
   showRecordingIndicator: boolean;
   /** Visual style for the recording indicator */
   indicatorStyle: IndicatorStyle;
+  /** Override the update check endpoint URL (null = use built-in default) */
+  updateEndpointOverride: string | null;
 }
 
 /** Recorder window position options */
@@ -133,6 +137,7 @@ interface ConfigRaw {
     toggle_recording: string;
     toggle_recording_alt: string | null;
     copy_last: string | null;
+    add_to_dictionary: string | null;
     recording_mode: RecordingMode;
   };
   enhancement: {
@@ -148,6 +153,7 @@ interface ConfigRaw {
     check_for_updates: boolean;
     show_recording_indicator: boolean;
     indicator_style: IndicatorStyle;
+    update_endpoint_override: string | null;
   };
   recorder: {
     position: RecorderPosition;
@@ -176,6 +182,7 @@ function parseConfig(raw: ConfigRaw): Config {
       toggleRecording: raw.shortcuts.toggle_recording,
       toggleRecordingAlt: raw.shortcuts.toggle_recording_alt,
       copyLast: raw.shortcuts.copy_last,
+      addToDictionary: raw.shortcuts.add_to_dictionary ?? null,
       recordingMode: raw.shortcuts.recording_mode,
     },
     enhancement: {
@@ -191,6 +198,7 @@ function parseConfig(raw: ConfigRaw): Config {
       checkForUpdates: raw.general.check_for_updates,
       showRecordingIndicator: raw.general.show_recording_indicator,
       indicatorStyle: raw.general.indicator_style,
+      updateEndpointOverride: raw.general.update_endpoint_override ?? null,
     },
     recorder: {
       position: raw.recorder.position,
@@ -220,6 +228,7 @@ function serialiseConfig(config: Config): ConfigRaw {
       toggle_recording: config.shortcuts.toggleRecording,
       toggle_recording_alt: config.shortcuts.toggleRecordingAlt,
       copy_last: config.shortcuts.copyLast,
+      add_to_dictionary: config.shortcuts.addToDictionary,
       recording_mode: config.shortcuts.recordingMode,
     },
     enhancement: {
@@ -235,6 +244,7 @@ function serialiseConfig(config: Config): ConfigRaw {
       check_for_updates: config.general.checkForUpdates,
       show_recording_indicator: config.general.showRecordingIndicator,
       indicator_style: config.general.indicatorStyle,
+      update_endpoint_override: config.general.updateEndpointOverride,
     },
     recorder: {
       position: config.recorder.position,
@@ -264,6 +274,7 @@ function getDefaultConfig(): Config {
       toggleRecording: 'F13',
       toggleRecordingAlt: 'CommandOrControl+Shift+Space',
       copyLast: 'F14',
+      addToDictionary: null,
       recordingMode: 'toggle',
     },
     enhancement: {
@@ -279,6 +290,7 @@ function getDefaultConfig(): Config {
       checkForUpdates: true,
       showRecordingIndicator: true,
       indicatorStyle: 'cursor-dot',
+      updateEndpointOverride: null,
     },
     recorder: {
       position: 'top-right',

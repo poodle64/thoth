@@ -239,10 +239,49 @@ pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Resu
     // Spawn emitter thread to send levels to the recording-indicator window
     let emit_stop_flag = stop_flag.clone();
     let emit_handle = std::thread::spawn(move || {
+        // Track silence for no-input warning
+        // After NO_INPUT_GRACE_SECS seconds with RMS below threshold, emit warning
+        const NO_INPUT_GRACE_SECS: f64 = 3.0;
+        const NO_INPUT_RMS_THRESHOLD: f32 = 0.001; // effectively silence
+        let mut silence_since: Option<std::time::Instant> = None;
+        let mut no_input_warning_sent = false;
+        let start_time = std::time::Instant::now();
+
         while !emit_stop_flag.load(Ordering::Relaxed) {
             while let Ok(samples) = rx.try_recv() {
                 let mut meter = meter.lock();
                 let level = meter.process(&samples);
+
+                // Track silence window for no-input detection
+                // Only start counting after grace period from recording start
+                let elapsed_secs = start_time.elapsed().as_secs_f64();
+                if elapsed_secs >= NO_INPUT_GRACE_SECS {
+                    if level.rms < NO_INPUT_RMS_THRESHOLD {
+                        let now = std::time::Instant::now();
+                        let silence_duration = silence_since
+                            .get_or_insert(now)
+                            .elapsed()
+                            .as_secs_f64();
+                        if silence_duration >= NO_INPUT_GRACE_SECS && !no_input_warning_sent {
+                            // Emit no-input warning
+                            let _ = app.emit("recording-no-input", true);
+                            if let Some(w) = app.get_webview_window("recording-indicator") {
+                                let _ = w.emit("recording-no-input", true);
+                            }
+                            no_input_warning_sent = true;
+                        }
+                    } else {
+                        // Voice detected — clear silence tracker and reset warning
+                        if no_input_warning_sent {
+                            let _ = app.emit("recording-no-input", false);
+                            if let Some(w) = app.get_webview_window("recording-indicator") {
+                                let _ = w.emit("recording-no-input", false);
+                            }
+                            no_input_warning_sent = false;
+                        }
+                        silence_since = None;
+                    }
+                }
 
                 let event = AudioLevelEvent {
                     rms: level.rms,

@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Thoth",
-  "version": "2026.2.7",
   "identifier": "com.poodle64.thoth",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -65,8 +64,10 @@
       "requireLiteralLeadingDot": false
     },
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEExOEY5RURGQUJBNkQzRjkKUldUNTA2YXIzNTZQb1lNSGQ3WVlkbDY3VVlUQlJYSzJzQW5ieUhhci9NVnVDUms5T0NJa21acnEK",
-      "endpoints": ["https://github.com/poodle64/thoth/releases/latest/download/latest.json"]
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU0NzMwMTlBQzJDQzEyOUMKUldTY0VzekNtZ0Z6VkxOQlZZSzlmczdBby92bnZnSmlVamRWODJEU3lvajJYcXJ3b1hJODRRUTQK",
+      "endpoints": [
+        "https://github.com/sk8ersquare/thoth/releases/latest/download/latest.json"
+      ]
     }
   },
   "bundle": {
@@ -106,7 +107,11 @@
         "bundleMediaFramework": true
       },
       "deb": {
-        "depends": ["libasound2", "libwebkit2gtk-4.1-0", "libgtk-3-0"],
+        "depends": [
+          "libasound2",
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ],
         "section": "sound",
         "priority": "optional",
         "desktopTemplate": "linux/thoth.desktop"

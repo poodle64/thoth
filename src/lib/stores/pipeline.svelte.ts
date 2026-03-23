@@ -11,7 +11,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { configStore } from './config.svelte';
 import { settingsStore } from './settings.svelte';
 
@@ -204,6 +204,12 @@ function createPipelineStore() {
         await toggleRecording();
         debug(`${timestamp} toggleRecording completed, new state:`, state);
       }
+
+      // Handle quick-add to dictionary shortcut
+      if (shortcutId === 'add_to_dictionary') {
+        debug(`${timestamp} Quick-add to dictionary triggered`);
+        await handleQuickAddToDictionary();
+      }
     });
     debug(' shortcut-triggered listener registered');
     unlisteners.push(shortcutUnlisten);
@@ -346,6 +352,26 @@ function createPipelineStore() {
       debug(' finally block - setting isRunning=false');
       isRunning = false;
       recordingStartTime = null;
+    }
+  }
+
+  /**
+   * Quick-add to dictionary: reads clipboard text as "from" word,
+   * prompts user for replacement, then saves the entry.
+   */
+  async function handleQuickAddToDictionary(): Promise<void> {
+    try {
+      const { readText } = await import('@tauri-apps/plugin-clipboard-manager');
+
+      // Read clipboard — user should have the word copied
+      const clipText = (await readText()) ?? '';
+      const fromWord = clipText.trim();
+
+      // Emit to the main window — it will show an inline modal with a text input
+      // (window.prompt is disabled in WKWebView; plugin-dialog has no text input type)
+      emit('show-dictionary-add', { word: fromWord }).catch(() => {});
+    } catch (e) {
+      console.error('[Pipeline] Quick-add to dictionary failed:', e);
     }
   }
 

@@ -30,6 +30,7 @@ pub mod shortcut_ids {
     pub const TOGGLE_RECORDING: &str = "toggle_recording";
     pub const TOGGLE_RECORDING_ALT: &str = "toggle_recording_alt";
     pub const COPY_LAST_TRANSCRIPTION: &str = "copy_last_transcription";
+    pub const ADD_TO_DICTIONARY: &str = "add_to_dictionary";
 }
 
 /// Global shortcut manager instance
@@ -79,6 +80,12 @@ pub fn get_defaults() -> Vec<ShortcutInfo> {
             id: shortcut_ids::TOGGLE_RECORDING_ALT.to_string(),
             accelerator: "ShiftRight".to_string(),
             description: "Toggle recording (alternative)".to_string(),
+            is_enabled: false,
+        },
+        ShortcutInfo {
+            id: shortcut_ids::ADD_TO_DICTIONARY.to_string(),
+            accelerator: String::new(), // No default — user sets their own key
+            description: "Quick-add selected text to dictionary".to_string(),
             is_enabled: false,
         },
     ]

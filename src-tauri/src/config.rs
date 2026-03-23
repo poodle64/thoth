@@ -122,6 +122,9 @@ pub struct ShortcutConfig {
     pub toggle_recording_alt: Option<String>,
     /// Copy last transcription shortcut
     pub copy_last: Option<String>,
+    /// Quick-add selected text to dictionary shortcut
+    #[serde(default)]
+    pub add_to_dictionary: Option<String>,
     /// Recording mode: toggle or push-to-talk
     pub recording_mode: RecordingMode,
 }
@@ -132,6 +135,7 @@ impl Default for ShortcutConfig {
             toggle_recording: "F13".to_string(),
             toggle_recording_alt: Some("ShiftRight".to_string()),
             copy_last: Some("F14".to_string()),
+            add_to_dictionary: None,
             recording_mode: RecordingMode::default(),
         }
     }
@@ -196,6 +200,9 @@ pub struct GeneralConfig {
     pub show_recording_indicator: bool,
     /// Visual style for the recording indicator
     pub indicator_style: IndicatorStyle,
+    /// Override the update check endpoint (None = use built-in default)
+    #[serde(default)]
+    pub update_endpoint_override: Option<String>,
 }
 
 impl Default for GeneralConfig {
@@ -207,6 +214,7 @@ impl Default for GeneralConfig {
             check_for_updates: true,
             show_recording_indicator: true,
             indicator_style: IndicatorStyle::default(),
+            update_endpoint_override: None,
         }
     }
 }
@@ -748,6 +756,7 @@ mod tests {
                 check_for_updates: true,
                 show_recording_indicator: true,
                 indicator_style: IndicatorStyle::CursorDot,
+                update_endpoint_override: None,
             },
             recorder: RecorderConfig {
                 position: RecorderPosition::Centre,

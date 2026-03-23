@@ -111,6 +111,13 @@ fn register_shortcuts_from_config(app: &tauri::AppHandle, cfg: &config::Config) 
                 "Copy last transcription",
             )
         }),
+        cfg.shortcuts.add_to_dictionary.as_deref().map(|accel| {
+            (
+                shortcut_ids::ADD_TO_DICTIONARY,
+                accel,
+                "Quick-add selected word to dictionary",
+            )
+        }),
     ]
     .into_iter()
     .flatten()
