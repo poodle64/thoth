@@ -39,7 +39,7 @@ symphonia = { version = "0.5", features = ["mp3", "aac", "ogg", "vorbis", "flac"
 # NOTE: static + download-binaries works on macOS and Windows (archives have .a/.lib files)
 # but NOT on Linux (archive only has binaries, no .a files). Linux CI
 # builds without parakeet feature until upstream fixes the archive.
-sherpa-rs = { version = "0.6", features = ["static", "download-binaries"], optional = true }
+sherpa-rs = { version = "0.6", default-features = false, features = ["static", "download-binaries"], optional = true }
 # fluidaudio-rs: Apple Neural Engine backend via CoreML (macOS-only, Apple Silicon)
 # Forked with platform guards: compiles as no-op on Linux/Windows
 fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", rev = "97aaf88", optional = true }
