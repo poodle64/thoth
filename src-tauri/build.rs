@@ -1,4 +1,13 @@
 fn main() {
+    // sherpa-onnx Windows static archive embeds ONNX Runtime (ETW telemetry) and
+    // espeak-ng (registry path lookup). Both require advapi32.lib for symbols like
+    // EventWriteTransfer, EventRegister, RegOpenKeyExA, etc. The sherpa-rs-sys
+    // build script doesn't add this lib on its own, so we add it here.
+    #[cfg(target_os = "windows")]
+    {
+        println!("cargo:rustc-link-lib=advapi32");
+    }
+
     // whisper-rs Metal code uses @available() checks that require the Clang runtime
     // (___isPlatformVersionAtLeast). When sherpa-rs is excluded (no parakeet feature),
     // this runtime isn't linked transitively, so we must link it explicitly.

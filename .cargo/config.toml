@@ -1,0 +1,5 @@
+# Windows: sherpa-onnx static archive requires advapi32 for ONNX Runtime ETW
+# telemetry symbols (EventWriteTransfer etc.) and espeak-ng registry access
+# (RegOpenKeyExA etc.). sherpa-rs-sys doesn't declare this dep itself.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/DEFAULTLIB:advapi32.lib"]

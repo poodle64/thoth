@@ -133,29 +133,98 @@ impl AudioRecorder {
         let callback_buffer = self.ring_buffer.clone();
         let secondary_callback_buffer = self.secondary_buffer.clone();
 
-        // Build input stream
-        let stream = device.build_input_stream(
-            &config.into(),
-            move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                // LOCK-FREE: Ring buffer write does not allocate
-                let written = callback_buffer.write(data);
-                if written < data.len() {
-                    tracing::warn!(
-                        "Audio buffer overflow: dropped {} samples",
-                        data.len() - written
-                    );
-                }
-
-                // Write to secondary buffer if present (for VAD processing)
-                if let Some(ref secondary) = secondary_callback_buffer {
-                    secondary.write(data);
-                }
+        // Build input stream.
+        //
+        // Windows WASAPI devices often report i16 or i32 as their native format.
+        // Requesting f32 samples from a non-f32 device causes cpal to fail on
+        // Windows. We detect the native format and convert to f32 in the callback
+        // so the rest of the pipeline always receives f32 regardless of platform.
+        let stream_config: cpal::StreamConfig = config.into();
+        let stream = match sample_format {
+            cpal::SampleFormat::F32 => device.build_input_stream(
+                &stream_config,
+                move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    let written = callback_buffer.write(data);
+                    if written < data.len() {
+                        tracing::warn!("Audio buffer overflow: dropped {} samples", data.len() - written);
+                    }
+                    if let Some(ref secondary) = secondary_callback_buffer {
+                        secondary.write(data);
+                    }
+                },
+                |err| tracing::error!("Audio stream error: {}", err),
+                None,
+            )?,
+            cpal::SampleFormat::I16 => {
+                device.build_input_stream(
+                    &stream_config,
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        let converted: Vec<f32> = data.iter().map(|&s| s as f32 / 32768.0).collect();
+                        let written = callback_buffer.write(&converted);
+                        if written < converted.len() {
+                            tracing::warn!("Audio buffer overflow: dropped {} samples", converted.len() - written);
+                        }
+                        if let Some(ref secondary) = secondary_callback_buffer {
+                            secondary.write(&converted);
+                        }
+                    },
+                    |err| tracing::error!("Audio stream error (i16): {}", err),
+                    None,
+                )?
             },
-            |err| {
-                tracing::error!("Audio stream error: {}", err);
+            cpal::SampleFormat::U16 => {
+                device.build_input_stream(
+                    &stream_config,
+                    move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                        let converted: Vec<f32> = data.iter().map(|&s| (s as f32 / 32768.0) - 1.0).collect();
+                        let written = callback_buffer.write(&converted);
+                        if written < converted.len() {
+                            tracing::warn!("Audio buffer overflow: dropped {} samples", converted.len() - written);
+                        }
+                        if let Some(ref secondary) = secondary_callback_buffer {
+                            secondary.write(&converted);
+                        }
+                    },
+                    |err| tracing::error!("Audio stream error (u16): {}", err),
+                    None,
+                )?
             },
-            None,
-        )?;
+            cpal::SampleFormat::I32 => {
+                device.build_input_stream(
+                    &stream_config,
+                    move |data: &[i32], _: &cpal::InputCallbackInfo| {
+                        let converted: Vec<f32> = data.iter().map(|&s| s as f32 / 2_147_483_648.0).collect();
+                        let written = callback_buffer.write(&converted);
+                        if written < converted.len() {
+                            tracing::warn!("Audio buffer overflow: dropped {} samples", converted.len() - written);
+                        }
+                        if let Some(ref secondary) = secondary_callback_buffer {
+                            secondary.write(&converted);
+                        }
+                    },
+                    |err| tracing::error!("Audio stream error (i32): {}", err),
+                    None,
+                )?
+            },
+            other => {
+                // Unsupported format — try f32 as a last resort and let cpal error if needed
+                tracing::warn!("Unsupported sample format {:?}, attempting f32 passthrough", other);
+                device.build_input_stream(
+                    &stream_config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        let written = callback_buffer.write(data);
+                        if written < data.len() {
+                            tracing::warn!("Audio buffer overflow: dropped {} samples", data.len() - written);
+                        }
+                        if let Some(ref secondary) = secondary_callback_buffer {
+                            secondary.write(data);
+                        }
+                    },
+                    |err| tracing::error!("Audio stream error (unknown fmt): {}", err),
+                    None,
+                )?
+            },
+        };
 
         stream.play()?;
         self.stream = Some(stream);

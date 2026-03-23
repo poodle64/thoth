@@ -188,7 +188,8 @@ pub fn run() {
             Some(vec!["--autostarted"]),
         ))
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_process::init());
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_os::init());
 
     // Updater plugin only on desktop platforms (not mobile)
     #[cfg(not(any(target_os = "android", target_os = "ios")))]

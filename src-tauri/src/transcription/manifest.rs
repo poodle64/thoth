@@ -335,6 +335,8 @@ pub fn is_backend_available(model_type: &str) -> bool {
     match model_type {
         "whisper_ggml" => true,
         "nemo_transducer" => cfg!(feature = "parakeet"),
+        // fp16 variant: requires parakeet feature; CUDA acceleration available when parakeet-cuda enabled
+        "nemo_transducer_fp16" => cfg!(feature = "parakeet"),
         "fluidaudio_coreml" => cfg!(all(target_os = "macos", feature = "fluidaudio")),
         _ => false,
     }

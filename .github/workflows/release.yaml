@@ -24,6 +24,11 @@ jobs:
           - platform: ubuntu-22.04
             args: '-- --no-default-features'
             rustflags: ''
+          # Windows x86_64 — Whisper CPU + Parakeet (Sherpa-ONNX static works on Windows)
+          # FluidAudio is macOS-only. CUDA/Vulkan GPU acceleration is opt-in at build time.
+          - platform: windows-latest
+            args: '-- --no-default-features --features parakeet'
+            rustflags: ''
 
     runs-on: ${{ matrix.platform }}
 
@@ -63,6 +68,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev
 
+      - name: Install system dependencies (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: |
+          choco install llvm -y
+          echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
+
+      - name: Patch version for Windows (MSI requires each component <= 255)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          # Strip century: 2026.2.11 -> 26.2.11
+          VERSION=$(grep '^version' src-tauri/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          WIN_VERSION=$(echo "$VERSION" | sed 's/^20//')
+          echo "Patching version $VERSION -> $WIN_VERSION for Windows"
+          sed -i "s/version = \"$VERSION\"/version = \"$WIN_VERSION\"/" src-tauri/Cargo.toml
+          sed -i "s/\"version\": \"$VERSION\"/\"version\": \"$WIN_VERSION\"/" package.json
+
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
@@ -79,6 +101,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           CFLAGS: ${{ matrix.platform == 'macos-15' && '-march=armv8-a' || '' }}
           CXXFLAGS: ${{ matrix.platform == 'macos-15' && '-march=armv8-a' || '' }}
+
           RUSTFLAGS: ${{ matrix.rustflags }}
         with:
           tagName: v__VERSION__

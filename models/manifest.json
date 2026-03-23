@@ -1,5 +1,5 @@
 {
-  "version": 9,
+  "version": 10,
   "updated": "2026-02-22T00:00:00Z",
   "models": [
     {
@@ -11,9 +11,14 @@
       "download_size": 1620000000,
       "extracted_size": 1620000000,
       "sha256": null,
-      "required_files": ["ggml-large-v3-turbo.bin"],
+      "required_files": [
+        "ggml-large-v3-turbo.bin"
+      ],
       "archive_directory": null,
-      "languages": ["en", "multilingual"],
+      "languages": [
+        "en",
+        "multilingual"
+      ],
       "model_type": "whisper_ggml",
       "recommended": false,
       "min_app_version": null
@@ -27,9 +32,13 @@
       "download_size": 1533000000,
       "extracted_size": 1533000000,
       "sha256": null,
-      "required_files": ["ggml-medium.en.bin"],
+      "required_files": [
+        "ggml-medium.en.bin"
+      ],
       "archive_directory": null,
-      "languages": ["en"],
+      "languages": [
+        "en"
+      ],
       "model_type": "whisper_ggml",
       "recommended": false,
       "min_app_version": null
@@ -43,9 +52,13 @@
       "download_size": 488000000,
       "extracted_size": 488000000,
       "sha256": null,
-      "required_files": ["ggml-small.en.bin"],
+      "required_files": [
+        "ggml-small.en.bin"
+      ],
       "archive_directory": null,
-      "languages": ["en"],
+      "languages": [
+        "en"
+      ],
       "model_type": "whisper_ggml",
       "recommended": false,
       "min_app_version": null
@@ -59,10 +72,40 @@
       "download_size": 482468385,
       "extracted_size": 661190513,
       "sha256": null,
-      "required_files": ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"],
+      "required_files": [
+        "encoder.int8.onnx",
+        "decoder.int8.onnx",
+        "joiner.int8.onnx",
+        "tokens.txt"
+      ],
       "archive_directory": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
-      "languages": ["en"],
+      "languages": [
+        "en"
+      ],
       "model_type": "nemo_transducer",
+      "recommended": false,
+      "min_app_version": null
+    },
+    {
+      "id": "parakeet-tdt-0.6b-v2-fp16",
+      "name": "Parakeet TDT 0.6B V2 GPU (English)",
+      "description": "Best for NVIDIA GPUs on Windows. FP16 precision via CUDA \u2014 ~3-4x faster than CPU int8. Requires NVIDIA GPU with CUDA.",
+      "version": "2.0.0",
+      "download_url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-fp16.tar.bz2",
+      "download_size": 1120982957,
+      "extracted_size": 1500000000,
+      "sha256": null,
+      "required_files": [
+        "encoder.fp16.onnx",
+        "decoder.fp16.onnx",
+        "joiner.fp16.onnx",
+        "tokens.txt"
+      ],
+      "archive_directory": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-fp16",
+      "languages": [
+        "en"
+      ],
+      "model_type": "nemo_transducer_fp16",
       "recommended": false,
       "min_app_version": null
     },
@@ -75,9 +118,40 @@
       "download_size": 487170055,
       "extracted_size": 671088640,
       "sha256": null,
-      "required_files": ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"],
+      "required_files": [
+        "encoder.int8.onnx",
+        "decoder.int8.onnx",
+        "joiner.int8.onnx",
+        "tokens.txt"
+      ],
       "archive_directory": "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
-      "languages": ["en", "bg", "hr", "cs", "da", "nl", "et", "fi", "fr", "de", "el", "hu", "it", "lv", "lt", "mt", "pl", "pt", "ro", "ru", "sk", "sl", "es", "sv", "uk"],
+      "languages": [
+        "en",
+        "bg",
+        "hr",
+        "cs",
+        "da",
+        "nl",
+        "et",
+        "fi",
+        "fr",
+        "de",
+        "el",
+        "hu",
+        "it",
+        "lv",
+        "lt",
+        "mt",
+        "pl",
+        "pt",
+        "ro",
+        "ru",
+        "sk",
+        "sl",
+        "es",
+        "sv",
+        "uk"
+      ],
       "model_type": "nemo_transducer",
       "recommended": false,
       "min_app_version": null
@@ -91,9 +165,13 @@
       "download_size": 500000000,
       "extracted_size": 500000000,
       "sha256": null,
-      "required_files": [".fluidaudio_ready"],
+      "required_files": [
+        ".fluidaudio_ready"
+      ],
       "archive_directory": null,
-      "languages": ["en"],
+      "languages": [
+        "en"
+      ],
       "model_type": "fluidaudio_coreml",
       "recommended": true,
       "min_app_version": null
