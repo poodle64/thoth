@@ -24,9 +24,10 @@ jobs:
           - platform: ubuntu-22.04
             args: '-- --no-default-features'
             rustflags: ''
-          # Windows x86_64 (Whisper only; Parakeet + FluidAudio are macOS-only)
+          # Windows x86_64 — Whisper CPU + Parakeet (Sherpa-ONNX static works on Windows)
+          # FluidAudio is macOS-only. CUDA/Vulkan GPU acceleration is opt-in at build time.
           - platform: windows-latest
-            args: '-- --no-default-features'
+            args: '-- --no-default-features --features parakeet'
             rustflags: ''
 
     runs-on: ${{ matrix.platform }}

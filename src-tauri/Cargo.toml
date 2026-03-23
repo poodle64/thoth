@@ -36,7 +36,7 @@ symphonia = { version = "0.5", features = ["mp3", "aac", "ogg", "vorbis", "flac"
 
 # Transcription
 # sherpa-rs: Parakeet TDT models via Sherpa-ONNX (statically linked)
-# NOTE: static + download-binaries works on macOS (archive has .a files)
+# NOTE: static + download-binaries works on macOS and Windows (archives have .a/.lib files)
 # but NOT on Linux (archive only has binaries, no .a files). Linux CI
 # builds without parakeet feature until upstream fixes the archive.
 sherpa-rs = { version = "0.6", features = ["static", "download-binaries"], optional = true }
@@ -113,9 +113,12 @@ ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
 # X11 support for display server detection and mouse tracking
 x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
 
-# Windows - CPU mode with optional GPU via features
+# Windows — CPU Whisper (+ optional CUDA/Vulkan GPU via --features)
+# whisper-rs default features include the GGML CPU backend; no extra flags needed.
+# sherpa-rs (Parakeet) is declared in [dependencies] as optional and is
+# activated via the `parakeet` feature, which is now enabled in Windows CI.
 [target.'cfg(target_os = "windows")'.dependencies]
-whisper-rs = { version = "0.15", default-features = false }
+whisper-rs = { version = "0.15" }
 [dev-dependencies]
 tempfile = "3.25"
 

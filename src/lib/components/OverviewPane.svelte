@@ -281,7 +281,12 @@
   let micStepDone = $derived(microphonePermission === 'granted');
   let shortcutStepDone = $derived(accessibilityPermission === 'granted');
   let accessibilityStale = $derived(accessibilityPermission === 'stale');
-  let allRequiredDone = $derived(modelStepDone && micStepDone && shortcutStepDone);
+  /** On macOS all 3 steps are required; on Windows/Linux only model + mic */
+  let allRequiredDone = $derived(
+    isMacos
+      ? modelStepDone && micStepDone && shortcutStepDone
+      : modelStepDone && micStepDone
+  );
 
   /** Celebration animation trigger */
   let showCelebration = $state(false);
@@ -385,7 +390,7 @@
     const [statsResult, readyResult, downloadedResult, gpuResult] = await Promise.allSettled([
       invoke<TranscriptionStats>('get_transcription_stats_cmd'),
       invoke<boolean>('is_transcription_ready'),
-      invoke<boolean>('check_model_downloaded', { modelId: null }),
+      invoke<boolean>('check_model_downloaded', { modelId: undefined }),
       invoke<GpuInfo>('get_gpu_info'),
     ]);
 
@@ -534,7 +539,8 @@
       </div>
     </div>
 
-    <!-- Step 3: Allow global shortcut -->
+    <!-- Step 3: Allow global shortcut (macOS only — auto-complete on Windows/Linux) -->
+    {#if isMacos}
     <div class="setup-step" class:completed={shortcutStepDone} class:stale={accessibilityStale}>
       <div class="step-indicator" class:pending={!shortcutStepDone && !accessibilityStale} class:done={shortcutStepDone} class:warn={accessibilityStale}>
         {#if shortcutStepDone}
@@ -579,6 +585,7 @@
         {/if}
       </div>
     </div>
+    {/if}
   </div>
 
   <!-- Optional settings -->
