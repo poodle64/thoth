@@ -1,6 +1,6 @@
 [package]
 name = "thoth"
-version = "2026.2.7"
+version = "2026.3.1"
 description = "Privacy-first, offline-capable voice transcription application"
 authors = ["Paul Roberts"]
 license = "MIT"
@@ -23,6 +23,7 @@ tauri-plugin-fs = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-process = "2"
+tauri-plugin-os = "2"
 tauri-plugin-single-instance = "2"
 
 # Audio
@@ -98,6 +99,8 @@ fluidaudio = ["fluidaudio-rs"]
 # Use: cargo build --features hipblas   for AMD GPUs (ROCm/HIP)
 # Use: cargo build --features vulkan    for cross-platform Vulkan (experimental)
 cuda = ["whisper-rs/cuda"]
+# CUDA acceleration for Parakeet on Windows (NVIDIA GPUs)
+parakeet-cuda = ["parakeet", "sherpa-rs/cuda"]
 hipblas = ["whisper-rs/hipblas"]
 vulkan = ["whisper-rs/vulkan"]
 

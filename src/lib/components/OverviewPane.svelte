@@ -17,6 +17,7 @@
 		formatTotalDuration
 	} from '../utils/format';
 	import { getUpdaterState, checkForUpdate } from '../stores/updater.svelte';
+  import { platform } from '@tauri-apps/plugin-os';
 
   interface ModelStats {
     name: string;
@@ -100,11 +101,18 @@
   let accessibilityPermission = $state<'unknown' | 'granted' | 'denied' | 'stale'>('unknown');
   let inputMonitoringPermission = $state<'unknown' | 'granted' | 'denied'>('unknown');
 
-  /** Whether all permissions are granted (and functional) */
+  /** Current platform — used to hide macOS-only permission UI on Windows/Linux */
+  let currentPlatform = $state<string>('macos');
+  let isMacos = $derived(currentPlatform === 'macos');
+
+  /** Whether all permissions are granted (and functional).
+   *  On non-macOS, Accessibility and Input Monitoring are not required. */
   let allPermissionsGranted = $derived(
-    microphonePermission === 'granted' &&
-    accessibilityPermission === 'granted' &&
-    inputMonitoringPermission === 'granted'
+    isMacos
+      ? microphonePermission === 'granted' &&
+        accessibilityPermission === 'granted' &&
+        inputMonitoringPermission === 'granted'
+      : microphonePermission === 'granted'
   );
 
   /** TCC reset state */
@@ -354,6 +362,7 @@
     loadAutostartState();
     loadDockState();
     getVersion().then((v) => { currentVersion = v; }).catch(() => {});
+    platform().then((p) => { currentPlatform = p; }).catch(() => {});
 
     // Listen for stale permission events emitted at startup
     listen<string>('permission-stale', (event) => {
@@ -836,6 +845,7 @@
         {#if microphonePermission !== 'granted'}
           <p class="permission-hint">Required to capture your voice for transcription</p>
         {/if}
+        {#if isMacos}
         <div class="status-row">
           <span
             class="status-dot"
@@ -892,6 +902,7 @@
         {#if inputMonitoringPermission !== 'granted'}
           <p class="permission-hint">Required for customising keyboard shortcuts</p>
         {/if}
+        {/if}<!-- end isMacos permission rows -->
         <div class="autostart-row">
           <span class="status-label">Launch at Login</span>
           <label class="toggle-switch">
@@ -907,6 +918,7 @@
         {#if autostartError}
           <div class="setting-error">{autostartError}</div>
         {/if}
+        {#if isMacos}
         <div class="autostart-row">
           <span class="status-label">Show in Dock</span>
           <label class="toggle-switch">
@@ -919,11 +931,13 @@
             <span class="toggle-slider"></span>
           </label>
         </div>
+        {/if}
       </div>
     </div>
   </section>
 
-  <!-- Troubleshooting (advanced) -->
+  <!-- Troubleshooting (advanced) — macOS only -->
+  {#if isMacos}
   <details class="optional-section">
     <summary class="optional-summary">Troubleshooting</summary>
     <div class="optional-content">
@@ -963,6 +977,7 @@
       </details>
     </div>
   </details>
+  {/if}<!-- end isMacos troubleshooting -->
 {/if}
 
 <style>

@@ -19,10 +19,10 @@ pub struct TranscriptionService {
 impl TranscriptionService {
     /// Create a new transcription service with models from the given directory
     ///
-    /// Expects the following files in the model directory:
-    /// - `encoder.int8.onnx`
-    /// - `decoder.int8.onnx`
-    /// - `joiner.int8.onnx`
+    /// Expects either int8 (CPU) or fp16 (GPU) model files in the model directory:
+    /// - `encoder.int8.onnx` / `encoder.fp16.onnx`
+    /// - `decoder.int8.onnx` / `decoder.fp16.onnx`
+    /// - `joiner.int8.onnx`  / `joiner.fp16.onnx`
     /// - `tokens.txt`
     pub fn new(model_dir: &Path) -> Result<Self> {
         if !model_dir.exists() {
@@ -32,10 +32,22 @@ impl TranscriptionService {
             ));
         }
 
-        // Check for required files
-        let encoder = model_dir.join("encoder.int8.onnx");
-        let decoder = model_dir.join("decoder.int8.onnx");
-        let joiner = model_dir.join("joiner.int8.onnx");
+        // Auto-detect: prefer fp16 (GPU) if present, fall back to int8 (CPU)
+        let (encoder, decoder, joiner) = {
+            let enc_fp16 = model_dir.join("encoder.fp16.onnx");
+            let dec_fp16 = model_dir.join("decoder.fp16.onnx");
+            let joi_fp16 = model_dir.join("joiner.fp16.onnx");
+            if enc_fp16.exists() && dec_fp16.exists() && joi_fp16.exists() {
+                tracing::info!("Using fp16 (GPU-optimised) model files");
+                (enc_fp16, dec_fp16, joi_fp16)
+            } else {
+                (
+                    model_dir.join("encoder.int8.onnx"),
+                    model_dir.join("decoder.int8.onnx"),
+                    model_dir.join("joiner.int8.onnx"),
+                )
+            }
+        };
         let tokens = model_dir.join("tokens.txt");
 
         for path in [&encoder, &decoder, &joiner, &tokens] {
@@ -84,9 +96,31 @@ impl TranscriptionService {
 
         #[cfg(not(target_os = "macos"))]
         let recognizer = {
-            tracing::info!("Using CPU provider");
-            TransducerRecognizer::new(build_config(None))
-                .map_err(|e| anyhow!("Failed to create recognizer: {}", e))?
+            // On Windows with CUDA feature: try CUDA provider first, fall back to CPU
+            #[cfg(all(target_os = "windows", feature = "parakeet-cuda"))]
+            let recognizer = {
+                tracing::info!("Attempting CUDA provider for GPU acceleration");
+                match TransducerRecognizer::new(build_config(Some("cuda".to_string()))) {
+                    Ok(r) => {
+                        tracing::info!("CUDA provider initialised successfully");
+                        r
+                    }
+                    Err(e) => {
+                        tracing::warn!("CUDA provider failed ({}), falling back to CPU", e);
+                        TransducerRecognizer::new(build_config(None))
+                            .map_err(|e| anyhow!("Failed to create recognizer with CPU fallback: {}", e))?
+                    }
+                }
+            };
+
+            #[cfg(not(all(target_os = "windows", feature = "parakeet-cuda")))]
+            let recognizer = {
+                tracing::info!("Using CPU provider");
+                TransducerRecognizer::new(build_config(None))
+                    .map_err(|e| anyhow!("Failed to create recognizer: {}", e))?
+            };
+
+            recognizer
         };
 
         tracing::info!("Parakeet model loaded successfully");
