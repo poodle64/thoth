@@ -174,7 +174,41 @@ fn is_wayland() -> bool {
     std::env::var("WAYLAND_DISPLAY").is_ok()
 }
 
-#[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
+/// Get the current mouse cursor position on Windows using GetCursorPos.
+///
+/// Returns `(x, y)` in logical pixels (device-independent). Windows reports
+/// cursor coordinates in physical pixels; we divide by the primary monitor's
+/// DPI scale factor to match Tauri's logical coordinate system.
+#[cfg(target_os = "windows")]
+fn get_mouse_position() -> Option<(f64, f64)> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    use windows::Win32::Graphics::Gdi::{
+        GetDC, ReleaseDC, GetDeviceCaps, LOGPIXELSX,
+    };
+
+    unsafe {
+        let mut pt = POINT::default();
+        if GetCursorPos(&mut pt).is_ok() {
+            // Get DPI of primary monitor (hdc = null → primary screen DC)
+            let hdc = GetDC(None);
+            let dpi = if !hdc.is_invalid() {
+                let dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+                ReleaseDC(None, hdc);
+                dpi as f64
+            } else {
+                96.0 // Standard DPI fallback
+            };
+
+            let scale = dpi / 96.0;
+            Some((pt.x as f64 / scale, pt.y as f64 / scale))
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "linux"), not(target_os = "windows")))]
 fn get_mouse_position() -> Option<(f64, f64)> {
     None
 }
