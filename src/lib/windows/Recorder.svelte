@@ -117,9 +117,10 @@
 
   // Position window and initialise on mount
   onMount(async () => {
-    // Initialise stores
+    // Initialise stores — skip shortcut listener to avoid double-toggling
+    // (the main window handles shortcut events; this window only needs state)
     await settingsStore.initialise();
-    await pipelineStore.initialise();
+    await pipelineStore.initialise({ listenForShortcuts: false });
 
     // Position window
     await positionWindow();

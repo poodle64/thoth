@@ -143,9 +143,15 @@ function createPipelineStore() {
   let isToggling = false;
 
   /**
-   * Initialise the pipeline store and set up event listeners
+   * Initialise the pipeline store and set up event listeners.
+   *
+   * @param options.listenForShortcuts - Whether to register the
+   *   `shortcut-triggered` listener.  Only the main window should do this;
+   *   secondary windows (e.g. the recording indicator) must pass `false` to
+   *   avoid double-toggling the recording pipeline.
    */
-  async function initialise(): Promise<void> {
+  async function initialise(options?: { listenForShortcuts?: boolean }): Promise<void> {
+    const { listenForShortcuts = true } = options ?? {};
     debug('initialise() called, isInitialised:', isInitialised, 'unlisteners:', unlisteners.length);
     // Always clean up existing listeners first (handles HMR where state may be stale)
     if (unlisteners.length > 0) {
@@ -184,29 +190,39 @@ function createPipelineStore() {
     });
     unlisteners.push(cancelUnlisten);
 
-    // Listen for shortcut events to trigger recording
-    debug(' Setting up shortcut-triggered listener...');
-    const shortcutUnlisten = await listen<string>('shortcut-triggered', async (event) => {
-      const shortcutId = event.payload;
-      const timestamp = new Date().toISOString();
-      debug(
-        `${timestamp} Shortcut event received:`,
-        shortcutId,
-        'current state:',
-        state,
-        'isRunning:',
-        isRunning
-      );
+    // Only the main window should listen for shortcut events to toggle
+    // recording.  Secondary windows (recorder indicator) receive pipeline
+    // state via pipeline-progress / pipeline-complete and must NOT register
+    // this listener — otherwise both windows call toggleRecording() on the
+    // same event, and the second call either double-starts (rejected as
+    // "already running", triggering hide_recording_indicator in the error
+    // path) or immediately stops the recording that just started.
+    if (listenForShortcuts) {
+      debug(' Setting up shortcut-triggered listener...');
+      const shortcutUnlisten = await listen<string>('shortcut-triggered', async (event) => {
+        const shortcutId = event.payload;
+        const timestamp = new Date().toISOString();
+        debug(
+          `${timestamp} Shortcut event received:`,
+          shortcutId,
+          'current state:',
+          state,
+          'isRunning:',
+          isRunning
+        );
 
-      // Handle toggle recording shortcuts
-      if (shortcutId === 'toggle_recording' || shortcutId === 'toggle_recording_alt') {
-        debug(`${timestamp} Calling toggleRecording...`);
-        await toggleRecording();
-        debug(`${timestamp} toggleRecording completed, new state:`, state);
-      }
-    });
-    debug(' shortcut-triggered listener registered');
-    unlisteners.push(shortcutUnlisten);
+        // Handle toggle recording shortcuts
+        if (shortcutId === 'toggle_recording' || shortcutId === 'toggle_recording_alt') {
+          debug(`${timestamp} Calling toggleRecording...`);
+          await toggleRecording();
+          debug(`${timestamp} toggleRecording completed, new state:`, state);
+        }
+      });
+      debug(' shortcut-triggered listener registered');
+      unlisteners.push(shortcutUnlisten);
+    } else {
+      debug(' Skipping shortcut-triggered listener (secondary window)');
+    }
 
     // Sync with backend state (e.g., after hot reload)
     try {
@@ -274,7 +290,9 @@ function createPipelineStore() {
       error = errorMsg;
       state = 'failed';
       // Hide indicator on failure
-      invoke('hide_recording_indicator').catch(() => {});
+      const catchReason = `frontend:startRecording_catch:${errorMsg.substring(0, 100)}`;
+      debug('!!! HIDE CALLER: startRecording catch block, error:', errorMsg);
+      invoke('hide_recording_indicator', { reason: catchReason }).catch(() => {});
       // Play error sound
       soundStore.playError();
       return { success: false, error: errorMsg };
@@ -303,9 +321,9 @@ function createPipelineStore() {
     debug(' Built config:', fullConfig);
 
     // Hide recording indicator
-    debug(' Hiding recording indicator');
+    debug('!!! HIDE CALLER: stopAndProcess');
     try {
-      await invoke('hide_recording_indicator');
+      await invoke('hide_recording_indicator', { reason: 'frontend:stopAndProcess' });
     } catch (e) {
       console.warn('[Pipeline] Failed to hide recording indicator:', e);
     }
@@ -424,8 +442,9 @@ function createPipelineStore() {
 
     try {
       // Hide recording indicator
+      debug('!!! HIDE CALLER: cancel()');
       try {
-        await invoke('hide_recording_indicator');
+        await invoke('hide_recording_indicator', { reason: 'frontend:cancel' });
       } catch (e) {
         console.warn('[Pipeline] Failed to hide recording indicator:', e);
       }

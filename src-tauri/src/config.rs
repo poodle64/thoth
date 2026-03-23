@@ -128,10 +128,16 @@ pub struct ShortcutConfig {
 
 impl Default for ShortcutConfig {
     fn default() -> Self {
+        #[cfg(target_os = "macos")]
+        let (toggle, alt, copy) = ("F13", Some("ShiftRight"), Some("F14"));
+        #[cfg(not(target_os = "macos"))]
+        let (toggle, alt, copy): (&str, Option<&str>, Option<&str>) =
+            ("CommandOrControl+Shift+Space", Some("ShiftRight"), None);
+
         Self {
-            toggle_recording: "F13".to_string(),
-            toggle_recording_alt: Some("ShiftRight".to_string()),
-            copy_last: Some("F14".to_string()),
+            toggle_recording: toggle.to_string(),
+            toggle_recording_alt: alt.map(|s| s.to_string()),
+            copy_last: copy.map(|s| s.to_string()),
             recording_mode: RecordingMode::default(),
         }
     }
@@ -196,6 +202,8 @@ pub struct GeneralConfig {
     pub show_recording_indicator: bool,
     /// Visual style for the recording indicator
     pub indicator_style: IndicatorStyle,
+    /// Show system window decorations (title bar). Linux only.
+    pub window_decorations: bool,
 }
 
 impl Default for GeneralConfig {
@@ -207,6 +215,7 @@ impl Default for GeneralConfig {
             check_for_updates: true,
             show_recording_indicator: true,
             indicator_style: IndicatorStyle::default(),
+            window_decorations: true,
         }
     }
 }
@@ -596,12 +605,20 @@ mod tests {
     #[test]
     fn test_shortcut_config_defaults() {
         let shortcuts = ShortcutConfig::default();
-        assert_eq!(shortcuts.toggle_recording, "F13");
+        #[cfg(target_os = "macos")]
+        {
+            assert_eq!(shortcuts.toggle_recording, "F13");
+            assert_eq!(shortcuts.copy_last, Some("F14".to_string()));
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            assert_eq!(shortcuts.toggle_recording, "CommandOrControl+Shift+Space");
+            assert_eq!(shortcuts.copy_last, None);
+        }
         assert_eq!(
             shortcuts.toggle_recording_alt,
             Some("ShiftRight".to_string())
         );
-        assert_eq!(shortcuts.copy_last, Some("F14".to_string()));
         assert_eq!(shortcuts.recording_mode, RecordingMode::Toggle);
     }
 
@@ -748,6 +765,7 @@ mod tests {
                 check_for_updates: true,
                 show_recording_indicator: true,
                 indicator_style: IndicatorStyle::CursorDot,
+                window_decorations: true,
             },
             recorder: RecorderConfig {
                 position: RecorderPosition::Centre,

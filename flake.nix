@@ -9,7 +9,7 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, rust-overlay, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
+    (flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs {
@@ -30,6 +30,113 @@
         cudaPackages = pkgs.cudaPackages_12;
 
       in {
+        # =====================================================================
+        # Nix package — installable via `nix build` or as a flake input
+        # =====================================================================
+        packages.default = pkgs.rustPlatform.buildRustPackage (finalAttrs: {
+          pname = "thoth";
+          version = "2026.2.7";
+          src = ./.;
+
+          cargoRoot = "src-tauri";
+          buildAndTestSubdir = "src-tauri";
+          cargoHash = "sha256-bWRmk1cvPxPqnzhB6KnW586Xhlqd4z6vFUOn/ujsQJk=";
+
+          # Disable default features to exclude fluidaudio (macOS-only git dep
+          # that fails in Nix sandbox) and parakeet (download-binaries feature)
+          buildNoDefaultFeatures = true;
+          buildFeatures = [ "cuda" ];
+
+          # Pre-fetched pnpm dependencies for the Svelte frontend
+          pnpmDeps = pkgs.fetchPnpmDeps {
+            inherit (finalAttrs) pname version src;
+            fetcherVersion = 3;
+            hash = "sha256-2/TWfSxppLkweslAwlWLRjHJQd44x20FKraY9o5HCGI=";
+          };
+
+          nativeBuildInputs = with pkgs; [
+            cargo-tauri.hook    # Replaces cargoBuildHook/cargoInstallHook
+            nodejs
+            pnpmConfigHook      # Sets up pre-fetched pnpm deps
+            pnpm
+            pkg-config
+            cmake               # Required by whisper.cpp (whisper-rs dependency)
+            git                 # Required by whisper.cpp CMakeLists.txt
+            llvmPackages.libclang  # Required by bindgen for whisper.cpp
+            wrapGAppsHook4      # GTK/GLib schema wrapping
+            makeWrapper         # For wrapping runtime PATH deps
+            cudaPackages.cuda_nvcc
+            gcc                 # Required for CUDA compilation
+          ];
+
+          buildInputs = with pkgs; [
+            openssl
+            webkitgtk_4_1
+            glib
+            glib-networking     # HTTPS support in webkitgtk
+            libsecret           # Credential storage
+            libappindicator-gtk3
+            alsa-lib
+            librsvg
+            libx11
+            libxcursor
+            libxrandr
+            libxi
+            vulkan-loader
+            vulkan-headers
+            shaderc
+            cudaPackages.cudatoolkit
+            cudaPackages.cuda_cudart
+            cudaPackages.cuda_cccl
+            cudaPackages.libcublas
+          ];
+
+          env = {
+            LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+            WEBKIT_DISABLE_COMPOSITING_MODE = "1";
+            CUDA_PATH = "${cudaPackages.cudatoolkit}";
+            RUSTFLAGS = "-C relocation-model=dynamic-no-pic -L ${cudaPackages.cuda_cudart}/lib/stubs";
+          };
+
+          postFixup = ''
+            wrapProgram $out/bin/thoth \
+              --prefix PATH : ${pkgs.lib.makeBinPath [
+                pkgs.wl-clipboard       # wl-copy, wl-paste
+                pkgs.wtype              # Wayland keyboard simulation
+                pkgs.glib.bin           # gsettings (theme detection)
+                pkgs.libcanberra-gtk3   # canberra-gtk-play (sound feedback)
+                pkgs.hyprland           # hyprctl (indicator positioning, keybind bridge)
+                pkgs.socat              # Unix socket IPC for Hyprland shortcut delivery
+              ]} \
+              --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [
+                pkgs.libappindicator-gtk3
+                pkgs.vulkan-loader
+                cudaPackages.cuda_cudart
+                cudaPackages.libcublas
+              ]}:/run/opengl-driver/lib \
+              --set WEBKIT_DISABLE_COMPOSITING_MODE 1
+          '';
+
+          # Disable updater artifact signing (no private key in nix sandbox)
+          preBuild = ''
+            substituteInPlace src-tauri/tauri.conf.json \
+              --replace-fail '"createUpdaterArtifacts": true' '"createUpdaterArtifacts": false'
+          '';
+
+          doCheck = false; # Tests need audio hardware
+
+          meta = with pkgs.lib; {
+            description = "Privacy-first, offline-capable voice transcription";
+            homepage = "https://github.com/kirin-ri/thoth";
+            license = licenses.mit;
+            platforms = platforms.linux;
+            mainProgram = "thoth";
+          };
+        });
+
+        # =====================================================================
+        # Development shell — unchanged from original
+        # =====================================================================
         devShells.default = pkgs.mkShell {
           # Platform-specific library paths (Linux)
           LD_LIBRARY_PATH = pkgs.lib.optionalString pkgs.stdenv.isLinux
@@ -55,7 +162,9 @@
           CUDA_HOME = pkgs.lib.optionalString pkgs.stdenv.isLinux "${cudaPackages.cudatoolkit}";
 
           # Linker search path for CUDA driver (libcuda.so)
-          RUSTFLAGS = pkgs.lib.optionalString pkgs.stdenv.isLinux "-L /run/opengl-driver/lib";
+          # NOTE: -C relocation-model=dynamic-no-pic is REQUIRED for sherpa-rs static linking on Linux
+          # See: https://github.com/thewh1teagle/sherpa-rs/issues/62
+          RUSTFLAGS = pkgs.lib.optionalString pkgs.stdenv.isLinux "-C relocation-model=dynamic-no-pic -L /run/opengl-driver/lib";
 
           packages = with pkgs; [
             # Rust / Tauri
@@ -135,5 +244,11 @@
             echo "  --features vulkan   - Cross-platform (experimental)"
           '';
         };
-      });
+      }
+    )) // {
+      # Overlay — defined outside eachDefaultSystem (overlays are system-independent)
+      overlays.default = final: prev: {
+        thoth = self.packages.${final.system}.default;
+      };
+    };
 }
