@@ -184,13 +184,14 @@ function normaliseKeyName(event: KeyboardEvent): string | null {
     return specialKeyMap[code];
   }
 
-  // Fallback to key value for printable characters
+  // Letters and digits
   if (key.length === 1 && /^[a-zA-Z0-9]$/.test(key)) {
     return key.toUpperCase();
   }
 
   return null;
 }
+
 
 /**
  * Format an accelerator string for human-readable display

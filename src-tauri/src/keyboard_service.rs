@@ -823,6 +823,7 @@ fn process_webview_keydown(
 
 /// Convert webview key/code to Tauri accelerator format
 fn webview_key_to_accelerator(key: &str, code: &str) -> Option<String> {
+    // Named codes (unambiguous regardless of shift state)
     match code {
         "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12"
         | "F13" | "F14" | "F15" | "F16" | "F17" | "F18" | "F19" | "F20" => {
@@ -842,12 +843,28 @@ fn webview_key_to_accelerator(key: &str, code: &str) -> Option<String> {
         "ArrowDown" => return Some("Down".to_string()),
         "ArrowLeft" => return Some("Left".to_string()),
         "ArrowRight" => return Some("Right".to_string()),
+        "Escape" => return Some("Escape".to_string()),
+        // Punctuation / symbol keys — use the physical key code so the
+        // accelerator is layout-independent (e.g. Backquote always means `,
+        // regardless of whether Shift is held to produce ~).
+        "Backquote"    => return Some("`".to_string()),
+        "Minus"        => return Some("-".to_string()),
+        "Equal"        => return Some("=".to_string()),
+        "BracketLeft"  => return Some("[".to_string()),
+        "BracketRight" => return Some("]".to_string()),
+        "Backslash"    => return Some("\\".to_string()),
+        "Semicolon"    => return Some(";".to_string()),
+        "Quote"        => return Some("'".to_string()),
+        "Comma"        => return Some(",".to_string()),
+        "Period"       => return Some(".".to_string()),
+        "Slash"        => return Some("/".to_string()),
         // Skip pure modifiers
         "ControlLeft" | "ControlRight" | "ShiftLeft" | "ShiftRight" | "AltLeft" | "AltRight"
         | "MetaLeft" | "MetaRight" => return None,
         _ => {}
     }
 
+    // Letters and digits
     let key_upper = key.to_uppercase();
     if key_upper.len() == 1 {
         let c = key_upper.chars().next()?;
@@ -858,8 +875,6 @@ fn webview_key_to_accelerator(key: &str, code: &str) -> Option<String> {
 
     match key {
         " " => Some("Space".to_string()),
-        "+" => Some("Plus".to_string()),
-        "-" => Some("Minus".to_string()),
         _ => None,
     }
 }
@@ -867,14 +882,26 @@ fn webview_key_to_accelerator(key: &str, code: &str) -> Option<String> {
 /// Convert webview key/code to display string
 fn webview_key_to_display(key: &str, code: &str) -> String {
     match code {
-        "ArrowUp" => "↑".to_string(),
-        "ArrowDown" => "↓".to_string(),
-        "ArrowLeft" => "←".to_string(),
-        "ArrowRight" => "→".to_string(),
-        "Space" => "Space".to_string(),
-        "Enter" => "Return".to_string(),
-        "Backspace" => "⌫".to_string(),
-        "Tab" => "⇥".to_string(),
+        "ArrowUp"      => "↑".to_string(),
+        "ArrowDown"    => "↓".to_string(),
+        "ArrowLeft"    => "←".to_string(),
+        "ArrowRight"   => "→".to_string(),
+        "Space"        => "Space".to_string(),
+        "Enter"        => "Return".to_string(),
+        "Backspace"    => "⌫".to_string(),
+        "Tab"          => "⇥".to_string(),
+        "Escape"       => "Esc".to_string(),
+        "Backquote"    => "`".to_string(),
+        "Minus"        => "-".to_string(),
+        "Equal"        => "=".to_string(),
+        "BracketLeft"  => "[".to_string(),
+        "BracketRight" => "]".to_string(),
+        "Backslash"    => "\\".to_string(),
+        "Semicolon"    => ";".to_string(),
+        "Quote"        => "'".to_string(),
+        "Comma"        => ",".to_string(),
+        "Period"       => ".".to_string(),
+        "Slash"        => "/".to_string(),
         _ => {
             if key.len() == 1 {
                 key.to_uppercase()
