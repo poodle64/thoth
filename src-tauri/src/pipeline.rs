@@ -51,8 +51,10 @@ pub enum PipelineState {
 pub struct PipelineConfig {
     /// Whether to apply dictionary replacements
     pub apply_dictionary: bool,
-    /// Whether to apply output filtering (filler words, formatting)
+    /// Whether to apply output filtering (formatting, whitespace)
     pub apply_filtering: bool,
+    /// Whether to remove hesitation sounds (um, uh, er, ah)
+    pub remove_fillers: bool,
     /// Whether AI enhancement is enabled
     pub enhancement_enabled: bool,
     /// Ollama model for enhancement
@@ -72,6 +74,7 @@ impl Default for PipelineConfig {
         Self {
             apply_dictionary: true,
             apply_filtering: true,
+            remove_fillers: true,
             enhancement_enabled: false,
             enhancement_model: "llama3.2".to_string(),
             enhancement_prompt: DEFAULT_ENHANCEMENT_PROMPT.to_string(),
@@ -489,7 +492,11 @@ async fn run_transcription_pipeline(
         emit_progress(app, PipelineState::Filtering, "Applying filters...");
 
         if config.apply_filtering {
-            text = transcription::filter_transcription(text, None);
+            let filter_opts = transcription::FilterOptions {
+                remove_fillers: config.remove_fillers,
+                ..Default::default()
+            };
+            text = transcription::filter_transcription(text, Some(filter_opts));
             tracing::debug!("Pipeline: After filtering: {} chars", text.len());
         }
 
@@ -564,16 +571,21 @@ async fn process_audio(
     let mut output_text = transcription::filter::format_paragraphs(&output.text);
 
     // Ensure consecutive transcriptions don't run together when inserted at
-    // the cursor. If the text doesn't end with punctuation, add a full stop
-    // so "leak it" + "And if" becomes "leak it. And if" (not "leak itAnd if").
-    if !output_text.ends_with('\n') {
-        let last_char = output_text.trim_end().chars().last().unwrap_or('.');
-        if !last_char.is_ascii_punctuation() {
+    // the cursor. Add a sentence-ending period if the text has no trailing
+    // punctuation, then always ensure there is a trailing space so that the
+    // next paste doesn't glue directly onto this one.
+    //
+    // Examples:
+    //   "Hello world"  → "Hello world. "
+    //   "Hello world." → "Hello world. "
+    //   "Hello world," → "Hello world, "
+    {
+        let last_meaningful = output_text.trim_end().chars().last().unwrap_or('.');
+        if !last_meaningful.is_ascii_punctuation() {
             output_text = output_text.trim_end().to_string();
-            output_text.push_str(". ");
-        } else if !output_text.ends_with(' ') {
-            output_text.push(' ');
+            output_text.push('.');
         }
+        output_text.push(' ');
     }
 
     tracing::info!(
@@ -1037,6 +1049,7 @@ mod tests {
         let config = PipelineConfig::default();
         assert!(config.apply_dictionary);
         assert!(config.apply_filtering);
+        assert!(config.remove_fillers);
         assert!(!config.enhancement_enabled);
         assert!(!config.auto_copy);
         assert!(config.auto_paste);

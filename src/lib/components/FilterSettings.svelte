@@ -41,7 +41,7 @@
 
   /** Sample text for preview */
   let sampleText = $state(
-    'um, so like, I think that uh, this is, you know, working...what do you think ??'
+    'um, so I think that uh, this is, you know, working...what do you think ??'
   );
 
   /** Whether the sample text input is expanded */
@@ -104,8 +104,8 @@
   const filterDefinitions = [
     {
       key: 'remove_fillers' as const,
-      label: 'Remove filler words',
-      description: 'Removes common filler words like um, uh, er, ah, like, you know',
+      label: 'Remove filler sounds',
+      description: 'Removes hesitation sounds: um, uh, er, ah',
     },
     {
       key: 'normalise_whitespace' as const,

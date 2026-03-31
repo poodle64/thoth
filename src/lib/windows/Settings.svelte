@@ -186,8 +186,9 @@
     }
   }
 
-  function handleFilterChange(_options: FilterOptions) {
-    // Filter change handler - options are passed to HistoryList component
+  async function handleFilterChange(options: FilterOptions) {
+    configStore.updateTranscription('removeFillers', options.remove_fillers);
+    await configStore.save();
   }
 
   async function handleRecordingModeChange(mode: RecordingMode) {
@@ -575,6 +576,12 @@
             </div>
             <div class="section-content">
               <FilterSettings
+                initialOptions={{
+                  remove_fillers: configStore.transcription.removeFillers,
+                  normalise_whitespace: true,
+                  cleanup_punctuation: true,
+                  sentence_case: false,
+                }}
                 onchange={handleFilterChange}
                 onOpenDictionary={() => (activePane = 'dictionary')}
               />
