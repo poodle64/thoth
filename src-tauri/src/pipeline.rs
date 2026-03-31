@@ -51,8 +51,10 @@ pub enum PipelineState {
 pub struct PipelineConfig {
     /// Whether to apply dictionary replacements
     pub apply_dictionary: bool,
-    /// Whether to apply output filtering (filler words, formatting)
+    /// Whether to apply output filtering (formatting, whitespace)
     pub apply_filtering: bool,
+    /// Whether to remove hesitation sounds (um, uh, er, ah)
+    pub remove_fillers: bool,
     /// Whether AI enhancement is enabled
     pub enhancement_enabled: bool,
     /// Ollama model for enhancement
@@ -72,6 +74,7 @@ impl Default for PipelineConfig {
         Self {
             apply_dictionary: true,
             apply_filtering: true,
+            remove_fillers: true,
             enhancement_enabled: false,
             enhancement_model: "llama3.2".to_string(),
             enhancement_prompt: DEFAULT_ENHANCEMENT_PROMPT.to_string(),
@@ -445,7 +448,11 @@ async fn run_transcription_pipeline(
         emit_progress(app, PipelineState::Filtering, "Applying filters...");
 
         if config.apply_filtering {
-            text = transcription::filter_transcription(text, None);
+            let filter_opts = transcription::FilterOptions {
+                remove_fillers: config.remove_fillers,
+                ..Default::default()
+            };
+            text = transcription::filter_transcription(text, Some(filter_opts));
             tracing::debug!("Pipeline: After filtering: {} chars", text.len());
         }
 
@@ -519,13 +526,21 @@ async fn process_audio(
     // Apply paragraph formatting for output only (not stored in database)
     let mut output_text = transcription::filter::format_paragraphs(&output.text);
 
-    // Append a trailing space after terminal punctuation so consecutive
-    // transcriptions don't run together when inserted at the cursor.
-    if output_text
-        .as_bytes()
-        .last()
-        .is_some_and(|&b| matches!(b, b'.' | b'?' | b'!' | b',' | b';' | b':'))
+    // Ensure consecutive transcriptions don't run together when inserted at
+    // the cursor. Add a sentence-ending period if the text has no trailing
+    // punctuation, then always ensure there is a trailing space so that the
+    // next paste doesn't glue directly onto this one.
+    //
+    // Examples:
+    //   "Hello world"  → "Hello world. "
+    //   "Hello world." → "Hello world. "
+    //   "Hello world," → "Hello world, "
     {
+        let last_meaningful = output_text.trim_end().chars().last().unwrap_or('.');
+        if !last_meaningful.is_ascii_punctuation() {
+            output_text = output_text.trim_end().to_string();
+            output_text.push('.');
+        }
         output_text.push(' ');
     }
 
@@ -953,6 +968,7 @@ mod tests {
         let config = PipelineConfig::default();
         assert!(config.apply_dictionary);
         assert!(config.apply_filtering);
+        assert!(config.remove_fillers);
         assert!(!config.enhancement_enabled);
         assert!(!config.auto_copy);
         assert!(config.auto_paste);

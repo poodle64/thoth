@@ -87,6 +87,13 @@ pub struct TranscriptionConfig {
     pub auto_paste: bool,
     /// Whether to add space before pasted text
     pub add_leading_space: bool,
+    /// Whether to remove hesitation sounds (um, uh, er, ah) from transcription
+    #[serde(default = "default_true")]
+    pub remove_fillers: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for TranscriptionConfig {
@@ -97,6 +104,7 @@ impl Default for TranscriptionConfig {
             auto_copy: false,
             auto_paste: true,
             add_leading_space: false,
+            remove_fillers: true,
         }
     }
 }
@@ -728,6 +736,7 @@ mod tests {
                 auto_copy: false,
                 auto_paste: false,
                 add_leading_space: true,
+                remove_fillers: false,
             },
             shortcuts: ShortcutConfig {
                 toggle_recording: "F12".to_string(),
