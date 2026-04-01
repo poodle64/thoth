@@ -16,7 +16,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import type { TranscriptionRecord } from '../stores/history.svelte';
   import { historyStore } from '../stores/history.svelte';
-  import { toastStore } from '../stores/toast.svelte';
+  import { toast } from 'svelte-sonner';
   import HistoryList from './HistoryList.svelte';
   import HistoryFilterPanel, { type FilterState } from './HistoryFilterPanel.svelte';
   import ExportDialog from './ExportDialog.svelte';
@@ -122,7 +122,7 @@
   // Route history store errors through the toast system
   $effect(() => {
     if (historyStore.error) {
-      toastStore.error(historyStore.error);
+      toast.error(historyStore.error);
       historyStore.clearError();
     }
   });
@@ -167,7 +167,7 @@
   async function handleCopy(item: TranscriptionRecord) {
     const success = await historyStore.copyToClipboard(item.text);
     if (success) {
-      toastStore.success('Copied to clipboard');
+      toast.success('Copied to clipboard');
     }
   }
 
@@ -234,12 +234,12 @@
           enhancementModelName: result.enhancementModelName ?? undefined,
           enhancementDurationSeconds: result.enhancementDurationSeconds ?? undefined,
         });
-        toastStore.success('Retranscription complete');
+        toast.success('Retranscription complete');
       } else {
-        toastStore.error(result.error ?? 'Retranscription failed');
+        toast.error(result.error ?? 'Retranscription failed');
       }
     } catch (e) {
-      toastStore.error(`${e}`);
+      toast.error(`${e}`);
     } finally {
       retranscribingId = null;
     }
@@ -344,7 +344,7 @@
     const success = await historyStore.deleteRecords(ids);
     if (success) {
       bulkSelectedIds = new Set();
-      toastStore.success(`Deleted ${count} transcription${count === 1 ? '' : 's'}`);
+      toast.success(`Deleted ${count} transcription${count === 1 ? '' : 's'}`);
     }
     bulkDeleteConfirm = false;
   }
@@ -364,7 +364,7 @@
     const success = await historyStore.deleteAll();
     if (success) {
       bulkSelectedIds = new Set();
-      toastStore.success('All history cleared');
+      toast.success('All history cleared');
     }
     clearAllConfirm = false;
   }

@@ -9,7 +9,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import { configStore } from '../stores/config.svelte';
-  import { toastStore } from '../stores/toast.svelte';
+  import { toast } from 'svelte-sonner';
 
   /** Prompt template matching Rust PromptTemplate struct */
   interface PromptTemplate {
@@ -84,10 +84,10 @@
   async function saveSettings(): Promise<void> {
     try {
       await configStore.save();
-      toastStore.success('Settings saved');
+      toast.success('Settings saved');
     } catch (e) {
       console.error('Failed to save settings:', e);
-      toastStore.error('Failed to save settings');
+      toast.error('Failed to save settings');
     }
   }
 
