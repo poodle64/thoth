@@ -347,27 +347,12 @@ function createClipboardStore() {
     }
 
     try {
-      // Call backend command which handles:
-      // - Saving clipboard if preserve_clipboard is enabled
-      // - Copying transcription with formatting
-      // - Pasting at cursor
-      // Returns delay in ms for restoration (0 if restoration not enabled)
-      const restoreDelay = await invoke<number>('paste_transcription', { text, enhanced });
+      // Backend handles the complete flow: save clipboard, paste, and
+      // restore original clipboard after configured delay.
+      await invoke('paste_transcription', { text, enhanced });
 
-      // Refresh history
       if (settings.historyEnabled) {
         await loadHistory();
-      }
-
-      // Schedule clipboard restoration after configured delay
-      if (restoreDelay > 0) {
-        setTimeout(async () => {
-          try {
-            await restoreClipboard();
-          } catch (e) {
-            console.error('Failed to restore clipboard after delay:', e);
-          }
-        }, restoreDelay);
       }
 
       return true;

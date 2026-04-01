@@ -551,6 +551,19 @@ async fn process_audio(
     );
     emit_progress(app, PipelineState::Outputting, "Outputting text...");
 
+    let uses_clipboard_paste = config.auto_paste && config.insertion_method != "typing";
+
+    // Save the user's original clipboard BEFORE any modification.
+    // This must happen before copy_transcription or insert_text_by_paste,
+    // both of which overwrite the clipboard.
+    let saved_clipboard = if uses_clipboard_paste {
+        arboard::Clipboard::new()
+            .ok()
+            .and_then(|mut cb| cb.get_text().ok())
+    } else {
+        None
+    };
+
     if config.auto_copy {
         tracing::debug!("Pipeline: Copying to clipboard...");
         if let Err(e) =
@@ -577,6 +590,20 @@ async fn process_audio(
             tracing::warn!("Pipeline: Failed to insert text: {}", e);
         } else {
             tracing::debug!("Pipeline: Pasted text successfully");
+        }
+    }
+
+    // Restore the user's original clipboard after paste completes.
+    // Uses the configurable restore delay from clipboard settings to give
+    // the target application time to process the paste before we overwrite
+    // the clipboard again.
+    if let Some(original) = saved_clipboard {
+        let restore_delay = clipboard::get_restore_delay();
+        tracing::debug!("Pipeline: Restoring clipboard in {}ms", restore_delay);
+        tokio::time::sleep(tokio::time::Duration::from_millis(restore_delay)).await;
+        match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(original)) {
+            Ok(()) => tracing::debug!("Pipeline: Clipboard restored"),
+            Err(e) => tracing::warn!("Pipeline: Failed to restore clipboard: {}", e),
         }
     }
 

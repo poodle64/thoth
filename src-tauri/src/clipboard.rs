@@ -388,20 +388,17 @@ pub fn get_restore_delay() -> u64 {
 
 /// Paste text at cursor with automatic clipboard restoration.
 ///
-/// This command implements the complete paste-with-restore flow:
+/// Implements the complete paste-with-restore flow:
 /// 1. Save current clipboard contents (if preserve_clipboard enabled)
 /// 2. Copy transcription to clipboard
 /// 3. Paste at cursor position
-/// 4. Schedule clipboard restoration after configured delay
-///
-/// Returns the delay in milliseconds for the frontend to schedule restoration,
-/// or 0 if restoration is not enabled.
+/// 4. Restore original clipboard after configured delay (backend-owned)
 #[tauri::command]
 pub async fn paste_transcription(
     app: AppHandle,
     text: String,
     enhanced: bool,
-) -> Result<u64, String> {
+) -> Result<(), String> {
     if text.is_empty() {
         return Err("Cannot paste empty text".to_string());
     }
@@ -410,13 +407,12 @@ pub async fn paste_transcription(
     let settings = manager.settings().clone();
     drop(manager);
 
-    // Save current clipboard if preservation is enabled
-    if settings.preserve_clipboard {
-        if let Ok(current) = app.clipboard().read_text() {
-            let mut manager = get_manager().lock();
-            manager.preserve_content(current);
-        }
-    }
+    // Save current clipboard BEFORE any modification
+    let saved_clipboard = if settings.preserve_clipboard {
+        app.clipboard().read_text().ok()
+    } else {
+        None
+    };
 
     // Format the text according to settings
     let formatted_text = match settings.format {
@@ -431,7 +427,7 @@ pub async fn paste_transcription(
         }
     };
 
-    // Copy to clipboard
+    // Copy to clipboard and paste
     app.clipboard().write_text(&formatted_text).map_err(|e| {
         error!("Failed to copy transcription for paste: {}", e);
         format!("Failed to copy transcription: {}", e)
@@ -448,7 +444,7 @@ pub async fn paste_transcription(
         manager.add_to_history(text, source);
     }
 
-    // Perform paste using text_insert module
+    // Perform paste
     crate::text_insert::insert_text_by_paste(formatted_text, Some(50)).map_err(|e| {
         error!("Failed to paste transcription: {}", e);
         format!("Failed to paste: {}", e)
@@ -459,12 +455,21 @@ pub async fn paste_transcription(
         enhanced, settings.preserve_clipboard
     );
 
-    // Return delay for frontend to schedule restoration
-    if settings.preserve_clipboard {
-        Ok(settings.restore_delay_ms)
-    } else {
-        Ok(0)
+    // Restore original clipboard in the background after configured delay.
+    // This is backend-owned; the frontend does not need to call restore_clipboard.
+    if let Some(original) = saved_clipboard {
+        let delay = settings.restore_delay_ms;
+        let app_clone = app.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+            match app_clone.clipboard().write_text(&original) {
+                Ok(()) => debug!("Clipboard restored after {}ms", delay),
+                Err(e) => tracing::warn!("Failed to restore clipboard: {}", e),
+            }
+        });
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
