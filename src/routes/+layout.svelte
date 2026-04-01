@@ -2,7 +2,8 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import Toaster from '$lib/components/Toaster.svelte';
+  import { Sonner } from '$components/ui/sonner';
+  import { ModeWatcher } from 'mode-watcher';
   import type { Snippet } from 'svelte';
 
   interface Props {
@@ -12,7 +13,6 @@
   let { children }: Props = $props();
 
   onMount(async () => {
-    // Set window icon (needed for dev mode where no .app bundle exists)
     try {
       await getCurrentWindow().setIcon('icons/128x128@2x.png');
     } catch {
@@ -21,8 +21,10 @@
   });
 </script>
 
+<ModeWatcher defaultMode="dark" />
+
 {#if children}
   {@render children()}
 {/if}
 
-<Toaster />
+<Sonner position="bottom-center" richColors />

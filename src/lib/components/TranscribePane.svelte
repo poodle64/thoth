@@ -3,7 +3,12 @@
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { writeText } from '@tauri-apps/plugin-clipboard-manager';
   import { pipelineStore } from '../stores/pipeline.svelte';
-  import { Upload, FileAudio, Copy, Check, X, Loader2 } from 'lucide-svelte';
+  import Upload from '@lucide/svelte/icons/upload';
+  import FileAudio from '@lucide/svelte/icons/file-audio';
+  import Copy from '@lucide/svelte/icons/copy';
+  import Check from '@lucide/svelte/icons/check';
+  import X from '@lucide/svelte/icons/x';
+  import Loader2 from '@lucide/svelte/icons/loader-2';
 
   let isDragOver = $state(false);
   let importedFileName = $state<string | null>(null);

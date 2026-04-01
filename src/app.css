@@ -1,4 +1,7 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
 
 /* Design tokens for Thoth - Scribe's Amber theme */
 @theme {
@@ -60,6 +63,27 @@
   --transition-fast: 150ms ease;
   --transition-normal: 200ms ease;
   --transition-slow: 300ms ease;
+
+  /* Chart tokens (governance required) */
+  --color-chart-1: #D08B3E;
+  --color-chart-2: #4ABA6A;
+  --color-chart-3: #E8C547;
+  --color-chart-4: #E05545;
+  --color-chart-5: #6B645A;
+
+  /* Sidebar tokens (governance required) */
+  --color-sidebar: #1C1B1A;
+  --color-sidebar-foreground: #EDE8E0;
+  --color-sidebar-primary: #D08B3E;
+  --color-sidebar-primary-foreground: #1C1B1A;
+  --color-sidebar-accent: #363330;
+  --color-sidebar-accent-foreground: #EDE8E0;
+  --color-sidebar-border: #363330;
+  --color-sidebar-ring: #D08B3E;
+}
+
+*, *::before, *::after {
+  outline-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
 }
 
 /* Base styles */
