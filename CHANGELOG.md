@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.4.0] - 2026-04-03
+
+### Added
+
+- **macOS permission reset wizard**: Guided 4-step troubleshooting UI for quarantine, TCC, and accessibility permissions (PR #37)
+- **MIT licence**
+- **Pre-commit hooks**: gitleaks secret scanning
+- **CI**: Reusable auto-label workflow
+
+### Changed
+
+- **Frontend scaffolding**: Migrated toast system to sonner, added lucide-svelte icons
+- **Filler word removal**: Only unambiguous hesitation sounds (um, uh, er, ah) are removed; "like" and "you know" preserved
+- **Sound feedback**: Replaced afplay subprocess with native NSSound for instant audio feedback on recording start/stop
+- **Dev server ports**: Migrated from 1420/1421 to 1422/1423 to avoid conflicts
+
+### Fixed
+
+- **Trailing punctuation**: Consecutive transcriptions no longer run together; a period and trailing space are always appended when needed
+- **Clipboard preservation**: Original clipboard contents saved before paste and restored after a configurable delay
+- **Global shortcuts suppressed while screen is locked** (closes #23)
+- **F14 copy-last-transcription shortcut** not working
+
 ## [2026.2.7] - 2026-02-22
 
 ### Added
