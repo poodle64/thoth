@@ -148,3 +148,89 @@ pub fn toggle_window(app: AppHandle, label: &str) -> Result<bool, String> {
         Err(format!("Window '{}' not found", label))
     }
 }
+
+// ─── macOS Permission Helpers ─────────────────────────────────────────────────
+
+/// Remove the macOS quarantine extended attribute from Thoth.app.
+/// Safe to call on any version — no-ops if already cleared.
+#[tauri::command]
+pub fn remove_quarantine() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("xattr")
+            .args(["-dr", "com.apple.quarantine", "/Applications/Thoth.app"])
+            .output()
+            .map_err(|e| format!("Failed to run xattr: {}", e))?;
+
+        if output.status.success() {
+            tracing::info!("Quarantine attribute removed from Thoth.app");
+            Ok(())
+        } else {
+            // xattr exits non-zero if the attribute doesn't exist — that's fine
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("No such xattr") || stderr.is_empty() {
+                Ok(()) // Already clear
+            } else {
+                Err(format!("xattr failed: {}", stderr))
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(()) // No-op on non-macOS
+    }
+}
+
+/// Reset TCC permissions for Thoth so macOS will re-prompt on next use.
+/// `service` should be one of: "Accessibility", "ListenEvent", "Microphone"
+#[tauri::command]
+pub fn reset_tcc_permission(service: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let allowed = ["Accessibility", "ListenEvent", "Microphone"];
+        if !allowed.contains(&service.as_str()) {
+            return Err(format!("Unknown TCC service: {}", service));
+        }
+
+        let output = std::process::Command::new("tccutil")
+            .args(["reset", &service, "com.poodle64.thoth"])
+            .output()
+            .map_err(|e| format!("Failed to run tccutil: {}", e))?;
+
+        tracing::info!("tccutil reset {} -> {:?}", service, output.status);
+        Ok(()) // tccutil exits 0 even if nothing was reset
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(())
+    }
+}
+
+/// Open a macOS Privacy & Security preference pane
+#[tauri::command]
+pub fn open_privacy_pane(pane: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let url = match pane.as_str() {
+            "accessibility" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+            "input-monitoring" => "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
+            "microphone" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+            _ => return Err(format!("Unknown pane: {}", pane)),
+        };
+        std::process::Command::new("open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("Failed to open settings: {}", e))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(())
+    }
+}
+
+/// Quit and relaunch the application (used by troubleshooting flow)
+#[tauri::command]
+pub fn relaunch_app(app: AppHandle) -> Result<(), String> {
+    app.restart();
+}
