@@ -13,7 +13,7 @@ use std::sync::LazyLock;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct FilterOptions {
-    /// Remove common filler words (um, uh, er, ah, like, you know)
+    /// Remove hesitation sounds (um, uh, er, ah)
     pub remove_fillers: bool,
     /// Normalise whitespace (collapse multiple spaces, trim)
     pub normalise_whitespace: bool,
@@ -44,9 +44,11 @@ impl Default for FilterOptions {
 
 /// Common filler words and sounds to remove
 static FILLER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    // Pattern matches filler words as whole words (case-insensitive)
-    // Includes: um, uh, er, ah, like (when used as filler), you know, y'know
-    Regex::new(r"(?i)\b(u+[hm]+|e+r+|a+h+|like,?\s+|you know,?\s*|y'know,?\s*)\b").unwrap()
+    // Pattern matches hesitation sounds as whole words (case-insensitive).
+    // Only unambiguous non-words: um, uh, er, ah.
+    // "like" and "you know" are excluded — they have legitimate grammatical
+    // uses that a regex cannot distinguish from filler.
+    Regex::new(r"(?i)\b(u+[hm]+|e+r+|a+h+)\b").unwrap()
 });
 
 /// Multiple whitespace pattern
@@ -236,30 +238,28 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_like_filler() {
-        assert_eq!(remove_filler_words("I was like thinking"), "I was thinking");
-        assert_eq!(remove_filler_words("It's like so good"), "It's so good");
+    fn test_preserve_like() {
+        // "like" is not removed — it has legitimate grammatical uses
+        assert_eq!(remove_filler_words("I was like thinking"), "I was like thinking");
+        assert_eq!(remove_filler_words("It's like so good"), "It's like so good");
+        assert_eq!(remove_filler_words("I like coffee"), "I like coffee");
     }
 
     #[test]
-    fn test_remove_you_know() {
+    fn test_preserve_you_know() {
+        // "you know" is not removed — it has legitimate grammatical uses
         assert_eq!(
             remove_filler_words("I was, you know, thinking"),
-            "I was, thinking"
+            "I was, you know, thinking"
         );
-        assert_eq!(remove_filler_words("You know what I mean"), "what I mean");
-    }
-
-    #[test]
-    fn test_remove_y_know() {
-        assert_eq!(remove_filler_words("I was, y'know, busy"), "I was, busy");
+        assert_eq!(remove_filler_words("You know what I mean"), "You know what I mean");
     }
 
     #[test]
     fn test_remove_multiple_fillers() {
         assert_eq!(
             remove_filler_words("Um, I was, uh, like thinking, you know"),
-            ", I was, , thinking, "
+            ", I was, , like thinking, you know"
         );
     }
 
@@ -267,7 +267,6 @@ mod tests {
     fn test_case_insensitive_fillers() {
         assert_eq!(remove_filler_words("UM hello"), " hello");
         assert_eq!(remove_filler_words("I UH think"), "I  think");
-        assert_eq!(remove_filler_words("Like cool"), "cool");
     }
 
     // Whitespace normalisation tests
@@ -384,8 +383,9 @@ mod tests {
         let input = "um, I was like  thinking...what do you think ??";
         let result = filter.filter(input);
 
-        // Should remove fillers, normalise spaces, clean punctuation, apply sentence case
-        assert_eq!(result, ", I was thinking. What do you think?");
+        // "um" removed; "like" preserved (not a hesitation sound); spaces normalised;
+        // punctuation cleaned; sentence case applied
+        assert_eq!(result, ", I was like thinking. What do you think?");
     }
 
     #[test]
@@ -576,9 +576,10 @@ mod tests {
         let input = "um so like I was thinking you know about the project...and uh I think we should like move forward with it what do you think ??";
         let result = filter.filter(input);
 
+        // "um" and "uh" removed; "like" and "you know" preserved; punctuation cleaned; sentence case applied
         assert_eq!(
             result,
-            "So I was thinking about the project. And I think we should move forward with it what do you think?"
+            "So like I was thinking you know about the project. And I think we should like move forward with it what do you think?"
         );
     }
 }

@@ -15,11 +15,11 @@
 [![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=flat-square&logo=svelte&logoColor=white)](https://svelte.dev/)
 [![Licence](https://img.shields.io/badge/Licence-MIT-blue?style=flat-square)](LICENCE)
 
-[Getting Started](#getting-started) · [Features](#features) · [Build](#building-from-source) · [Docs](docs/product/)
+[Installation](#installation) · [Features](#features) · [Contributing](#contributing) · [Docs](docs/product/)
 
 </div>
 
-![Thoth in action](docs/screenshots/hero.gif)
+![Thoth in action](docs/branding/hero.gif)
 
 Voice input on macOS and Linux is either cloud-dependent or requires complex
 setup. Thoth runs speech-to-text **locally** using whisper.cpp with GPU
@@ -28,7 +28,7 @@ No subscription. No cloud. No internet required.
 
 ---
 
-## Getting Started
+## Installation
 
 > After installing, Thoth checks for updates automatically and installs them in-app.
 
@@ -149,7 +149,7 @@ The app walks you through three quick steps:
 
 ---
 
-## Building from Source
+## Contributing
 
 ```bash
 pnpm install
@@ -218,31 +218,7 @@ If GPU initialisation fails, Thoth automatically falls back to CPU transcription
 ## Documentation
 
 - **Product docs:** [docs/product/](docs/product/). Intent, workflows, design principles
-- **Architecture:** [docs/architecture/](docs/architecture/). Audio pipeline, data model
-
----
-
-## Acknowledgements
-
-<strong>Core Technology</strong>
-
-- [whisper.cpp](https://github.com/ggerganov/whisper.cpp). High-performance speech recognition with GPU acceleration (Metal/CUDA/Vulkan)
-- [whisper-rs](https://github.com/tazz4843/whisper-rs). Rust bindings for whisper.cpp
-- [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx). Fallback speech recognition inference
-- [NVIDIA Parakeet](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/parakeet-tdt-1.1b). Speech-to-text models
-
-<strong>Dependencies</strong>
-
-- [Tauri](https://tauri.app/). Desktop application framework
-- [cpal](https://github.com/RustAudio/cpal). Cross-platform audio
-- [rubato](https://github.com/HEnquist/rubato). Audio resampling
-- [enigo](https://github.com/enigo-rs/enigo). Cross-platform input simulation
-
-<strong>Inspiration</strong>
-
-- [MacWhisper](https://goodsnooze.gumroad.com/l/macwhisper). Proved that local Whisper transcription on macOS could be fast and practical
-- [VoiceInk](https://voiceink.app/). Demonstrated seamless hotkey-to-cursor voice input
-- [Spokenly](https://www.spokenly.app/). Showed how clean and minimal a dictation app could be
+- **Development:** [docs/development/](docs/development/). Audio pipeline, data model, architecture
 
 ---
 
@@ -251,5 +227,7 @@ If GPU initialisation fails, Thoth automatically falls back to CPU transcription
 **Your voice. Your machine. Nothing else.**
 
 _Named after the Egyptian god of writing and wisdom, the scribe who faithfully records all that is spoken._
+
+Built on [whisper.cpp](https://github.com/ggerganov/whisper.cpp), [Tauri](https://tauri.app/), [cpal](https://github.com/RustAudio/cpal), and [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx). Inspired by [MacWhisper](https://goodsnooze.gumroad.com/l/macwhisper), [VoiceInk](https://voiceink.app/), and [Spokenly](https://www.spokenly.app/).
 
 </div>

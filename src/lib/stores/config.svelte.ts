@@ -27,6 +27,8 @@ export interface TranscriptionConfig {
   autoPaste: boolean;
   /** Whether to add space before pasted text */
   addLeadingSpace: boolean;
+  /** Whether to remove hesitation sounds (um, uh, er, ah) from transcription */
+  removeFillers: boolean;
 }
 
 /** Recording mode options */
@@ -128,6 +130,7 @@ interface ConfigRaw {
     auto_copy: boolean;
     auto_paste: boolean;
     add_leading_space: boolean;
+    remove_fillers: boolean;
   };
   shortcuts: {
     toggle_recording: string;
@@ -171,6 +174,7 @@ function parseConfig(raw: ConfigRaw): Config {
       autoCopy: raw.transcription.auto_copy,
       autoPaste: raw.transcription.auto_paste,
       addLeadingSpace: raw.transcription.add_leading_space,
+      removeFillers: raw.transcription.remove_fillers,
     },
     shortcuts: {
       toggleRecording: raw.shortcuts.toggle_recording,
@@ -215,6 +219,7 @@ function serialiseConfig(config: Config): ConfigRaw {
       auto_copy: config.transcription.autoCopy,
       auto_paste: config.transcription.autoPaste,
       add_leading_space: config.transcription.addLeadingSpace,
+      remove_fillers: config.transcription.removeFillers,
     },
     shortcuts: {
       toggle_recording: config.shortcuts.toggleRecording,
@@ -259,6 +264,7 @@ function getDefaultConfig(): Config {
       autoCopy: false,
       autoPaste: true,
       addLeadingSpace: false,
+      removeFillers: true,
     },
     shortcuts: {
       toggleRecording: 'F13',

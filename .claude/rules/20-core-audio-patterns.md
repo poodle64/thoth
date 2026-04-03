@@ -73,4 +73,4 @@ Audio recording patterns using Core Audio AUHAL.
 
 ## See Also
 
-- [docs/architecture/audio-pipeline.md](../../docs/architecture/audio-pipeline.md) - Complete pipeline documentation
+- [docs/development/audio-pipeline.md](../../docs/development/audio-pipeline.md) - Complete pipeline documentation
