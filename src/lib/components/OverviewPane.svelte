@@ -96,7 +96,7 @@
   let dockLoading = $state(false);
 
   /** Permission states */
-  let microphonePermission = $state<'unknown' | 'granted' | 'denied'>('unknown');
+  let microphonePermission = $state<'unknown' | 'granted' | 'denied' | 'not_determined'>('unknown');
   let accessibilityPermission = $state<'unknown' | 'granted' | 'denied' | 'stale'>('unknown');
   let inputMonitoringPermission = $state<'unknown' | 'granted' | 'denied'>('unknown');
 
@@ -173,7 +173,13 @@
   async function checkPermissions() {
     try {
       const micStatus = await invoke<string>('check_microphone_permission');
-      microphonePermission = micStatus === 'granted' ? 'granted' : 'denied';
+      if (micStatus === 'granted') {
+        microphonePermission = 'granted';
+      } else if (micStatus === 'not_determined') {
+        microphonePermission = 'not_determined';
+      } else {
+        microphonePermission = 'denied';
+      }
     } catch (error) {
       console.error('Failed to check microphone permission:', error);
       microphonePermission = 'unknown';
@@ -195,7 +201,14 @@
 
     try {
       const inputStatus = await invoke<boolean>('check_input_monitoring');
+      const wasNotGranted = inputMonitoringPermission !== 'granted';
       inputMonitoringPermission = inputStatus ? 'granted' : 'denied';
+
+      // If Input Monitoring was just granted, start the keyboard service
+      // so modifier shortcuts work without requiring an app restart.
+      if (wasNotGranted && inputStatus) {
+        invoke('try_start_keyboard_service').catch(() => {});
+      }
     } catch (error) {
       console.error('Failed to check input monitoring:', error);
       inputMonitoringPermission = 'unknown';
@@ -212,8 +225,8 @@
       await invoke<string>('reset_tcc_permissions', { services });
       // After reset, re-check permissions (they should all show as denied now)
       await checkPermissions();
-      // Open accessibility settings so user can re-grant
-      invoke('request_accessibility');
+      // Start polling — the setup card UI will guide the user to whichever
+      // permission still needs granting via individual "Allow" buttons.
       startPermissionPolling();
     } catch (error) {
       resetError = error instanceof Error ? error.message : String(error);
@@ -343,12 +356,9 @@
     }
   });
 
-  let staleEventUnlisten: UnlistenFn | null = null;
-
   onDestroy(() => {
     stopPermissionPolling();
     cleanupDownloadListeners();
-    staleEventUnlisten?.();
   });
 
   onMount(async () => {
@@ -356,13 +366,8 @@
     loadDockState();
     getVersion().then((v) => { currentVersion = v; }).catch(() => {});
 
-    // Listen for stale permission events emitted at startup
-    listen<string>('permission-stale', (event) => {
-      if (event.payload === 'accessibility') {
-        accessibilityPermission = 'stale';
-      }
-    }).then((unlisten) => { staleEventUnlisten = unlisten; });
-
+    // Pull-based: checkPermissions calls verify_accessibility_functional
+    // which detects stale TCC entries reliably (no event race).
     await checkPermissions();
 
     // If all permissions are already granted, refresh tray in case it was built
@@ -820,12 +825,17 @@
           <span
             class="status-dot"
             class:ready={microphonePermission === 'granted'}
-            class:warning={microphonePermission === 'denied'}
+            class:warning={microphonePermission === 'denied' || microphonePermission === 'not_determined'}
           ></span>
           <span class="status-label">Mic Permission</span>
           <span class="status-value">
             {#if microphonePermission === 'granted'}
               Granted
+            {:else if microphonePermission === 'not_determined'}
+              <span class="permission-actions">
+                <button class="btn-small" onclick={() => requestPermission('request_microphone_permission')}>Allow</button>
+                <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
+              </span>
             {:else}
               <span class="permission-actions">
                 <button class="btn-small" onclick={() => requestPermission('request_microphone_permission')}>Grant Access</button>
@@ -835,7 +845,7 @@
           </span>
         </div>
         {#if microphonePermission !== 'granted'}
-          <p class="permission-hint">Required to capture your voice for transcription</p>
+          <p class="permission-hint">{microphonePermission === 'not_determined' ? 'Click Allow to enable microphone access' : 'Required to capture your voice for transcription'}</p>
         {/if}
         <div class="status-row">
           <span
@@ -969,9 +979,7 @@
             class="btn-small warning"
             onclick={async () => {
               try {
-                await invoke('reset_tcc_permission', { service: 'ListenEvent' });
-                await invoke('reset_tcc_permission', { service: 'Accessibility' });
-                await invoke('reset_tcc_permission', { service: 'Microphone' });
+                await invoke('reset_tcc_permissions', { services: ['ListenEvent', 'Accessibility', 'Microphone'] });
                 permFixStatus.tcc = 'done';
               } catch (e) {
                 permFixStatus.tcc = 'error';

@@ -2,7 +2,7 @@
 //!
 //! Desktop application for macOS and Linux.
 
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 pub mod audio;
 pub mod clipboard;
@@ -259,10 +259,11 @@ pub fn run() {
                     });
                 }
 
-                // Check accessibility permission on startup (including stale entry detection)
+                // Log accessibility permission status on startup for diagnostics.
+                // The frontend pulls the authoritative state via check_accessibility +
+                // verify_accessibility_functional on mount — no event emission needed.
                 let has_accessibility = platform::check_accessibility();
                 if has_accessibility {
-                    // Permission entry exists — verify it's actually functional
                     if platform::verify_accessibility_functional() {
                         tracing::info!("Accessibility permission granted and functional");
                     } else {
@@ -270,10 +271,6 @@ pub fn run() {
                             "Accessibility permission appears granted but is stale — \
                              TCC entry may need resetting"
                         );
-                        // Emit event so the frontend can show a warning
-                        if let Err(e) = app.emit("permission-stale", "accessibility") {
-                            tracing::error!("Failed to emit permission-stale event: {}", e);
-                        }
                     }
                 } else {
                     tracing::warn!(
@@ -309,7 +306,6 @@ pub fn run() {
             commands::toggle_window,
             commands::open_url,
             commands::remove_quarantine,
-            commands::reset_tcc_permission,
             commands::open_privacy_pane,
             commands::relaunch_app,
             commands::set_show_in_dock,
@@ -502,6 +498,7 @@ pub fn run() {
             keyboard_service::is_capture_active_cmd,
             keyboard_service::check_input_monitoring,
             keyboard_service::request_input_monitoring,
+            keyboard_service::try_start_keyboard_service,
             keyboard_service::report_key_event,
         ])
         .run(tauri::generate_context!())
