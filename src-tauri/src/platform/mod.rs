@@ -317,14 +317,15 @@ pub fn get_caret_position() -> Option<CaretPosition> {
 /// Triggers the system permission dialog. If permission was already denied,
 /// this will open System Preferences instead.
 #[tauri::command]
-pub fn request_microphone_permission() {
+pub fn request_microphone_permission(app: tauri::AppHandle) {
     #[cfg(target_os = "macos")]
     {
         let status = macos::check_microphone_permission();
         match status {
             macos::MicrophoneStatus::NotDetermined => {
-                // First time - trigger the system dialog
-                macos::request_microphone_permission();
+                // First time — trigger the system dialog. The completion
+                // handler emits permission-changed when the user responds.
+                macos::request_microphone_permission(app);
             }
             macos::MicrophoneStatus::Denied | macos::MicrophoneStatus::Restricted => {
                 // Already denied - open System Preferences
@@ -336,12 +337,12 @@ pub fn request_microphone_permission() {
             }
             macos::MicrophoneStatus::Unknown => {
                 // Try requesting anyway
-                macos::request_microphone_permission();
+                macos::request_microphone_permission(app);
             }
         }
     }
     #[cfg(not(target_os = "macos"))]
     {
-        // Nothing needed on other platforms
+        let _ = app;
     }
 }

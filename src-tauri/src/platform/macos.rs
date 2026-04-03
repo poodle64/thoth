@@ -128,8 +128,9 @@ pub fn check_microphone_permission() -> MicrophoneStatus {
 /// Request microphone permission
 ///
 /// Triggers the system permission dialog for microphone access.
-/// Note: This returns immediately; the actual user response is handled asynchronously.
-pub fn request_microphone_permission() {
+/// The completion handler emits a `permission-changed` event so the
+/// frontend can re-check immediately when the user responds.
+pub fn request_microphone_permission(app: tauri::AppHandle) {
     unsafe {
         #[link(name = "AVFoundation", kind = "framework")]
         extern "C" {}
@@ -138,11 +139,14 @@ pub fn request_microphone_permission() {
         let media_type = NSString::from_str("soun");
 
         // requestAccessForMediaType:completionHandler: requires a proper ObjC
-        // block, not a null pointer. Passing null causes undefined behaviour
-        // (the runtime tries to invoke it). Use a real no-op block via block2.
+        // block, not a null pointer. The completion handler fires on a background
+        // thread when the user responds to the system dialog.
         let handler: block2::RcBlock<dyn Fn(objc2::runtime::Bool)> =
-            block2::RcBlock::new(|_granted: objc2::runtime::Bool| {
-                tracing::debug!("Microphone permission response received");
+            block2::RcBlock::new(move |granted: objc2::runtime::Bool| {
+                tracing::info!("Microphone permission response: {}", granted.as_bool());
+                // Notify frontend so it can re-check all permissions instantly
+                use tauri::Emitter;
+                let _ = app.emit("permission-changed", "microphone");
             });
 
         let _: () = msg_send![
