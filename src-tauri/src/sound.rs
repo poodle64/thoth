@@ -3,7 +3,7 @@
 //! Provides audio feedback sounds for recording events.
 //! Uses macOS dictation-style tones (dt-begin, dt-confirm) for recording
 //! start/stop, and standard system sounds for other events.
-//! Playback is via the afplay command which is lightweight and non-blocking.
+//! Playback uses NSSound on macOS for instant, zero-latency feedback.
 
 use crate::config;
 
@@ -69,21 +69,29 @@ pub fn play_sound(event: SoundEvent) {
     }
 }
 
-/// Play a macOS sound file using afplay command
+/// Play a macOS sound file using NSSound (instant, no subprocess overhead).
 #[cfg(target_os = "macos")]
 fn play_macos_sound(path: &str) {
-    let path = path.to_string();
-    // Spawn afplay in a separate thread to avoid blocking
-    std::thread::spawn(
-        move || match std::process::Command::new("afplay").arg(&path).output() {
-            Ok(_) => {
-                tracing::debug!("Played sound: {}", path);
-            }
-            Err(e) => {
-                tracing::warn!("Failed to play sound {}: {}", path, e);
-            }
-        },
-    );
+    use objc2::AnyThread;
+    use objc2_app_kit::NSSound;
+    use objc2_foundation::NSString;
+
+    let ns_path = NSString::from_str(path);
+    let sound = NSSound::initWithContentsOfFile_byReference(NSSound::alloc(), &ns_path, true);
+    match sound {
+        Some(s) => {
+            s.play();
+            // NSSound plays asynchronously. We intentionally leak the reference
+            // so the sound finishes playing. The OS reclaims it when playback ends.
+            // At ~0.5s per sound and ~4 events max per recording cycle, this is
+            // negligible memory (a few KB held briefly).
+            std::mem::forget(s);
+            tracing::debug!("Playing sound: {}", path);
+        }
+        None => {
+            tracing::warn!("Failed to load sound: {}", path);
+        }
+    }
 }
 
 /// Play a sound for recording start
