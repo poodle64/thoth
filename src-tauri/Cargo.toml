@@ -1,6 +1,6 @@
 [package]
 name = "thoth"
-version = "2026.4.0"
+version = "2026.4.1"
 description = "Privacy-first, offline-capable voice transcription application"
 authors = ["Paul Roberts"]
 license = "MIT"

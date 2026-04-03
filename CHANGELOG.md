@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.4.1] - 2026-04-04
+
+### Fixed
+
+- **ObjC crash**: Use proper `block2::RcBlock` completion handler instead of null pointer in microphone permission request (caused SIGABRT crashes)
+- **Keyboard service crash**: Use `DeviceState::checked_new()` with inner permission check to prevent process abort when Input Monitoring permission is revoked
+- **Microphone status**: Distinguish `not_determined` from `denied` so first-launch users see correct state
+- **Stale permission detection**: Replace racy push-based event (fired before webview listener exists) with reliable pull-based check on mount
+- **Keyboard service restart**: Auto-start keyboard monitoring when Input Monitoring permission is newly granted (no app restart needed)
+- **TCC reset**: Remove broken non-admin `reset_tcc_permission` command; use admin-elevated `reset_tcc_permissions` everywhere
+- **Permission reset UX**: Stop unconditionally opening Accessibility pane after TCC reset; let setup card guide user to correct pane
+
 ## [2026.4.0] - 2026-04-03
 
 ### Added
