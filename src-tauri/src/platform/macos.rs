@@ -109,18 +109,15 @@ impl std::fmt::Display for MicrophoneStatus {
 /// Returns the detailed status.
 pub fn check_microphone_permission() -> MicrophoneStatus {
     unsafe {
-        // Link AVFoundation framework
         #[link(name = "AVFoundation", kind = "framework")]
         extern "C" {}
 
-        // Get AVCaptureDevice class
         let cls: &AnyClass = class!(AVCaptureDevice);
-
-        // Create NSString for "soun" (AVMediaTypeAudio)
         let media_type = NSString::from_str("soun");
 
-        // Call authorizationStatusForMediaType:
-        // Returns: 0=NotDetermined, 1=Restricted, 2=Denied, 3=Authorized
+        // authorizationStatusForMediaType: returns 0..3 — the NSString must stay
+        // alive for the duration of the message send but is not retained by the
+        // callee, so binding it above is sufficient.
         let status: i64 = msg_send![cls, authorizationStatusForMediaType: &*media_type];
 
         tracing::debug!("Microphone authorization status: {}", status);
@@ -140,13 +137,18 @@ pub fn request_microphone_permission() {
         let cls: &AnyClass = class!(AVCaptureDevice);
         let media_type = NSString::from_str("soun");
 
-        // Call requestAccessForMediaType:completionHandler:
-        // We pass a nil completion handler since we don't need the callback
-        let nil: *const std::ffi::c_void = std::ptr::null();
+        // requestAccessForMediaType:completionHandler: requires a proper ObjC
+        // block, not a null pointer. Passing null causes undefined behaviour
+        // (the runtime tries to invoke it). Use a real no-op block via block2.
+        let handler: block2::RcBlock<dyn Fn(objc2::runtime::Bool)> =
+            block2::RcBlock::new(|_granted: objc2::runtime::Bool| {
+                tracing::debug!("Microphone permission response received");
+            });
+
         let _: () = msg_send![
             cls,
             requestAccessForMediaType: &*media_type,
-            completionHandler: nil
+            completionHandler: &*handler
         ];
 
         tracing::info!("Requested microphone permission");

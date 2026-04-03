@@ -359,6 +359,16 @@ pub fn request_input_monitoring() {
     }
 }
 
+/// Try to start the keyboard monitoring service.
+///
+/// Called by the frontend after Input Monitoring permission is newly granted,
+/// so the keyboard service can start without requiring an app restart.
+/// Idempotent: no-ops if already running or no modifier shortcuts are registered.
+#[tauri::command]
+pub fn try_start_keyboard_service(app: AppHandle) {
+    start_monitoring(app);
+}
+
 /// Enter capture mode for shortcut recording in the settings UI.
 ///
 /// The single polling thread switches from monitoring to capturing.
@@ -483,9 +493,10 @@ pub fn report_key_event(
 
 /// Ensure the polling thread is running. Spawns one if not.
 ///
-/// On macOS, refuses to spawn the thread unless Input Monitoring
-/// permission is granted — `DeviceState::new()` calls IOKit which
-/// aborts the process if the TCC permission is missing.
+/// On macOS, `DeviceState::new()` calls IOKit which aborts the process if
+/// the Input Monitoring TCC permission is missing. We check permission both
+/// here (fast-path to avoid a pointless spawn) and inside the thread (to
+/// close the TOCTOU window if permission is revoked between check and use).
 fn ensure_thread_running(app: AppHandle) {
     #[cfg(target_os = "macos")]
     if !crate::platform::check_input_monitoring_permission() {
@@ -510,13 +521,31 @@ fn ensure_thread_running(app: AppHandle) {
         }
         let _guard = ThreadGuard;
 
+        // Re-check inside the thread to close the TOCTOU window: permission
+        // could have been revoked between the outer check and this point.
+        #[cfg(target_os = "macos")]
+        if !crate::platform::check_input_monitoring_permission() {
+            tracing::warn!(
+                "Input Monitoring permission revoked before thread could start — exiting cleanly"
+            );
+            return;
+        }
+
         polling_loop(app);
     });
 }
 
 /// The single polling loop. Reads keys, then checks mode, then processes.
 fn polling_loop(app: AppHandle) {
-    let device_state = DeviceState::new();
+    // Use checked_new() instead of new() to avoid the assert-panic inside
+    // DeviceState::new() if Input Monitoring permission was revoked between
+    // the pre-spawn check and this point (TOCTOU residual).
+    let Some(device_state) = DeviceState::checked_new() else {
+        tracing::error!(
+            "DeviceState::checked_new() returned None — Input Monitoring permission not available"
+        );
+        return;
+    };
     let mut previous_keys: HashSet<Keycode> = HashSet::new();
     let mut previous_mode = KeyboardMode::Idle;
 

@@ -181,31 +181,6 @@ pub fn remove_quarantine() -> Result<(), String> {
     }
 }
 
-/// Reset TCC permissions for Thoth so macOS will re-prompt on next use.
-/// `service` should be one of: "Accessibility", "ListenEvent", "Microphone"
-#[tauri::command]
-pub fn reset_tcc_permission(service: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let allowed = ["Accessibility", "ListenEvent", "Microphone"];
-        if !allowed.contains(&service.as_str()) {
-            return Err(format!("Unknown TCC service: {}", service));
-        }
-
-        let output = std::process::Command::new("tccutil")
-            .args(["reset", &service, "com.poodle64.thoth"])
-            .output()
-            .map_err(|e| format!("Failed to run tccutil: {}", e))?;
-
-        tracing::info!("tccutil reset {} -> {:?}", service, output.status);
-        Ok(()) // tccutil exits 0 even if nothing was reset
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Ok(())
-    }
-}
-
 /// Open a macOS Privacy & Security preference pane
 #[tauri::command]
 pub fn open_privacy_pane(pane: String) -> Result<(), String> {

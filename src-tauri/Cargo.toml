@@ -86,6 +86,7 @@ cocoa = "0.26"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
 objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "NSButton", "NSResponder", "NSControl", "NSSound"] }
+block2 = "0.6"
 core-foundation = "0.10"
 core-graphics = "0.24"
 
