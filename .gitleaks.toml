@@ -1,0 +1,11 @@
+# Gitleaks configuration for Thoth
+# See: https://github.com/gitleaks/gitleaks
+
+title = "Thoth gitleaks config"
+
+[allowlist]
+  description = "Global allowlist"
+  paths = [
+    '''pnpm-lock\.yaml''',
+    '''\.svg$''',
+  ]

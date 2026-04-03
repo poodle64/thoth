@@ -37,8 +37,10 @@ export type PipelineState =
 export interface PipelineConfig {
   /** Whether to apply dictionary replacements */
   applyDictionary: boolean;
-  /** Whether to apply output filtering (filler words, formatting) */
+  /** Whether to apply output filtering (formatting, whitespace) */
   applyFiltering: boolean;
+  /** Whether to remove hesitation sounds (um, uh, er, ah) */
+  removeFillers: boolean;
   /** Whether AI enhancement is enabled */
   enhancementEnabled: boolean;
   /** Ollama model for enhancement */
@@ -110,6 +112,7 @@ async function getDefaultConfig(): Promise<PipelineConfig> {
   return {
     applyDictionary: true,
     applyFiltering: true,
+    removeFillers: config.transcription.removeFillers,
     enhancementEnabled: config.enhancement.enabled,
     enhancementModel: config.enhancement.model,
     enhancementPrompt,

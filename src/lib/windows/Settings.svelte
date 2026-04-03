@@ -6,22 +6,20 @@
    * Overview, Recording, Models, AI, History, Dictionary, Transcribe
    */
 
-  import type { ComponentType } from 'svelte';
+  import type { Component } from 'svelte';
   import { onMount, onDestroy } from 'svelte';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import {
-    LayoutDashboard,
-    Mic,
-    Cpu,
-    Sparkles,
-    History,
-    BookOpen,
-    FileText,
-    HardDrive,
-    Info,
-  } from 'lucide-svelte';
+  import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard';
+  import Mic from '@lucide/svelte/icons/mic';
+  import Cpu from '@lucide/svelte/icons/cpu';
+  import Sparkles from '@lucide/svelte/icons/sparkles';
+  import History from '@lucide/svelte/icons/history';
+  import BookOpen from '@lucide/svelte/icons/book-open';
+  import FileText from '@lucide/svelte/icons/file-text';
+  import HardDrive from '@lucide/svelte/icons/hard-drive';
+  import Info from '@lucide/svelte/icons/info';
   import AIEnhancementSettings from '../components/AIEnhancementSettings.svelte';
   import AudioDeviceSelector from '../components/AudioDeviceSelector.svelte';
   import DictionaryEditor from '../components/DictionaryEditor.svelte';
@@ -43,7 +41,7 @@
   interface SettingsPane {
     id: string;
     title: string;
-    icon: ComponentType;
+    icon: Component;
   }
 
   /** Filter options type matching Rust FilterOptions */
@@ -186,8 +184,9 @@
     }
   }
 
-  function handleFilterChange(_options: FilterOptions) {
-    // Filter change handler - options are passed to HistoryList component
+  async function handleFilterChange(options: FilterOptions) {
+    configStore.updateTranscription('removeFillers', options.remove_fillers);
+    await configStore.save();
   }
 
   async function handleRecordingModeChange(mode: RecordingMode) {
@@ -575,6 +574,12 @@
             </div>
             <div class="section-content">
               <FilterSettings
+                initialOptions={{
+                  remove_fillers: configStore.transcription.removeFillers,
+                  normalise_whitespace: true,
+                  cleanup_punctuation: true,
+                  sentence_case: false,
+                }}
                 onchange={handleFilterChange}
                 onOpenDictionary={() => (activePane = 'dictionary')}
               />

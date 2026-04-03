@@ -1,7 +1,3 @@
-// Tauri doesn't have a Node.js server to do proper SSR
-// so we use adapter-static with a fallback to index.html to put the site in SPA mode
-// See: https://svelte.dev/docs/kit/single-page-apps
-// See: https://v2.tauri.app/start/frontend/sveltekit/ for more info
 import adapter from '@sveltejs/adapter-static';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
@@ -12,9 +8,13 @@ const config = {
     adapter: adapter({
       fallback: 'index.html',
     }),
+    alias: {
+      '$components': 'src/lib/components',
+      '$stores': 'src/lib/stores',
+      '$api': 'src/lib/api',
+    },
   },
   onwarn: (warning, handler) => {
-    // Suppress a11y click events warning for context menus (mouse-only interactions)
     if (warning.code === 'a11y_click_events_have_key_events') {
       return;
     }

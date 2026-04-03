@@ -51,8 +51,10 @@ pub enum PipelineState {
 pub struct PipelineConfig {
     /// Whether to apply dictionary replacements
     pub apply_dictionary: bool,
-    /// Whether to apply output filtering (filler words, formatting)
+    /// Whether to apply output filtering (formatting, whitespace)
     pub apply_filtering: bool,
+    /// Whether to remove hesitation sounds (um, uh, er, ah)
+    pub remove_fillers: bool,
     /// Whether AI enhancement is enabled
     pub enhancement_enabled: bool,
     /// Ollama model for enhancement
@@ -72,6 +74,7 @@ impl Default for PipelineConfig {
         Self {
             apply_dictionary: true,
             apply_filtering: true,
+            remove_fillers: true,
             enhancement_enabled: false,
             enhancement_model: "llama3.2".to_string(),
             enhancement_prompt: DEFAULT_ENHANCEMENT_PROMPT.to_string(),
@@ -445,7 +448,11 @@ async fn run_transcription_pipeline(
         emit_progress(app, PipelineState::Filtering, "Applying filters...");
 
         if config.apply_filtering {
-            text = transcription::filter_transcription(text, None);
+            let filter_opts = transcription::FilterOptions {
+                remove_fillers: config.remove_fillers,
+                ..Default::default()
+            };
+            text = transcription::filter_transcription(text, Some(filter_opts));
             tracing::debug!("Pipeline: After filtering: {} chars", text.len());
         }
 
@@ -519,10 +526,21 @@ async fn process_audio(
     // Apply paragraph formatting for output only (not stored in database)
     let mut output_text = transcription::filter::format_paragraphs(&output.text);
 
-    // Always append a trailing space so consecutive transcriptions don't
-    // run together when inserted at the cursor. Without this, "it" + "And"
-    // becomes "itAnd" instead of "it And".
-    if !output_text.ends_with(' ') && !output_text.ends_with('\n') {
+    // Ensure consecutive transcriptions don't run together when inserted at
+    // the cursor. Add a sentence-ending period if the text has no trailing
+    // punctuation, then always ensure there is a trailing space so that the
+    // next paste doesn't glue directly onto this one.
+    //
+    // Examples:
+    //   "Hello world"  → "Hello world. "
+    //   "Hello world." → "Hello world. "
+    //   "Hello world," → "Hello world, "
+    {
+        let last_meaningful = output_text.trim_end().chars().last().unwrap_or('.');
+        if !last_meaningful.is_ascii_punctuation() {
+            output_text = output_text.trim_end().to_string();
+            output_text.push('.');
+        }
         output_text.push(' ');
     }
 
@@ -532,6 +550,19 @@ async fn process_audio(
         config.auto_paste
     );
     emit_progress(app, PipelineState::Outputting, "Outputting text...");
+
+    let uses_clipboard_paste = config.auto_paste && config.insertion_method != "typing";
+
+    // Save the user's original clipboard BEFORE any modification.
+    // This must happen before copy_transcription or insert_text_by_paste,
+    // both of which overwrite the clipboard.
+    let saved_clipboard = if uses_clipboard_paste {
+        arboard::Clipboard::new()
+            .ok()
+            .and_then(|mut cb| cb.get_text().ok())
+    } else {
+        None
+    };
 
     if config.auto_copy {
         tracing::debug!("Pipeline: Copying to clipboard...");
@@ -579,6 +610,20 @@ async fn process_audio(
                 Ok(()) => tracing::debug!("Pipeline: Clipboard restored"),
                 Err(e) => tracing::warn!("Pipeline: Failed to restore clipboard: {}", e),
             }
+        }
+    }
+
+    // Restore the user's original clipboard after paste completes.
+    // Uses the configurable restore delay from clipboard settings to give
+    // the target application time to process the paste before we overwrite
+    // the clipboard again.
+    if let Some(original) = saved_clipboard {
+        let restore_delay = clipboard::get_restore_delay();
+        tracing::debug!("Pipeline: Restoring clipboard in {}ms", restore_delay);
+        tokio::time::sleep(tokio::time::Duration::from_millis(restore_delay)).await;
+        match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(original)) {
+            Ok(()) => tracing::debug!("Pipeline: Clipboard restored"),
+            Err(e) => tracing::warn!("Pipeline: Failed to restore clipboard: {}", e),
         }
     }
 
@@ -970,6 +1015,7 @@ mod tests {
         let config = PipelineConfig::default();
         assert!(config.apply_dictionary);
         assert!(config.apply_filtering);
+        assert!(config.remove_fillers);
         assert!(!config.enhancement_enabled);
         assert!(!config.auto_copy);
         assert!(config.auto_paste);

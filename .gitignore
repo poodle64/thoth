@@ -26,9 +26,10 @@ Thumbs.db
 .claude/CLAUDE.local.md
 .claude/.sessions/
 # Master project symlinks (local dev only, broken for other contributors)
-.claude/commands/deploy.md
-.claude/commands/git-release.md
-.claude/commands/screenshot.md
+.claude/commands/master
+.claude/hooks/master
+.claude/rules/master
+.claude/skills
 
 # ============================================================================
 # Environment & Secrets
@@ -41,11 +42,33 @@ Thumbs.db
 .mcp.json
 
 # ============================================================================
+# Python
+# ============================================================================
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ============================================================================
 # Node.js
 # ============================================================================
 node_modules/
+.npm/
+.pnpm-store/
 npm-debug.log*
 *.log
+
+# ============================================================================
+# Testing / MCP Tools
+# ============================================================================
+.playwright-mcp/
 
 # ============================================================================
 # Build Outputs
@@ -77,11 +100,20 @@ models/
 # ============================================================================
 # Internal docs (local dev only, not for public repo)
 # ============================================================================
-docs/DEPLOYMENT.md
-docs/UPDATE_TESTING.md
-docs/app-icon-prompt.md
-docs/archive/
-docs/branding/
+docs/deployment/
+docs/research/
+docs/master
+# Branding: track hero image and overview screenshot, gitignore private design work
+docs/branding/colour-schemes.md
+docs/branding/colour-preview.html
+docs/branding/icon-design-brief.md
+docs/branding/app-icon-prompt.md
+
+# ============================================================================
+# Private planning docs (not for public repos)
+# ============================================================================
+docs/product/
+docs/superpowers/
 
 # ============================================================================
 # Temporary files

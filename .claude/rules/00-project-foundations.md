@@ -159,7 +159,7 @@ cargo clippy        # Run Rust linter (from src-tauri/)
 ## Sources of Truth
 
 - **Master rules**: `.claude/rules/master/` (symlinked) - Universal principles
-- **Architecture docs**: `docs/architecture/` - System design and data flows
+- **Development docs**: `docs/development/` - System design and data flows
 - **Product docs**: `docs/product/` - User workflows and design principles
 - **GitHub Issues**: Task tracking and feature planning
 
