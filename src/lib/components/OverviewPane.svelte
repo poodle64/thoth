@@ -110,9 +110,9 @@
   /** TCC reset state */
   let resettingPermissions = $state(false);
   let resetError = $state<string | null>(null);
-  let showResetConfirm = $state(false);
+
   let permFixStatus = $state<{ quarantine: string; tcc: string }>({ quarantine: '', tcc: '' });
-  let showManualFix = $state(false);
+
 
   async function handleAutostartToggle() {
     autostartLoading = true;
@@ -165,10 +165,7 @@
     }
   }
 
-  let permissionPollTimer: ReturnType<typeof setInterval> | null = null;
-  let permissionPollCount = 0;
-  const POLL_INTERVAL_MS = 2000;
-  const MAX_POLL_ATTEMPTS = 15; // 30 seconds total
+  let permissionChangedUnlisten: UnlistenFn | null = null;
 
   async function checkPermissions() {
     try {
@@ -219,15 +216,12 @@
   async function resetPermissions(services: string[]) {
     resettingPermissions = true;
     resetError = null;
-    showResetConfirm = false;
+
 
     try {
       await invoke<string>('reset_tcc_permissions', { services });
-      // After reset, re-check permissions (they should all show as denied now)
       await checkPermissions();
-      // Start polling — the setup card UI will guide the user to whichever
-      // permission still needs granting via individual "Allow" buttons.
-      startPermissionPolling();
+      startPermissionPoll();
     } catch (error) {
       resetError = error instanceof Error ? error.message : String(error);
       console.error('Failed to reset TCC permissions:', error);
@@ -236,43 +230,43 @@
     }
   }
 
-  function stopPermissionPolling() {
+  /**
+   * Adaptive permission polling — the standard macOS pattern.
+   *
+   * macOS provides no callback for TCC permission changes (Accessibility,
+   * Input Monitoring). Even the microphone dialog triggered by CoreAudio
+   * has no completion handler. Every well-built macOS app (AltTab, Rectangle,
+   * Raycast) polls AXIsProcessTrusted() on a timer.
+   *
+   * We poll at 500ms while permissions are outstanding (fast enough to feel
+   * instant when the user toggles a switch in System Settings) and stop
+   * the moment all permissions are granted.
+   */
+  const POLL_MS = 500;
+  let permissionPollTimer: ReturnType<typeof setInterval> | null = null;
+
+  function startPermissionPoll() {
+    if (permissionPollTimer !== null) return;
+    permissionPollTimer = setInterval(async () => {
+      await checkPermissions();
+      if (allPermissionsGranted) {
+        stopPermissionPoll();
+        invoke('refresh_tray_menu').catch(() => {});
+      }
+    }, POLL_MS);
+  }
+
+  function stopPermissionPoll() {
     if (permissionPollTimer !== null) {
       clearInterval(permissionPollTimer);
       permissionPollTimer = null;
-      permissionPollCount = 0;
     }
   }
 
-  function startPermissionPolling() {
-    // Don't start if already polling
-    if (permissionPollTimer !== null) return;
-
-    permissionPollCount = 0;
-    permissionPollTimer = setInterval(async () => {
-      permissionPollCount++;
-      await checkPermissions();
-
-      // Stop if all permissions are granted (and functional) or we've exceeded attempts
-      const allGranted =
-        microphonePermission === 'granted' &&
-        accessibilityPermission === 'granted' &&
-        inputMonitoringPermission === 'granted';
-
-      if (allGranted) {
-        stopPermissionPolling();
-        // Refresh tray menu so status shows "Ready" instead of stale permission warning
-        invoke('refresh_tray_menu').catch(() => {});
-      } else if (permissionPollCount >= MAX_POLL_ATTEMPTS) {
-        stopPermissionPolling();
-      }
-    }, POLL_INTERVAL_MS);
-  }
-
-  /** Request a permission and start auto-polling for status changes */
+  /** Request a permission (opens system dialog or System Settings) */
   function requestPermission(command: string) {
     invoke(command);
-    startPermissionPolling();
+    startPermissionPoll();
   }
 
   /** Model download state for setup card */
@@ -357,7 +351,8 @@
   });
 
   onDestroy(() => {
-    stopPermissionPolling();
+    stopPermissionPoll();
+    permissionChangedUnlisten?.();
     cleanupDownloadListeners();
   });
 
@@ -366,18 +361,20 @@
     loadDockState();
     getVersion().then((v) => { currentVersion = v; }).catch(() => {});
 
-    // Pull-based: checkPermissions calls verify_accessibility_functional
-    // which detects stale TCC entries reliably (no event race).
+    // Listen for permission-changed events from the backend (microphone
+    // dialog completion handler fires this for an immediate update).
+    listen<string>('permission-changed', () => {
+      checkPermissions();
+    }).then((unlisten) => { permissionChangedUnlisten = unlisten; });
+
     await checkPermissions();
 
-    // If all permissions are already granted, refresh tray in case it was built
-    // before permissions were available (e.g. after TCC reset + reinstall)
-    if (
-      microphonePermission === 'granted' &&
-      accessibilityPermission === 'granted' &&
-      inputMonitoringPermission === 'granted'
-    ) {
+    if (allPermissionsGranted) {
       invoke('refresh_tray_menu').catch(() => {});
+    } else {
+      // Start adaptive polling — the standard macOS pattern for detecting
+      // TCC changes. Stops automatically when all permissions are granted.
+      startPermissionPoll();
     }
     const [statsResult, readyResult, downloadedResult, gpuResult] = await Promise.allSettled([
       invoke<TranscriptionStats>('get_transcription_stats_cmd'),
@@ -525,7 +522,6 @@
           <p class="step-description">Thoth needs to hear you to transcribe your speech.</p>
           <div class="step-actions">
             <button class="btn-setup" onclick={() => requestPermission('request_microphone_permission')}>Allow</button>
-            <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
           </div>
         {/if}
       </div>
@@ -554,16 +550,7 @@
             <button class="btn-setup warning" onclick={() => resetPermissions(['Accessibility', 'ListenEvent'])} disabled={resettingPermissions}>
               {resettingPermissions ? 'Resetting...' : 'Reset & Re-grant'}
             </button>
-            <button class="btn-setup-alt" onclick={() => { showManualFix = !showManualFix; }}>Manual fix</button>
-            <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
           </div>
-          {#if showManualFix}
-            <div class="manual-fix">
-              <p class="manual-fix-title">Run in Terminal:</p>
-              <code class="manual-fix-code">sudo tccutil reset Accessibility com.poodle64.thoth && sudo tccutil reset ListenEvent com.poodle64.thoth</code>
-              <p class="manual-fix-hint">Then re-enable Thoth in System Settings &gt; Privacy &amp; Security &gt; Accessibility.</p>
-            </div>
-          {/if}
           {#if resetError}
             <p class="step-error">{resetError}</p>
           {/if}
@@ -571,7 +558,6 @@
           <p class="step-description">Lets you start recording from anywhere with a keyboard shortcut.</p>
           <div class="step-actions">
             <button class="btn-setup" onclick={() => requestPermission('request_accessibility')}>Allow</button>
-            <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
           </div>
         {/if}
       </div>
@@ -593,10 +579,7 @@
           {#if inputMonitoringPermission === 'granted'}
             Granted
           {:else}
-            <span class="permission-actions">
-              <button class="btn-small" onclick={() => requestPermission('request_input_monitoring')}>Grant Access</button>
-              <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
-            </span>
+            <button class="btn-small" onclick={() => requestPermission('request_input_monitoring')}>Grant Access</button>
           {/if}
         </span>
       </div>
@@ -822,87 +805,20 @@
           <span class="status-value truncate">{deviceName}</span>
         </div>
         <div class="status-row">
-          <span
-            class="status-dot"
-            class:ready={microphonePermission === 'granted'}
-            class:warning={microphonePermission === 'denied' || microphonePermission === 'not_determined'}
-          ></span>
-          <span class="status-label">Mic Permission</span>
+          <span class="status-dot" class:ready={allPermissionsGranted} class:warning={!allPermissionsGranted}></span>
+          <span class="status-label">Permissions</span>
           <span class="status-value">
-            {#if microphonePermission === 'granted'}
-              Granted
-            {:else if microphonePermission === 'not_determined'}
-              <span class="permission-actions">
-                <button class="btn-small" onclick={() => requestPermission('request_microphone_permission')}>Allow</button>
-                <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
-              </span>
+            {#if allPermissionsGranted}
+              All granted
             {:else}
-              <span class="permission-actions">
-                <button class="btn-small" onclick={() => requestPermission('request_microphone_permission')}>Grant Access</button>
-                <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
-              </span>
+              {[
+                microphonePermission !== 'granted' ? 'Mic' : '',
+                accessibilityPermission !== 'granted' ? 'Accessibility' : '',
+                inputMonitoringPermission !== 'granted' ? 'Input Monitoring' : '',
+              ].filter(Boolean).join(', ')} needed
             {/if}
           </span>
         </div>
-        {#if microphonePermission !== 'granted'}
-          <p class="permission-hint">{microphonePermission === 'not_determined' ? 'Click Allow to enable microphone access' : 'Required to capture your voice for transcription'}</p>
-        {/if}
-        <div class="status-row">
-          <span
-            class="status-dot"
-            class:ready={accessibilityPermission === 'granted'}
-            class:warning={accessibilityPermission === 'denied'}
-            class:stale={accessibilityPermission === 'stale'}
-          ></span>
-          <span class="status-label">Accessibility</span>
-          <span class="status-value">
-            {#if accessibilityPermission === 'granted'}
-              Granted
-            {:else if accessibilityPermission === 'stale'}
-              <span class="permission-actions">
-                <span class="status-stale-label">Stale</span>
-                <button class="btn-small warning" onclick={() => resetPermissions(['Accessibility', 'ListenEvent'])} disabled={resettingPermissions}>
-                  {resettingPermissions ? 'Resetting...' : 'Reset'}
-                </button>
-                <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
-              </span>
-            {:else}
-              <span class="permission-actions">
-                <button class="btn-small" onclick={() => requestPermission('request_accessibility')}>Grant Access</button>
-                <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
-              </span>
-            {/if}
-          </span>
-        </div>
-        {#if accessibilityPermission === 'stale'}
-          <p class="permission-hint stale-hint">Permission appears granted but isn't working. Reset to fix.</p>
-          {#if resetError}
-            <p class="permission-hint error-hint">{resetError}</p>
-          {/if}
-        {:else if accessibilityPermission !== 'granted'}
-          <p class="permission-hint">Required for the global recording shortcut to work</p>
-        {/if}
-        <div class="status-row">
-          <span
-            class="status-dot"
-            class:ready={inputMonitoringPermission === 'granted'}
-            class:warning={inputMonitoringPermission === 'denied'}
-          ></span>
-          <span class="status-label">Input Monitoring</span>
-          <span class="status-value">
-            {#if inputMonitoringPermission === 'granted'}
-              Granted
-            {:else}
-              <span class="permission-actions">
-                <button class="btn-small" onclick={() => requestPermission('request_input_monitoring')}>Grant Access</button>
-                <button class="btn-icon" onclick={checkPermissions} title="Refresh">&#8635;</button>
-              </span>
-            {/if}
-          </span>
-        </div>
-        {#if inputMonitoringPermission !== 'granted'}
-          <p class="permission-hint">Required for customising keyboard shortcuts</p>
-        {/if}
         <div class="autostart-row">
           <span class="status-label">Launch at Login</span>
           <label class="toggle-switch">
@@ -1373,12 +1289,6 @@
     line-height: 1.3;
   }
 
-  .permission-actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
   .autostart-row {
     display: flex;
     align-items: center;
@@ -1426,12 +1336,6 @@
     color: var(--color-text-tertiary);
   }
 
-  /* Stale permission indicator */
-  .status-dot.stale {
-    background: var(--color-warning);
-    animation: pulse 1.5s ease-in-out infinite;
-  }
-
   .step-indicator.warn {
     background: color-mix(in srgb, var(--color-warning) 15%, var(--color-bg-secondary));
     color: var(--color-warning);
@@ -1444,22 +1348,6 @@
 
   .stale-warning {
     color: var(--color-warning) !important;
-  }
-
-  .stale-hint {
-    color: var(--color-warning) !important;
-  }
-
-  .error-hint {
-    color: var(--color-error, #ef4444) !important;
-  }
-
-  .status-stale-label {
-    font-size: var(--text-xs);
-    font-weight: 600;
-    color: var(--color-warning);
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
   }
 
   .btn-setup.warning,
@@ -1485,13 +1373,6 @@
     padding: 10px 12px;
     background: var(--color-bg-tertiary);
     border-radius: var(--radius-sm);
-  }
-
-  .manual-fix-title {
-    margin: 0 0 6px;
-    font-size: var(--text-xs);
-    font-weight: 600;
-    color: var(--color-text-secondary);
   }
 
   .manual-fix-code {
@@ -1580,18 +1461,4 @@
     line-height: 1.3;
   }
 
-  .reset-confirm {
-    padding: 12px;
-    background: color-mix(in srgb, var(--color-warning) 8%, var(--color-bg-tertiary));
-    border: 1px solid color-mix(in srgb, var(--color-warning) 30%, var(--color-border-subtle));
-    border-radius: var(--radius-md);
-    margin-bottom: 8px;
-  }
-
-  .reset-confirm-text {
-    margin: 0 0 10px;
-    font-size: var(--text-sm);
-    color: var(--color-text-primary);
-    line-height: 1.4;
-  }
 </style>

@@ -200,6 +200,21 @@ pub fn run() {
         .setup(|app| {
             tracing::info!("Thoth starting");
 
+            // Request microphone permission BEFORE any audio enumeration.
+            // cpal's device enumeration touches CoreAudio which triggers the
+            // system mic prompt implicitly — but with no completion handler,
+            // so we can't detect the result. By calling requestAccess first,
+            // we own the dialog and get the result via our completion handler
+            // which emits a permission-changed event to the frontend.
+            #[cfg(target_os = "macos")]
+            {
+                use platform::macos::MicrophoneStatus;
+                if platform::macos::check_microphone_permission() == MicrophoneStatus::NotDetermined
+                {
+                    platform::macos::request_microphone_permission(app.handle().clone());
+                }
+            }
+
             // Initialise database early so tray menu queries work immediately
             database::initialise_database().map_err(|e| {
                 tracing::error!("Failed to initialise database: {}", e);
