@@ -111,6 +111,7 @@
   let resettingPermissions = $state(false);
   let resetError = $state<string | null>(null);
   let showResetConfirm = $state(false);
+  let permFixStatus = $state<{ quarantine: string; tcc: string }>({ quarantine: '', tcc: '' });
   let showManualFix = $state(false);
 
   async function handleAutostartToggle() {
@@ -928,37 +929,110 @@
     <summary class="optional-summary">Troubleshooting</summary>
     <div class="optional-content">
       <p class="troubleshoot-description">
-        If permissions appear granted but features aren't working, stale macOS permission entries
-        may be the cause. This commonly happens after app updates or reinstalls.
+        After installing a new version of Thoth, macOS may block it or hold onto stale permission entries.
+        Run these steps in order — each one takes about 2 seconds.
       </p>
-      {#if showResetConfirm}
-        <div class="reset-confirm">
-          <p class="reset-confirm-text">
-            This will revoke all macOS permissions for Thoth. You will need to re-grant
-            microphone, accessibility, and input monitoring permissions afterwards.
-          </p>
-          <div class="step-actions">
-            <button class="btn-setup warning" onclick={() => resetPermissions(['All'])} disabled={resettingPermissions}>
-              {resettingPermissions ? 'Resetting...' : 'Confirm Reset'}
-            </button>
-            <button class="btn-setup-alt" onclick={() => { showResetConfirm = false; }}>Cancel</button>
+
+      <!-- Step 1: Quarantine -->
+      <div class="fix-step">
+        <div class="fix-step-header">
+          <span class="fix-step-num">1</span>
+          <div class="fix-step-info">
+            <span class="fix-step-title">Remove quarantine flag</span>
+            <span class="fix-step-desc">macOS marks downloaded apps as quarantined. Removes the "are you sure?" block.</span>
           </div>
-        </div>
-      {:else}
-        <div class="step-actions">
-          <button class="btn-small warning" onclick={() => { showResetConfirm = true; }} disabled={resettingPermissions}>
-            Reset All Permissions
+          <button
+            class="btn-small"
+            onclick={async () => {
+              try {
+                await invoke('remove_quarantine');
+                permFixStatus.quarantine = 'done';
+              } catch (e) {
+                permFixStatus.quarantine = 'error';
+              }
+            }}
+          >
+            {permFixStatus.quarantine === 'done' ? '✓ Done' : permFixStatus.quarantine === 'error' ? '✗ Error' : 'Fix'}
           </button>
         </div>
-      {/if}
+      </div>
+
+      <!-- Step 2: Reset all TCC -->
+      <div class="fix-step">
+        <div class="fix-step-header">
+          <span class="fix-step-num">2</span>
+          <div class="fix-step-info">
+            <span class="fix-step-title">Reset system permissions</span>
+            <span class="fix-step-desc">Clears stale grants for Input Monitoring, Accessibility, and Microphone. macOS will re-prompt for each one.</span>
+          </div>
+          <button
+            class="btn-small warning"
+            onclick={async () => {
+              try {
+                await invoke('reset_tcc_permission', { service: 'ListenEvent' });
+                await invoke('reset_tcc_permission', { service: 'Accessibility' });
+                await invoke('reset_tcc_permission', { service: 'Microphone' });
+                permFixStatus.tcc = 'done';
+              } catch (e) {
+                permFixStatus.tcc = 'error';
+              }
+            }}
+          >
+            {permFixStatus.tcc === 'done' ? '✓ Done' : permFixStatus.tcc === 'error' ? '✗ Error' : 'Reset'}
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 3: Open privacy panes -->
+      <div class="fix-step">
+        <div class="fix-step-header">
+          <span class="fix-step-num">3</span>
+          <div class="fix-step-info">
+            <span class="fix-step-title">Open Privacy &amp; Security</span>
+            <span class="fix-step-desc">Opens the two panels where you'll re-grant permissions after relaunching Thoth.</span>
+          </div>
+          <div style="display:flex;gap:4px">
+            <button class="btn-small" onclick={() => invoke('open_privacy_pane', { pane: 'accessibility' })}>
+              Accessibility
+            </button>
+            <button class="btn-small" onclick={() => invoke('open_privacy_pane', { pane: 'input-monitoring' })}>
+              Input Monitoring
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4: Quit and relaunch -->
+      <div class="fix-step">
+        <div class="fix-step-header">
+          <span class="fix-step-num">4</span>
+          <div class="fix-step-info">
+            <span class="fix-step-title">Quit &amp; relaunch Thoth</span>
+            <span class="fix-step-desc">Restart the app so macOS re-prompts for each permission. Click Allow in each dialog.</span>
+          </div>
+          <button
+            class="btn-small"
+            onclick={async () => {
+              await invoke('relaunch_app').catch(() => {});
+            }}
+          >
+            Relaunch
+          </button>
+        </div>
+      </div>
+
       {#if resetError}
         <p class="step-error">{resetError}</p>
       {/if}
+
       <details class="manual-fix-details">
         <summary class="manual-fix-summary">Manual fix (Terminal)</summary>
         <div class="manual-fix">
-          <code class="manual-fix-code">sudo tccutil reset All com.poodle64.thoth</code>
-          <p class="manual-fix-hint">Then restart Thoth and re-grant permissions in System Settings &gt; Privacy &amp; Security.</p>
+          <code class="manual-fix-code">xattr -dr com.apple.quarantine /Applications/Thoth.app</code>
+          <code class="manual-fix-code">tccutil reset ListenEvent com.poodle64.thoth</code>
+          <code class="manual-fix-code">tccutil reset Accessibility com.poodle64.thoth</code>
+          <code class="manual-fix-code">tccutil reset Microphone com.poodle64.thoth</code>
+          <p class="manual-fix-hint">Then restart Thoth and re-grant permissions in System Settings → Privacy &amp; Security.</p>
         </div>
       </details>
     </div>
@@ -1414,6 +1488,7 @@
 
   .manual-fix-code {
     display: block;
+    margin-bottom: 4px;
     padding: 8px 10px;
     background: var(--color-bg-primary);
     border: 1px solid var(--color-border-subtle);
@@ -1444,10 +1519,57 @@
 
   /* Troubleshooting section */
   .troubleshoot-description {
-    margin: 0 0 10px;
+    margin: 0 0 12px;
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
     line-height: 1.4;
+  }
+
+  .fix-step {
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    margin-bottom: 8px;
+  }
+
+  .fix-step-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .fix-step-num {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    color: var(--color-bg);
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .fix-step-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .fix-step-title {
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--color-text-primary);
+  }
+
+  .fix-step-desc {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    line-height: 1.3;
   }
 
   .reset-confirm {
