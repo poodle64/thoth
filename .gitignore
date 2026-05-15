@@ -9,15 +9,16 @@
 .Spotlight-V100
 .Trashes
 Thumbs.db
+desktop.ini
 
 # ============================================================================
 # Editor / IDE
 # ============================================================================
+.idea/
+.vscode/
 *.swp
 *.swo
 *~
-.vscode/
-.idea/
 
 # ============================================================================
 # Claude Code
@@ -25,11 +26,6 @@ Thumbs.db
 .claude/settings.local.json
 .claude/CLAUDE.local.md
 .claude/.sessions/
-# Master project symlinks (local dev only, broken for other contributors)
-.claude/commands/master
-.claude/hooks/master
-.claude/rules/master
-.claude/skills
 
 # ============================================================================
 # Environment & Secrets
@@ -50,6 +46,8 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+dist/
+build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -62,21 +60,27 @@ htmlcov/
 node_modules/
 .npm/
 .pnpm-store/
+.svelte-kit/
 npm-debug.log*
-*.log
 
 # ============================================================================
 # Testing / MCP Tools
-.superpowers/
 # ============================================================================
 .playwright-mcp/
+.superpowers/
 
 # ============================================================================
-# Build Outputs
+# TikZ / LaTeX Diagrams
 # ============================================================================
-dist/
-build/
-.svelte-kit/
+docs/diagrams/*.aux
+docs/diagrams/*.log
+docs/diagrams/*.pdf
+
+# ============================================================================
+# Logs
+# ============================================================================
+logs/
+*.log
 
 # ============================================================================
 # Rust / Tauri
@@ -87,37 +91,26 @@ src-tauri/Cargo.lock
 *.dylib
 
 # ============================================================================
-# TikZ / LaTeX Diagrams
-# ============================================================================
-docs/diagrams/*.aux
-docs/diagrams/*.log
-docs/diagrams/*.pdf
-
-# ============================================================================
-# Models (too large for git)
-# ============================================================================
-models/
-
-# ============================================================================
-# Internal docs (local dev only, not for public repo)
-# ============================================================================
-docs/deployment/
-docs/research/
-docs/master
-# Branding: track hero image and overview screenshot, gitignore private design work
-docs/branding/colour-schemes.md
-docs/branding/colour-preview.html
-docs/branding/icon-design-brief.md
-docs/branding/app-icon-prompt.md
-
-# ============================================================================
 # Private planning docs (not for public repos)
 # ============================================================================
 docs/product/
 docs/superpowers/
 
 # ============================================================================
-# Temporary files
+# Project-Specific
 # ============================================================================
+# Models (too large for git)
+models/
+
+# Internal docs (local dev only, not for public repo)
+docs/deployment/
+docs/research/
+# Branding: track hero image and overview screenshot, gitignore private design work
+docs/branding/colour-schemes.md
+docs/branding/colour-preview.html
+docs/branding/icon-design-brief.md
+docs/branding/app-icon-prompt.md
+
+# Temporary files
 *.tmp
 *.temp
