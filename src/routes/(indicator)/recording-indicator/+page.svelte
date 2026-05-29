@@ -102,8 +102,17 @@
       const levelUnlisten = await listen<{ rms: number; peak: number }>(
         'recording-audio-level',
         (event) => {
-          // Normalise and boost for visibility
-          audioLevel = Math.min(1, event.payload.rms * 3);
+          // Map the raw level to a visible 0-1 range. Real microphones —
+          // especially line-level USB mics like the DJI MIC MINI — produce a
+          // low-amplitude signal: normal speech RMS sits around 0.005-0.03 and
+          // peaks around 0.03-0.10. A small linear multiplier left every bar
+          // pinned at the minimum height, which is why the waveform looked
+          // dead. We use the more responsive `peak`, apply a perceptual
+          // (square-root) curve so quiet speech still moves the bars without
+          // loud speech clipping instantly, and scale so typical speech fills
+          // a healthy fraction of the bar.
+          const peak = event.payload.peak;
+          audioLevel = Math.min(1, Math.sqrt(peak) * 2.2);
 
           // Update waveform history for pill style
           waveformUpdateCounter++;

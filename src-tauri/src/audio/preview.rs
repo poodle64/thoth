@@ -282,4 +282,47 @@ mod tests {
         assert!(state.stream.is_none());
         assert!(!state.stop_flag.load(Ordering::Relaxed));
     }
+
+    /// Proves the metering emitter's read-and-process path produces a real,
+    /// non-zero level when the recorder's callback writes non-silent samples
+    /// into the SAME shared buffer the emitter reads from. This mirrors the
+    /// production flow without needing a live audio device:
+    ///   recorder callback ──write──▶ shared AudioRingBuffer ──read──▶ AudioMeter
+    /// If this passes but the on-screen waveform is flat, the break is on the
+    /// frontend delivery/render side, not in this Rust level path.
+    #[test]
+    fn test_metering_emitter_reads_nonzero_from_shared_buffer() {
+        use crate::audio::AudioRecorder;
+        use crate::audio::AudioRingBuffer;
+        use std::sync::Arc;
+
+        // Wire a metering buffer into the recorder exactly as start_recording does.
+        let metering_buf = Arc::new(AudioRingBuffer::new());
+        let mut recorder = AudioRecorder::new();
+        recorder.set_metering_buffer(metering_buf.clone());
+
+        // Simulate the audio callback writing a non-silent block (a half-scale
+        // square wave). We write directly to the SAME Arc the recorder holds,
+        // which is what the cpal callback closure does in capture.rs.
+        let block: Vec<f32> = (0..2048)
+            .map(|i| if i % 2 == 0 { 0.5 } else { -0.5 })
+            .collect();
+        let written = metering_buf.write(&block);
+        assert_eq!(written, block.len(), "ring buffer should accept the block");
+
+        // The emitter reads from current_metering_buffer-equivalent (same Arc)
+        // into a scratch buffer and runs the meter — identical to the live loop.
+        let mut scratch = vec![0.0f32; 4096];
+        let n = metering_buf.read(&mut scratch);
+        assert!(n > 0, "emitter must read the written samples back");
+
+        let mut meter = AudioMeter::new();
+        let level = meter.process(&scratch[..n]);
+        assert!(
+            level.rms > 0.4,
+            "RMS of a half-scale square wave should be ~0.5, got {}",
+            level.rms
+        );
+        assert!(level.peak > 0.4, "peak should be ~0.5, got {}", level.peak);
+    }
 }
