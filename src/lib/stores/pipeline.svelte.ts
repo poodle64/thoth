@@ -12,14 +12,15 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { toast } from 'svelte-sonner';
 import { configStore } from './config.svelte';
 import { settingsStore } from './settings.svelte';
+import { soundStore } from './sound.svelte';
 
 /** Debug logging — only active in development builds */
 const debug = import.meta.env.DEV
   ? (...args: unknown[]) => console.log('[Pipeline]', ...args)
   : () => {};
-import { soundStore } from './sound.svelte';
 
 /** Pipeline execution states */
 export type PipelineState =
@@ -255,13 +256,17 @@ function createPipelineStore() {
     // NOTE: Recording indicator is shown directly from the Rust shortcut handler
     // for instant response. No need to call it from here.
 
-    // Play the dictation-style begin tone when starting
-    soundStore.playRecordingStart();
-
     try {
       debug(' Calling pipeline_start_recording...');
       const path = await invoke<string>('pipeline_start_recording');
       debug(' Recording started at path:', path);
+
+      // Play the dictation-style begin tone only AFTER the backend confirms the
+      // recording actually started. Playing it earlier would lie when the
+      // backend rejects the start (e.g. the previous pipeline is still
+      // processing), leaving the user talking to a dead mic.
+      soundStore.playRecordingStart();
+
       audioPath = path;
       state = 'recording';
       isRunning = true;
@@ -396,8 +401,14 @@ function createPipelineStore() {
           const startResult = await startRecording();
           return { success: startResult.success, error: startResult.error };
         } else {
-          // Processing in progress
+          // Processing in progress: a start press arrived while the previous
+          // recording is still transcribing/enhancing/pasting (the backend
+          // holds the pipeline lock across that whole window). Give the user
+          // explicit feedback instead of silently dropping the press and
+          // leaving them dictating to a mic that never opened.
           debug(' Processing in progress, ignoring toggle');
+          soundStore.playError();
+          toast.info('Still processing the last recording…');
           return { success: false, error: 'Processing in progress' };
         }
       }
