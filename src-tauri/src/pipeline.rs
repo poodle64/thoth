@@ -237,9 +237,7 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
             // The indicator window is pre-warmed at startup so no JS init wait needed.
 
             // Start recording metering AFTER the indicator is visible
-            if let Err(e) =
-                crate::audio::start_recording_metering(app, device_id.as_deref())
-            {
+            if let Err(e) = crate::audio::start_recording_metering(app) {
                 tracing::warn!("Pipeline: Failed to start recording metering: {}", e);
             }
 

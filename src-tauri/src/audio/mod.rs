@@ -32,6 +32,9 @@ use tauri::{AppHandle, Emitter};
 /// Global recorder instance (basic, no VAD)
 static RECORDER: OnceLock<Mutex<AudioRecorder>> = OnceLock::new();
 
+/// Metering ring buffer for the current recording session (set by start_recording, cleared by stop_recording)
+static METERING_BUFFER: OnceLock<Mutex<Option<Arc<AudioRingBuffer>>>> = OnceLock::new();
+
 /// Global VAD-enabled recorder instance
 static VAD_RECORDER: OnceLock<Mutex<VadRecorder>> = OnceLock::new();
 
@@ -62,6 +65,17 @@ fn get_vad_config() -> &'static Mutex<VadConfig> {
 
 fn get_vad_enabled() -> &'static Arc<AtomicBool> {
     VAD_ENABLED.get_or_init(|| Arc::new(AtomicBool::new(false)))
+}
+
+fn get_metering_buffer() -> &'static Mutex<Option<Arc<AudioRingBuffer>>> {
+    METERING_BUFFER.get_or_init(|| Mutex::new(None))
+}
+
+/// Return a clone of the current recording's metering ring buffer, if one is active.
+///
+/// Used by the recording metering emitter to read samples without opening a second device stream.
+pub fn current_metering_buffer() -> Option<Arc<AudioRingBuffer>> {
+    get_metering_buffer().lock().clone()
 }
 
 /// Start recording audio to ~/.thoth/Recordings/
@@ -99,6 +113,11 @@ pub fn start_recording() -> Result<String, String> {
     let audio_device = device::get_recording_device(device_id)
         .ok_or_else(|| "No audio input device available".to_string())?;
 
+    // Create a fresh metering buffer and attach it before starting the stream
+    let metering_buf = Arc::new(AudioRingBuffer::new());
+    recorder.set_metering_buffer(metering_buf.clone());
+    *get_metering_buffer().lock() = Some(metering_buf);
+
     recorder
         .start(&audio_device, &output_path)
         .map_err(|e| e.to_string())?;
@@ -114,6 +133,9 @@ pub fn stop_recording() -> Result<String, String> {
     if !recorder.is_recording() {
         return Err("No recording in progress".to_string());
     }
+
+    recorder.clear_metering_buffer();
+    *get_metering_buffer().lock() = None;
 
     let path = recorder.stop().map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().to_string())

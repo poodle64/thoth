@@ -229,4 +229,28 @@ mod tests {
         meter.reset();
         assert_eq!(meter.peak, 0.0);
     }
+
+    /// Verifies that writing non-zero samples into an AudioRingBuffer and then
+    /// reading them through AudioMeter produces rms > 0. This proves the
+    /// shared-buffer metering path delivers real levels to the meter.
+    #[test]
+    fn test_shared_buffer_metering_produces_nonzero_rms() {
+        use crate::audio::ring_buffer::AudioRingBuffer;
+
+        let buf = AudioRingBuffer::new();
+        let samples = vec![0.5f32; 1024];
+        buf.write(&samples);
+
+        let mut scratch = vec![0.0f32; 4096];
+        let n = buf.read(&mut scratch);
+        assert!(n > 0, "ring buffer should have data after write");
+
+        let mut meter = AudioMeter::new();
+        let level = meter.process(&scratch[..n]);
+        assert!(
+            level.rms > 0.0,
+            "rms should be > 0 for non-zero samples; got {}",
+            level.rms
+        );
+    }
 }

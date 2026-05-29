@@ -169,80 +169,36 @@ static RECORDING_METER_STATE: Mutex<Option<MeteringState>> = Mutex::new(None);
 
 /// Start recording metering - emits `recording-audio-level` events
 ///
-/// This runs alongside recording to provide real-time audio levels for the
-/// recording indicator overlay. Uses the same device as recording.
-pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Result<(), String> {
-    tracing::info!(
-        "Recording metering: starting with device_id={:?}",
-        device_id
-    );
+/// Routes metering through the recorder's shared ring buffer so the meter sees
+/// the exact samples being recorded, without opening a second device stream.
+/// A second stream on USB mics (e.g. DJI MIC MINI) receives silence because
+/// the device delivers audio to only one capture client on macOS.
+///
+/// Must be called AFTER `audio::start_recording()` so the metering buffer exists.
+pub fn start_recording_metering(app: AppHandle) -> Result<(), String> {
+    tracing::info!("[RECORDING METERING] starting via shared ring buffer");
 
     // Stop any existing metering
     stop_recording_metering_inner();
 
-    // Find the device using stable device IDs
-    let device = get_recording_device(device_id)
-        .ok_or_else(|| "No audio input device available".to_string())?;
-
-    let device_name = get_device_display_name(&device);
-    tracing::info!("Recording metering: using device '{}'", device_name);
-
-    let config = device.default_input_config().map_err(|e| {
-        tracing::error!("Recording metering: failed to get config: {}", e);
-        e.to_string()
+    // Obtain the metering ring buffer that the recorder's callback writes into
+    let buf = crate::audio::current_metering_buffer().ok_or_else(|| {
+        "Recording metering: no metering buffer available (recorder not started?)".to_string()
     })?;
-    let channels = config.channels() as usize;
-    tracing::info!(
-        "Recording metering: config {}Hz, {} channels",
-        config.sample_rate(),
-        channels
-    );
 
-    // Shared state for metering
-    let meter = Arc::new(Mutex::new(AudioMeter::new()));
     let stop_flag = Arc::new(AtomicBool::new(false));
+    let mut meter = AudioMeter::new();
 
-    // Channel for audio data
-    let (tx, rx) = crossbeam_channel::bounded::<Vec<f32>>(16);
+    // Scratch buffer allocated once outside the read loop — never inside
+    let mut scratch = vec![0.0f32; 4096];
 
-    // Build the input stream
-    let stream = {
-        let tx = tx.clone();
-        device
-            .build_input_stream(
-                &config.into(),
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    let mono: Vec<f32> = data
-                        .chunks(channels)
-                        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
-                        .collect();
-                    let _ = tx.try_send(mono);
-                },
-                |err| {
-                    tracing::error!("Recording meter stream error: {}", err);
-                },
-                None,
-            )
-            .map_err(|e| {
-                tracing::error!("Recording metering: failed to build stream: {}", e);
-                e.to_string()
-            })?
-    };
-
-    stream.play().map_err(|e| {
-        tracing::error!("Recording metering: failed to play stream: {}", e);
-        e.to_string()
-    })?;
-
-    tracing::info!("Recording metering: audio stream active");
-
-    // Spawn emitter thread to send levels to the recording-indicator window
+    // Spawn emitter thread to drain the ring buffer and emit levels
     let emit_stop_flag = stop_flag.clone();
     let emit_handle = std::thread::spawn(move || {
         while !emit_stop_flag.load(Ordering::Relaxed) {
-            while let Ok(samples) = rx.try_recv() {
-                let mut meter = meter.lock();
-                let level = meter.process(&samples);
+            let n = buf.read(&mut scratch);
+            if n > 0 {
+                let level = meter.process(&scratch[..n]);
 
                 let event = AudioLevelEvent {
                     rms: level.rms,
@@ -269,10 +225,10 @@ pub fn start_recording_metering(app: AppHandle, device_id: Option<&str>) -> Resu
         }
     });
 
-    // Store state
+    // Store state — no cpal stream; metering follows the recorder's stream
     let mut state_guard = RECORDING_METER_STATE.lock();
     *state_guard = Some(MeteringState {
-        stream: Some(stream),
+        stream: None,
         stop_flag,
         emit_handle: Some(emit_handle),
     });

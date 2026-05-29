@@ -19,6 +19,8 @@ pub struct AudioRecorder {
     ring_buffer: Arc<AudioRingBuffer>,
     /// Optional secondary ring buffer for VAD or other consumers
     secondary_buffer: Option<Arc<AudioRingBuffer>>,
+    /// Optional ring buffer for real-time metering (recording indicator waveform)
+    metering_buffer: Option<Arc<AudioRingBuffer>>,
     /// Source sample rate (set during recording)
     source_rate: Option<u32>,
     /// Source channel count (set during recording)
@@ -41,6 +43,7 @@ impl AudioRecorder {
             output_path: None,
             ring_buffer: Arc::new(AudioRingBuffer::new()),
             secondary_buffer: None,
+            metering_buffer: None,
             source_rate: None,
             source_channels: None,
         }
@@ -57,6 +60,19 @@ impl AudioRecorder {
     /// Clear the secondary buffer
     pub fn clear_secondary_buffer(&mut self) {
         self.secondary_buffer = None;
+    }
+
+    /// Set a dedicated metering ring buffer that receives audio data alongside the primary buffer.
+    ///
+    /// Routes raw device-native samples to the metering consumer without opening a second
+    /// device stream. Must be called before `start()`.
+    pub fn set_metering_buffer(&mut self, buffer: Arc<AudioRingBuffer>) {
+        self.metering_buffer = Some(buffer);
+    }
+
+    /// Clear the metering buffer
+    pub fn clear_metering_buffer(&mut self) {
+        self.metering_buffer = None;
     }
 
     /// Check if currently recording
@@ -132,6 +148,7 @@ impl AudioRecorder {
         // Clone ring buffers for the audio callback
         let callback_buffer = self.ring_buffer.clone();
         let secondary_callback_buffer = self.secondary_buffer.clone();
+        let metering_callback_buffer = self.metering_buffer.clone();
 
         // Build input stream
         let stream = device.build_input_stream(
@@ -149,6 +166,11 @@ impl AudioRecorder {
                 // Write to secondary buffer if present (for VAD processing)
                 if let Some(ref secondary) = secondary_callback_buffer {
                     secondary.write(data);
+                }
+
+                // Write to metering buffer if present (for recording-indicator waveform)
+                if let Some(ref m) = metering_callback_buffer {
+                    m.write(data);
                 }
             },
             |err| {
