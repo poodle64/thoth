@@ -252,7 +252,7 @@
           shift: event.shiftKey,
           alt: event.altKey,
           meta: event.metaKey,
-          event_type: 'keydown',
+          eventType: 'keydown',
         });
       } catch (e) {
         console.error('Failed to report key event:', e);

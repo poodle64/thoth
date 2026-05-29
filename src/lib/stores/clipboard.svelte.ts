@@ -262,8 +262,8 @@ function createClipboardStore() {
     try {
       await invoke('insert_text_by_typing', {
         text,
-        keystroke_delay_ms: keystrokeDelayMs,
-        initial_delay_ms: initialDelayMs,
+        keystrokeDelayMs,
+        initialDelayMs,
       });
       return true;
     } catch (e) {
@@ -291,7 +291,7 @@ function createClipboardStore() {
     try {
       await invoke('insert_text_by_paste', {
         text,
-        initial_delay_ms: initialDelayMs,
+        initialDelayMs,
       });
       return true;
     } catch (e) {
