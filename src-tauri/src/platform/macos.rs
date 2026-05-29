@@ -543,33 +543,44 @@ pub fn is_screen_locked() -> bool {
 /// evicted. We re-warm the transcription model in the background so the
 /// first recording after wake isn't penalised.
 pub fn register_wake_observer() {
+    // Poll cadence and the gap multiple that counts as "we were asleep".
+    // The thread sleeps POLL secs; if substantially more wall-clock elapsed,
+    // the process was suspended (sleep, display sleep, or a long lid-close).
+    // The previous 30s threshold missed short and display-only sleeps — the
+    // exact cases that leave the cursor indicator frozen. A ~8s gap against a
+    // 4s poll reliably flags real suspends without false-positiving on normal
+    // scheduler jitter.
+    const POLL_SECS: u64 = 4;
+    const WAKE_GAP_SECS: u64 = 8;
+
     std::thread::spawn(|| {
         let mut last_check = std::time::Instant::now();
 
         loop {
-            std::thread::sleep(std::time::Duration::from_secs(5));
+            std::thread::sleep(std::time::Duration::from_secs(POLL_SECS));
             let now = std::time::Instant::now();
             let elapsed = now.duration_since(last_check);
+            last_check = now;
 
-            // If more than 30 seconds have passed in what should be ~5 seconds,
-            // the system was asleep.
-            if elapsed > std::time::Duration::from_secs(30) {
+            if elapsed > std::time::Duration::from_secs(WAKE_GAP_SECS) {
                 tracing::info!(
-                    "Detected wake from sleep ({:.0}s gap), re-warming transcription model",
+                    "Detected wake from sleep ({:.0}s gap)",
                     elapsed.as_secs_f64()
                 );
-                // Brief delay to let the system stabilise after wake
+                // Invalidate the mouse tracker's caches FIRST (a cheap atomic)
+                // so the indicator can recover immediately, without waiting on
+                // the multi-second model re-warm below.
+                crate::mouse_tracker::notify_wake();
+                // Then re-warm the transcription model: the CoreML/ONNX compile
+                // cache may have been evicted across sleep, so the first
+                // recording after wake would otherwise be penalised.
                 std::thread::sleep(std::time::Duration::from_secs(3));
                 crate::transcription::warmup_transcription();
-                // Invalidate mouse tracker's cached monitor bounds
-                crate::mouse_tracker::notify_wake();
             }
-
-            last_check = now;
         }
     });
 
-    tracing::info!("Registered wake-from-sleep observer for model re-warming");
+    tracing::info!("Registered wake-from-sleep observer");
 }
 
 #[cfg(test)]

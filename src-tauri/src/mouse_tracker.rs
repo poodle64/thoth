@@ -386,6 +386,32 @@ pub fn start_tracking() {
                     );
                 }
 
+                // Self-heal after a sustained failure run. A long gap of failed
+                // polls is the signature of a sleep/wake (or display
+                // reconfiguration): CGEvent returns nothing for hundreds of ms,
+                // the indicator gets parked off-screen, and the smoothed/cached
+                // state is now stale. Recovery must not depend on notify_wake()
+                // firing — the wake observer is a heuristic that misses short
+                // and display-only sleeps. Treat the recovery itself as a wake:
+                // discard the stale position and monitor cache so the next
+                // reposition snaps straight to the live cursor instead of
+                // lerping from the off-screen/pre-sleep position (or never
+                // moving because last_x is unchanged).
+                if failures >= FAILURE_HIDE_THRESHOLD {
+                    tracing::info!(
+                        "Self-healing tracker state after {} failed polls (wake/reconfig)",
+                        failures
+                    );
+                    smooth_x = f64::NAN;
+                    smooth_y = f64::NAN;
+                    last_x = f64::NAN;
+                    last_y = f64::NAN;
+                    cached_monitor = None;
+                    last_monitor_refresh = None;
+                    last_refresh_cx = f64::NAN;
+                    last_refresh_cy = f64::NAN;
+                }
+
                 let dx = (cx - last_x).abs();
                 let dy = (cy - last_y).abs();
 
