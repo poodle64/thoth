@@ -149,6 +149,9 @@
       case 'copy_last_transcription':
         configStore.updateShortcuts('copyLast', accelerator);
         break;
+      case 'toggle_enhancement':
+        configStore.updateShortcuts('toggleEnhancement', accelerator);
+        break;
     }
   }
 
@@ -164,6 +167,7 @@
           toggle_recording: configStore.shortcuts.toggleRecording,
           toggle_recording_alt: configStore.shortcuts.toggleRecordingAlt,
           copy_last: configStore.shortcuts.copyLast,
+          toggle_enhancement: configStore.shortcuts.toggleEnhancement,
           recording_mode: configStore.shortcuts.recordingMode,
         },
       });

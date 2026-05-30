@@ -829,6 +829,14 @@ fn handle_select_model(app: &AppHandle, model_id: String) {
     });
 }
 
+/// Payload for the enhancement-toggled-shortcut event
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EnhancementToggledShortcutPayload {
+    enabled: bool,
+    prompt_name: String,
+}
+
 /// Handle AI enhancement toggle from the tray submenu
 fn handle_toggle_enhancement(app: &AppHandle) {
     match config::get_config() {
@@ -851,6 +859,65 @@ fn handle_toggle_enhancement(app: &AppHandle) {
             tracing::error!("Failed to read config for enhancement toggle: {}", e);
         }
     }
+}
+
+/// Handle AI enhancement toggle from the global shortcut.
+///
+/// Uses the bypass writer so the prompt_id preservation guard in set_config
+/// does not interfere. Emits a distinct event with prompt name so the frontend
+/// can show a descriptive toast without a separate IPC call.
+///
+/// Tray rebuild happens via `rebuild_tray_menu_from_app` which is called by
+/// the `refresh_tray_menu` Tauri command on the concrete Wry handle. Here we
+/// emit `"tray-refresh-needed"` so the main window can invoke that command,
+/// keeping this function runtime-generic and the rebuild on the concrete path.
+pub fn handle_toggle_enhancement_shortcut<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let cfg = match config::get_config() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to read config for enhancement shortcut: {}", e);
+            return;
+        }
+    };
+
+    let new_enabled = !cfg.enhancement.enabled;
+
+    if let Err(e) = config::set_enhancement_enabled(new_enabled) {
+        tracing::error!("Failed to save enhancement toggle via shortcut: {}", e);
+        return;
+    }
+
+    tracing::info!("AI enhancement toggled via shortcut to: {}", new_enabled);
+
+    // Emit the plain boolean event so the Settings UI stays in sync (same as tray path)
+    let _ = app.emit("enhancement-toggled", new_enabled);
+
+    // Resolve the current prompt's human name for the toast
+    let prompt_name = enhancement::prompts::get_all_prompts()
+        .into_iter()
+        .find(|p| p.id == cfg.enhancement.prompt_id)
+        .map(|p| p.name)
+        .unwrap_or_else(|| cfg.enhancement.prompt_id.clone());
+
+    let payload = EnhancementToggledShortcutPayload {
+        enabled: new_enabled,
+        prompt_name,
+    };
+
+    // Notify frontend for the toast
+    let _ = app.emit("enhancement-toggled-shortcut", payload);
+
+    // Trigger a tray rebuild. The Rust shortcut handler is generic over Runtime,
+    // but rebuild_tray_menu needs a concrete AppHandle<Wry>. We request the
+    // rebuild by emitting an internal event; the frontend's settings store
+    // calls `refresh_tray_menu` (a Tauri command) in response to the
+    // `enhancement-toggled` event, which runs on the concrete Wry handle.
+    // No additional event is needed here — the existing enhancement-toggled
+    // listener in settings.svelte.ts will trigger a config reload and any
+    // subscriber can call refresh_tray_menu if desired. The tray will at
+    // minimum self-update on the next menu open because macOS rebuilds the
+    // menu lazily. For an immediate update we emit a dedicated signal.
+    let _ = app.emit("tray-rebuild-needed", ());
 }
 
 /// Handle prompt selection from the tray submenu

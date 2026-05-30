@@ -208,6 +208,20 @@ function createPipelineStore() {
     });
     unlisteners.push(cancelUnlisten);
 
+    // Show a toast when AI enhancement is toggled via the global shortcut
+    const enhancementShortcutUnlisten = await listen<{
+      enabled: boolean;
+      promptName: string;
+    }>('enhancement-toggled-shortcut', (event) => {
+      const { enabled, promptName } = event.payload;
+      if (enabled) {
+        toast.info(`AI Enhancement: On — ${promptName}`);
+      } else {
+        toast.info('AI Enhancement: Off');
+      }
+    });
+    unlisteners.push(enhancementShortcutUnlisten);
+
     // Listen for shortcut events to trigger recording.
     // The start-vs-stop decision is made by the Rust pipeline_toggle_recording
     // command (which reads is_recording() — the single authority). The frontend

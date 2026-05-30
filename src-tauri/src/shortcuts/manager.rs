@@ -30,6 +30,7 @@ pub mod shortcut_ids {
     pub const TOGGLE_RECORDING: &str = "toggle_recording";
     pub const TOGGLE_RECORDING_ALT: &str = "toggle_recording_alt";
     pub const COPY_LAST_TRANSCRIPTION: &str = "copy_last_transcription";
+    pub const TOGGLE_ENHANCEMENT: &str = "toggle_enhancement";
 }
 
 /// Global shortcut manager instance
@@ -79,6 +80,12 @@ pub fn get_defaults() -> Vec<ShortcutInfo> {
             id: shortcut_ids::TOGGLE_RECORDING_ALT.to_string(),
             accelerator: "ShiftRight".to_string(),
             description: "Toggle recording (alternative)".to_string(),
+            is_enabled: false,
+        },
+        ShortcutInfo {
+            id: shortcut_ids::TOGGLE_ENHANCEMENT.to_string(),
+            accelerator: String::new(),
+            description: "Toggle AI enhancement".to_string(),
             is_enabled: false,
         },
     ]
@@ -210,6 +217,13 @@ pub fn register<R: Runtime>(
                         return;
                     }
 
+                    // Handle toggle-enhancement directly in Rust
+                    // (no frontend round-trip needed)
+                    if shortcut_id == shortcut_ids::TOGGLE_ENHANCEMENT {
+                        crate::tray::handle_toggle_enhancement_shortcut(&app_handle);
+                        return;
+                    }
+
                     match app_handle.emit("shortcut-triggered", shortcut_id.clone()) {
                         Ok(_) => {
                             tracing::info!("Emitted shortcut-triggered event for: {}", shortcut_id)
@@ -333,7 +347,7 @@ mod tests {
     fn test_get_defaults_returns_expected_shortcuts() {
         let defaults = get_defaults();
 
-        assert_eq!(defaults.len(), 3);
+        assert_eq!(defaults.len(), 4);
 
         let toggle = defaults
             .iter()
@@ -352,6 +366,12 @@ mod tests {
             .find(|s| s.id == shortcut_ids::TOGGLE_RECORDING_ALT);
         assert!(alt.is_some());
         assert_eq!(alt.unwrap().accelerator, "ShiftRight");
+
+        let enh = defaults
+            .iter()
+            .find(|s| s.id == shortcut_ids::TOGGLE_ENHANCEMENT);
+        assert!(enh.is_some());
+        assert_eq!(enh.unwrap().accelerator, "");
     }
 
     #[test]

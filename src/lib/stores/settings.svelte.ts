@@ -34,6 +34,7 @@ export function createSettingsStore() {
   let deviceChangedUnlisten: UnlistenFn | null = null;
   let promptChangedUnlisten: UnlistenFn | null = null;
   let enhancementToggledUnlisten: UnlistenFn | null = null;
+  let trayRebuildUnlisten: UnlistenFn | null = null;
 
   /**
    * Load available audio input devices from the backend
@@ -145,6 +146,15 @@ export function createSettingsStore() {
     enhancementToggledUnlisten = await listen<boolean>('enhancement-toggled', (event) => {
       configStore.updateEnhancement('enabled', event.payload);
     });
+
+    // Rebuild the tray when a shortcut handler requests it (e.g. enhancement toggle shortcut)
+    trayRebuildUnlisten = await listen('tray-rebuild-needed', async () => {
+      try {
+        await invoke('refresh_tray_menu');
+      } catch (e) {
+        console.warn('Failed to refresh tray menu:', e);
+      }
+    });
   }
 
   /**
@@ -162,6 +172,10 @@ export function createSettingsStore() {
     if (enhancementToggledUnlisten) {
       enhancementToggledUnlisten();
       enhancementToggledUnlisten = null;
+    }
+    if (trayRebuildUnlisten) {
+      trayRebuildUnlisten();
+      trayRebuildUnlisten = null;
     }
   }
 

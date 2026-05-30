@@ -109,6 +109,13 @@ fn register_shortcuts_from_config(app: &tauri::AppHandle, cfg: &config::Config) 
                 "Copy last transcription",
             )
         }),
+        cfg.shortcuts.toggle_enhancement.as_deref().map(|accel| {
+            (
+                shortcut_ids::TOGGLE_ENHANCEMENT,
+                accel,
+                "Toggle AI enhancement",
+            )
+        }),
     ]
     .into_iter()
     .flatten()

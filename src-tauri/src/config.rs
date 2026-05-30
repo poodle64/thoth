@@ -146,6 +146,8 @@ pub struct ShortcutConfig {
     pub toggle_recording_alt: Option<String>,
     /// Copy last transcription shortcut
     pub copy_last: Option<String>,
+    /// Toggle AI enhancement on/off shortcut (unbound by default)
+    pub toggle_enhancement: Option<String>,
     /// Recording mode: toggle or push-to-talk
     pub recording_mode: RecordingMode,
 }
@@ -156,6 +158,7 @@ impl Default for ShortcutConfig {
             toggle_recording: "F13".to_string(),
             toggle_recording_alt: Some("ShiftRight".to_string()),
             copy_last: Some("F14".to_string()),
+            toggle_enhancement: None,
             recording_mode: RecordingMode::default(),
         }
     }
@@ -477,6 +480,26 @@ pub fn set_config(mut config: Config) -> Result<(), String> {
             );
             config.shortcuts.toggle_recording_alt = current.shortcuts.toggle_recording_alt.clone();
         }
+
+        // Preserve toggle_enhancement if incoming is None but cached has a user-set value.
+        if config.shortcuts.toggle_enhancement.is_none()
+            && current.shortcuts.toggle_enhancement.is_some()
+        {
+            tracing::debug!(
+                "Preserving toggle_enhancement={:?} (incoming config had None)",
+                current.shortcuts.toggle_enhancement
+            );
+            config.shortcuts.toggle_enhancement = current.shortcuts.toggle_enhancement.clone();
+        }
+
+        // Preserve copy_last if incoming is None but cached has a user-set value.
+        if config.shortcuts.copy_last.is_none() && current.shortcuts.copy_last.is_some() {
+            tracing::debug!(
+                "Preserving copy_last={:?} (incoming config had None)",
+                current.shortcuts.copy_last
+            );
+            config.shortcuts.copy_last = current.shortcuts.copy_last.clone();
+        }
     }
 
     // Save to disk first
@@ -524,6 +547,19 @@ pub fn set_prompt_config(prompt_id: String) -> Result<(), String> {
         "Prompt config updated (prompt_id: {:?})",
         cached.enhancement.prompt_id
     );
+    Ok(())
+}
+
+/// Set enhancement enabled directly, bypassing set_config's preservation logic.
+///
+/// This is the correct way to toggle enhancement from the shortcut handler. The
+/// preservation logic in `set_config` has a prompt_id guard that would interfere
+/// with a full-config round-trip; this bypass touches only the `enabled` flag.
+pub fn set_enhancement_enabled(enabled: bool) -> Result<(), String> {
+    let mut cached = get_config_instance().write();
+    cached.enhancement.enabled = enabled;
+    save_to_disk(&cached)?;
+    tracing::info!("Enhancement enabled updated to: {}", enabled);
     Ok(())
 }
 
@@ -626,6 +662,7 @@ mod tests {
             Some("ShiftRight".to_string())
         );
         assert_eq!(shortcuts.copy_last, Some("F14".to_string()));
+        assert_eq!(shortcuts.toggle_enhancement, None);
         assert_eq!(shortcuts.recording_mode, RecordingMode::Toggle);
     }
 
@@ -753,6 +790,7 @@ mod tests {
                 toggle_recording: "F12".to_string(),
                 toggle_recording_alt: None,
                 copy_last: None,
+                toggle_enhancement: None,
                 recording_mode: RecordingMode::Toggle,
             },
             enhancement: EnhancementConfig {
