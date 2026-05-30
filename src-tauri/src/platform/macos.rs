@@ -537,53 +537,110 @@ pub fn is_screen_locked() -> bool {
     }
 }
 
-/// Register a listener for system wake-from-sleep events.
+/// Milliseconds since the Unix epoch of the most recent wake event we acted on.
+/// Used to debounce the two notifications (DidWake + ScreensDidWake) that both
+/// fire on a full system wake. Zero means no wake has fired yet.
+static LAST_WAKE_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Run the wake recovery sequence on a background thread.
 ///
-/// When the Mac wakes up, the CoreML/ONNX compilation cache may have been
-/// evicted. We re-warm the transcription model in the background so the
-/// first recording after wake isn't penalised.
-pub fn register_wake_observer() {
-    // Poll cadence and the gap multiple that counts as "we were asleep".
-    // The thread sleeps POLL secs; if substantially more wall-clock elapsed,
-    // the process was suspended (sleep, display sleep, or a long lid-close).
-    // The previous 30s threshold missed short and display-only sleeps — the
-    // exact cases that leave the cursor indicator frozen. A ~8s gap against a
-    // 4s poll reliably flags real suspends without false-positiving on normal
-    // scheduler jitter.
-    const POLL_SECS: u64 = 4;
-    const WAKE_GAP_SECS: u64 = 8;
+/// Kept separate so the NSWorkspace notification block stays cheap
+/// (grab atomic, maybe spawn, return) and this body can be called
+/// identically for both DidWake and ScreensDidWake.
+fn handle_wake(source: &str) {
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    // Milliseconds since epoch — fits in u64 for centuries.
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_millis() as u64;
+
+    // Debounce: both DidWake and ScreensDidWake fire on a full system wake.
+    // If we handled a wake within the last second, skip this duplicate.
+    let prev = LAST_WAKE_MS.load(Ordering::Relaxed);
+    if prev > 0 && now_ms.saturating_sub(prev) < 1000 {
+        tracing::debug!("Wake notification '{}' suppressed (debounce)", source);
+        return;
+    }
+    LAST_WAKE_MS.store(now_ms, Ordering::Relaxed);
+
+    tracing::info!("System wake detected via '{}'", source);
 
     std::thread::spawn(|| {
-        let mut last_check = std::time::Instant::now();
-
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(POLL_SECS));
-            let now = std::time::Instant::now();
-            let elapsed = now.duration_since(last_check);
-            last_check = now;
-
-            if elapsed > std::time::Duration::from_secs(WAKE_GAP_SECS) {
-                tracing::info!(
-                    "Detected wake from sleep ({:.0}s gap)",
-                    elapsed.as_secs_f64()
-                );
-                // Invalidate the mouse tracker's caches FIRST (a cheap atomic)
-                // so the indicator can recover immediately, without waiting on
-                // the multi-second model re-warm below.
-                crate::mouse_tracker::notify_wake();
-                // A held cpal stream handle goes stale across sleep; drop it so
-                // the next recording opens a fresh device handle.
-                crate::audio::cool_down_recording();
-                // Then re-warm the transcription model: the CoreML/ONNX compile
-                // cache may have been evicted across sleep, so the first
-                // recording after wake would otherwise be penalised.
-                std::thread::sleep(std::time::Duration::from_secs(3));
-                crate::transcription::warmup_transcription();
-            }
-        }
+        // Invalidate the mouse tracker's caches FIRST (a cheap atomic)
+        // so the indicator can recover immediately, without waiting on
+        // the multi-second model re-warm below.
+        crate::mouse_tracker::notify_wake();
+        // A held cpal stream handle goes stale across sleep; drop it so
+        // the next recording opens a fresh device handle.
+        crate::audio::cool_down_recording();
+        // Then re-warm the transcription model: the CoreML/ONNX compile
+        // cache may have been evicted across sleep, so the first
+        // recording after wake would otherwise be penalised.
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        crate::transcription::warmup_transcription();
     });
+}
 
-    tracing::info!("Registered wake-from-sleep observer");
+/// Register NSWorkspace observers for system wake and display-wake events.
+///
+/// Uses `NSWorkspaceDidWakeNotification` (full wake from sleep) and
+/// `NSWorkspaceScreensDidWakeNotification` (display wake, e.g. lid open or
+/// HDMI reconnect). The poll-based heuristic missed display-only wakes and
+/// short lid-close events; real OS notifications are exact.
+///
+/// Observer tokens are leaked for process lifetime — the returned object is
+/// not Send, so it cannot live in a static Mutex; leaking is the correct
+/// pattern for a once-registered, never-removed observer.
+pub fn register_wake_observer() {
+    use objc2::runtime::AnyObject;
+    use objc2_app_kit::{
+        NSWorkspace, NSWorkspaceDidWakeNotification, NSWorkspaceScreensDidWakeNotification,
+    };
+    use objc2_foundation::NSOperationQueue;
+    use std::ptr::NonNull;
+
+    unsafe {
+        let workspace = NSWorkspace::sharedWorkspace();
+        let center = workspace.notificationCenter();
+        let queue = NSOperationQueue::mainQueue();
+
+        // Build one block per notification name. Each block is cheap: debounce
+        // check + optional thread spawn. The `move` captures nothing heap-heavy.
+        let did_wake_block: block2::RcBlock<dyn Fn(NonNull<objc2_foundation::NSNotification>)> =
+            block2::RcBlock::new(move |_notif: NonNull<objc2_foundation::NSNotification>| {
+                handle_wake("NSWorkspaceDidWakeNotification");
+            });
+
+        let screens_did_wake_block: block2::RcBlock<
+            dyn Fn(NonNull<objc2_foundation::NSNotification>),
+        > = block2::RcBlock::new(move |_notif: NonNull<objc2_foundation::NSNotification>| {
+            handle_wake("NSWorkspaceScreensDidWakeNotification");
+        });
+
+        let token_did_wake = center.addObserverForName_object_queue_usingBlock(
+            Some(NSWorkspaceDidWakeNotification),
+            None::<&AnyObject>,
+            Some(&*queue),
+            &did_wake_block,
+        );
+
+        let token_screens_wake = center.addObserverForName_object_queue_usingBlock(
+            Some(NSWorkspaceScreensDidWakeNotification),
+            None::<&AnyObject>,
+            Some(&*queue),
+            &screens_did_wake_block,
+        );
+
+        // Leak the tokens for process lifetime — removing these observers is
+        // not needed (the app exits, taking the notification centre with it).
+        Box::leak(Box::new(token_did_wake));
+        Box::leak(Box::new(token_screens_wake));
+    }
+
+    tracing::info!("Registered NSWorkspace wake observers (DidWake + ScreensDidWake)");
 }
 
 #[cfg(test)]
