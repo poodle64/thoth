@@ -1,130 +1,84 @@
 /**
- * Auto-update state management store using Svelte 5 runes.
+ * Auto-update state management using Svelte 5 runes.
  *
  * Manages update checking, downloading, and installation via tauri-plugin-updater.
+ * User-facing notifications are handled via sonner toasts.
  */
 
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { invoke } from '@tauri-apps/api/core';
+import { toast } from 'svelte-sonner';
 
 /** GitHub releases page for manual download fallback */
 export const RELEASES_URL = 'https://github.com/poodle64/thoth/releases/latest';
 
-/** Update availability state */
+/** Update state visible to the Overview pane */
 export type UpdateState =
-  | 'idle' // Not checked or dismissed
-  | 'checking' // Checking for updates
-  | 'available' // Update available
-  | 'downloading' // Downloading update
-  | 'ready' // Downloaded and ready to install
-  | 'up-to-date' // No update available
-  | 'error'; // Error occurred
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'up-to-date'
+  | 'error';
 
-/** Updater store state */
 interface UpdaterState {
-  /** Current update state */
   state: UpdateState;
-  /** Available update object (if any) */
   update: Update | null;
-  /** Update version string */
   updateVersion: string | null;
-  /** Release notes (body from update manifest) */
-  releaseNotes: string | null;
-  /** Download progress (0-100) */
-  downloadProgress: number;
-  /** Error message (if state is 'error') */
   error: string | null;
 }
 
-/** Updater store singleton */
 const updaterState = $state<UpdaterState>({
   state: 'idle',
   update: null,
   updateVersion: null,
-  releaseNotes: null,
-  downloadProgress: 0,
   error: null,
 });
 
-/**
- * Check for available updates
- */
-export async function checkForUpdate(): Promise<void> {
-  // Reset state
-  updaterState.state = 'checking';
-  updaterState.error = null;
-  updaterState.update = null;
-  updaterState.updateVersion = null;
-  updaterState.releaseNotes = null;
-
-  try {
-    const update = await check();
-
-    if (update) {
-      // Update available
-      updaterState.state = 'available';
-      updaterState.update = update;
-      updaterState.updateVersion = update.version;
-      updaterState.releaseNotes = update.body || null;
-    } else {
-      // No update available
-      updaterState.state = 'up-to-date';
-    }
-  } catch (err) {
-    // Error checking for updates (likely offline or endpoint unreachable)
-    updaterState.state = 'error';
-    updaterState.error = err instanceof Error ? err.message : 'Failed to check for updates';
-    console.error('Update check failed:', err);
-  }
+function openReleasesPage() {
+  invoke('open_url', { url: RELEASES_URL }).catch((err) =>
+    console.error('Failed to open releases page:', err)
+  );
 }
 
-/**
- * Download and install the available update, then relaunch
- */
-export async function downloadAndInstall(): Promise<void> {
-  if (!updaterState.update) {
-    console.error('No update available to download');
-    return;
-  }
+/** Download and install the available update, then relaunch */
+async function downloadAndInstall(): Promise<void> {
+  if (!updaterState.update) return;
+
+  const toastId = toast.loading('Downloading update...');
 
   try {
     updaterState.state = 'downloading';
-    updaterState.downloadProgress = 0;
 
-    // Download and install with progress callback
     let downloaded = 0;
     await updaterState.update.downloadAndInstall((event) => {
       switch (event.event) {
-        case 'Started':
-          updaterState.downloadProgress = 0;
-          break;
         case 'Progress': {
-          // Accumulate downloaded bytes and calculate progress
           const chunk = event.data as { chunkLength: number; contentLength?: number };
           downloaded += chunk.chunkLength;
           if (chunk.contentLength && chunk.contentLength > 0) {
-            updaterState.downloadProgress = Math.min(
-              99,
-              Math.round((downloaded / chunk.contentLength) * 100)
-            );
+            const pct = Math.min(99, Math.round((downloaded / chunk.contentLength) * 100));
+            toast.loading(`Downloading update... ${pct}%`, { id: toastId });
           }
           break;
         }
         case 'Finished':
-          updaterState.downloadProgress = 100;
+          toast.success('Update installed. Restarting...', { id: toastId });
           break;
       }
     });
 
-    // Installation complete
-    updaterState.state = 'ready';
-
-    // Relaunch the application
     await relaunch();
   } catch (err) {
+    const message = describeUpdateError(err);
     updaterState.state = 'error';
-    updaterState.error = describeUpdateError(err);
-    console.error('Update download/install failed:', err);
+    updaterState.error = message;
+    toast.error('Update failed', {
+      id: toastId,
+      description: message,
+      action: { label: 'Retry', onClick: () => void checkForUpdate() },
+    });
   }
 }
 
@@ -152,46 +106,43 @@ function describeUpdateError(err: unknown): string {
 }
 
 /**
- * Retry after a failed update by re-checking for updates.
- * The previous Update object may be stale after a failed install,
- * so we start fresh rather than retrying downloadAndInstall().
+ * Check for available updates.
+ * Shows a toast when an update is found or when the check fails.
  */
-export async function retryUpdate(): Promise<void> {
+export async function checkForUpdate(): Promise<void> {
+  updaterState.state = 'checking';
   updaterState.error = null;
-  await checkForUpdate();
-}
-
-/**
- * Dismiss the current update notification (for this session)
- */
-export function dismissUpdate(): void {
-  updaterState.state = 'idle';
   updaterState.update = null;
   updaterState.updateVersion = null;
-  updaterState.releaseNotes = null;
-  updaterState.error = null;
+
+  try {
+    const update = await check();
+
+    if (update) {
+      updaterState.state = 'available';
+      updaterState.update = update;
+      updaterState.updateVersion = update.version;
+
+      toast.info(`Update available: v${update.version}`, {
+        duration: Infinity,
+        action: { label: 'Update Now', onClick: () => void downloadAndInstall() },
+      });
+    } else {
+      updaterState.state = 'up-to-date';
+    }
+  } catch (err) {
+    updaterState.state = 'error';
+    updaterState.error = err instanceof Error ? err.message : 'Failed to check for updates';
+    console.error('Update check failed:', err);
+
+    toast.error('Failed to check for updates', {
+      description: updaterState.error,
+      action: { label: 'Download Manually', onClick: openReleasesPage },
+    });
+  }
 }
 
-/**
- * Get the current updater state (reactive)
- */
+/** Get the current updater state (reactive, for OverviewPane status display) */
 export function getUpdaterState(): UpdaterState {
   return updaterState;
-}
-
-/** Derived computed properties (as getter functions) */
-export function updateAvailable(): boolean {
-  return updaterState.state === 'available';
-}
-
-export function isDownloading(): boolean {
-  return updaterState.state === 'downloading';
-}
-
-export function isReady(): boolean {
-  return updaterState.state === 'ready';
-}
-
-export function hasError(): boolean {
-  return updaterState.state === 'error';
 }
