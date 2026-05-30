@@ -39,7 +39,6 @@ struct TrayState {
     last_transcription: Option<String>,
 }
 
-
 /// Get the global tray state instance
 fn get_tray_state() -> &'static RwLock<TrayState> {
     TRAY_STATE.get_or_init(|| RwLock::new(TrayState::default()))
@@ -208,8 +207,7 @@ fn build_tray_menu(
     let copy_last = copy_builder.build(app)?;
 
     // Transcribe
-    let transcribe =
-        MenuItemBuilder::with_id(menu_ids::TRANSCRIBE, "Transcribe...").build(app)?;
+    let transcribe = MenuItemBuilder::with_id(menu_ids::TRANSCRIBE, "Transcribe...").build(app)?;
 
     // History
     let history = MenuItemBuilder::with_id(menu_ids::HISTORY, "History...").build(app)?;
@@ -273,14 +271,15 @@ fn build_input_source_submenu(
         .find(|d| d.is_default)
         .map(|d| d.name.as_str())
         .unwrap_or("Unknown");
-    let prefix = if is_default_selected { SELECTED_PREFIX } else { UNSELECTED_PREFIX };
+    let prefix = if is_default_selected {
+        SELECTED_PREFIX
+    } else {
+        UNSELECTED_PREFIX
+    };
     let default_label = format!("{}System Default ({})", prefix, default_device_name);
 
-    let default_item = MenuItemBuilder::with_id(
-        menu_ids::INPUT_SOURCE_DEFAULT,
-        &default_label,
-    )
-    .build(app)?;
+    let default_item =
+        MenuItemBuilder::with_id(menu_ids::INPUT_SOURCE_DEFAULT, &default_label).build(app)?;
 
     let mut submenu = SubmenuBuilder::new(app, "Input Source").item(&default_item);
 
@@ -294,7 +293,11 @@ fn build_input_source_submenu(
         .map(|device| {
             let menu_id = format!("{}{}", menu_ids::INPUT_SOURCE_PREFIX, device.id);
             let is_selected = selected_device_id == Some(device.id.as_str());
-            let prefix = if is_selected { SELECTED_PREFIX } else { UNSELECTED_PREFIX };
+            let prefix = if is_selected {
+                SELECTED_PREFIX
+            } else {
+                UNSELECTED_PREFIX
+            };
             let suffix = if device.is_default { " (Default)" } else { "" };
             let label = format!("{}{}{}", prefix, device.name, suffix);
             MenuItemBuilder::with_id(menu_id, &label).build(app)
@@ -356,7 +359,11 @@ fn build_model_submenu(
                     .as_deref()
                     .map(|id| id == model.id)
                     .unwrap_or(model.recommended);
-                let prefix = if is_selected { SELECTED_PREFIX } else { UNSELECTED_PREFIX };
+                let prefix = if is_selected {
+                    SELECTED_PREFIX
+                } else {
+                    UNSELECTED_PREFIX
+                };
                 let label = format!(
                     "{}{} ({})",
                     prefix,

@@ -312,7 +312,10 @@ pub async fn pipeline_stop_and_process(
     // immediately while this task processes.
     PIPELINE_RUNNING.store(false, Ordering::SeqCst);
 
-    tracing::info!("Pipeline: Recording stopped, spawning detached process task for {}", audio_path);
+    tracing::info!(
+        "Pipeline: Recording stopped, spawning detached process task for {}",
+        audio_path
+    );
 
     // Emit authoritative state: capture ended and processing is starting.
     // We emit Transcribing directly here rather than calling get_pipeline_state()
@@ -362,7 +365,10 @@ pub fn pipeline_cancel(app: AppHandle) -> Result<(), String> {
     // Stop recording metering and hide indicator
     crate::audio::stop_recording_metering();
     if let Err(e) = crate::recording_indicator::hide_recording_indicator(app.clone()) {
-        tracing::warn!("Pipeline: Failed to hide recording indicator on cancel: {}", e);
+        tracing::warn!(
+            "Pipeline: Failed to hide recording indicator on cancel: {}",
+            e
+        );
     }
 
     // Signal cancellation for file import operations
@@ -452,11 +458,10 @@ async fn run_transcription_pipeline(
     // dedicated blocking thread avoids starving the shared async worker pool,
     // which matters now that process_audio runs as a detached task.
     let audio_path_owned = audio_path.to_string();
-    let raw_text = tokio::task::spawn_blocking(move || {
-        transcription::transcribe_file(audio_path_owned)
-    })
-    .await
-    .map_err(|e| format!("Transcription task panicked: {}", e))??;
+    let raw_text =
+        tokio::task::spawn_blocking(move || transcription::transcribe_file(audio_path_owned))
+            .await
+            .map_err(|e| format!("Transcription task panicked: {}", e))??;
     let transcription_duration_seconds = transcription_start.elapsed().as_secs_f64();
 
     tracing::info!(
@@ -917,10 +922,7 @@ pub async fn pipeline_retranscribe(
     transcription_id: String,
     config: Option<PipelineConfig>,
 ) -> Result<PipelineResult, String> {
-    tracing::info!(
-        "Pipeline: retranscribe called for id={}",
-        transcription_id
-    );
+    tracing::info!("Pipeline: retranscribe called for id={}", transcription_id);
 
     // Look up the existing record from the database
     let existing = database::transcription::get_transcription(&transcription_id)
@@ -955,7 +957,9 @@ pub async fn pipeline_retranscribe(
                     .to_string(),
             );
         }
-        tracing::info!("Pipeline: Model not loaded, starting eager background load for retranscribe");
+        tracing::info!(
+            "Pipeline: Model not loaded, starting eager background load for retranscribe"
+        );
         std::thread::spawn(|| {
             transcription::warmup_transcription();
         });

@@ -100,8 +100,8 @@ fn get_service() -> &'static Mutex<Option<TranscriptionService>> {
 /// Initialise the transcription service with whisper backend (primary)
 #[tauri::command]
 pub fn init_whisper_transcription(model_path: String) -> Result<(), String> {
-    let service = TranscriptionService::new_whisper(&PathBuf::from(model_path))
-        .map_err(|e| e.to_string())?;
+    let service =
+        TranscriptionService::new_whisper(&PathBuf::from(model_path)).map_err(|e| e.to_string())?;
 
     let mut guard = get_service().lock();
     *guard = Some(service);
@@ -134,8 +134,7 @@ pub fn init_parakeet_transcription(_model_dir: String) -> Result<(), String> {
 pub fn init_fluidaudio_transcription() -> Result<(), String> {
     #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
     {
-        let service =
-            TranscriptionService::new_fluidaudio().map_err(|e| e.to_string())?;
+        let service = TranscriptionService::new_fluidaudio().map_err(|e| e.to_string())?;
 
         let mut guard = get_service().lock();
         *guard = Some(service);
@@ -186,7 +185,11 @@ pub fn init_transcription(model_path: String) -> Result<(), String> {
         if let Ok(entries) = std::fs::read_dir(&path) {
             for entry in entries.filter_map(|e| e.ok()) {
                 let entry_path = entry.path();
-                if entry_path.extension().map(|ext| ext == "bin").unwrap_or(false) {
+                if entry_path
+                    .extension()
+                    .map(|ext| ext == "bin")
+                    .unwrap_or(false)
+                {
                     tracing::info!("Found whisper model in directory, using Metal GPU backend");
                     return init_whisper_transcription(entry_path.to_string_lossy().to_string());
                 }
@@ -263,7 +266,8 @@ pub fn transcribe_file(audio_path: String) -> Result<String, String> {
 fn audio_has_speech(path: &std::path::Path) -> Result<bool, String> {
     use std::io::Read;
 
-    let file = std::fs::File::open(path).map_err(|e| format!("Failed to open audio file: {}", e))?;
+    let file =
+        std::fs::File::open(path).map_err(|e| format!("Failed to open audio file: {}", e))?;
     let mut reader = std::io::BufReader::new(file);
 
     // Read WAV header (44 bytes minimum for standard WAV)
@@ -283,7 +287,10 @@ fn audio_has_speech(path: &std::path::Path) -> Result<bool, String> {
 
     if bits_per_sample != 16 {
         // For non-16-bit audio, assume it has speech (can't easily check)
-        tracing::debug!("Non-16-bit audio ({}), assuming speech present", bits_per_sample);
+        tracing::debug!(
+            "Non-16-bit audio ({}), assuming speech present",
+            bits_per_sample
+        );
         return Ok(true);
     }
 
@@ -357,8 +364,8 @@ pub fn warmup_transcription() {
     // ── FluidAudio path ────────────────────────────────────────────────
     // Try FluidAudio when explicitly selected OR when nothing is selected
     // (it's the recommended default on Apple Silicon).
-    let should_try_fluidaudio = selected_model_type == Some("fluidaudio_coreml")
-        || selected_id.is_none();
+    let should_try_fluidaudio =
+        selected_model_type == Some("fluidaudio_coreml") || selected_id.is_none();
 
     if should_try_fluidaudio {
         if try_warmup_fluidaudio() {
@@ -398,9 +405,7 @@ fn try_warmup_fluidaudio() -> bool {
         if fluidaudio::is_cached() {
             match init_fluidaudio_transcription() {
                 Ok(()) => {
-                    tracing::info!(
-                        "FluidAudio transcription model warmed up (Neural Engine)"
-                    );
+                    tracing::info!("FluidAudio transcription model warmed up (Neural Engine)");
                     return true;
                 }
                 Err(e) => {
@@ -408,9 +413,7 @@ fn try_warmup_fluidaudio() -> bool {
                 }
             }
         } else {
-            tracing::info!(
-                "FluidAudio models not yet cached, falling back to Whisper"
-            );
+            tracing::info!("FluidAudio models not yet cached, falling back to Whisper");
         }
     }
 

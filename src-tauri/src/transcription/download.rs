@@ -206,11 +206,9 @@ pub async fn download_model(app: AppHandle, model_id: Option<String>) -> Result<
             },
         );
 
-        let result = tokio::task::spawn_blocking(|| {
-            super::init_fluidaudio_transcription()
-        })
-        .await
-        .map_err(|e| format!("FluidAudio init task panicked: {}", e))?;
+        let result = tokio::task::spawn_blocking(|| super::init_fluidaudio_transcription())
+            .await
+            .map_err(|e| format!("FluidAudio init task panicked: {}", e))?;
 
         match result {
             Ok(()) => {
@@ -295,7 +293,9 @@ const TRUSTED_DOWNLOAD_DOMAINS: &[&str] = &[
 fn validate_download_url(url: &str) -> Result<()> {
     let parsed = url::Url::parse(url).map_err(|e| anyhow!("Invalid download URL: {}", e))?;
 
-    let host = parsed.host_str().ok_or_else(|| anyhow!("Download URL has no host"))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow!("Download URL has no host"))?;
 
     let trusted = TRUSTED_DOWNLOAD_DOMAINS
         .iter()
@@ -354,7 +354,9 @@ async fn download_and_extract_model(app: &AppHandle, model: &RemoteModelInfo) ->
     // Check if this is a direct file download (e.g., whisper .bin files)
     if is_direct_download(model) {
         // For direct downloads, save directly to the required file name
-        let file_name = model.required_files.first()
+        let file_name = model
+            .required_files
+            .first()
             .ok_or_else(|| anyhow!("No required files specified for model"))?;
         let dest_path = model_dir.join(file_name);
 
@@ -394,7 +396,12 @@ async fn download_and_extract_model(app: &AppHandle, model: &RemoteModelInfo) ->
         );
 
         // Extract the archive
-        extract_tar_bz2(&archive_path, &model_dir, &model.required_files, model.archive_directory.as_deref())?;
+        extract_tar_bz2(
+            &archive_path,
+            &model_dir,
+            &model.required_files,
+            model.archive_directory.as_deref(),
+        )?;
 
         // Clean up archive file
         if let Err(e) = std::fs::remove_file(&archive_path) {
@@ -412,13 +419,14 @@ async fn download_and_extract_model(app: &AppHandle, model: &RemoteModelInfo) ->
     if let Err(e) = std::fs::write(&version_path, model.version.trim()) {
         tracing::warn!("Failed to write .version sidecar for {}: {}", model.id, e);
     } else {
-        tracing::debug!("Wrote .version sidecar for {} ({})", model.id, model.version);
+        tracing::debug!(
+            "Wrote .version sidecar for {} ({})",
+            model.id,
+            model.version
+        );
     }
 
-    tracing::info!(
-        "Model {} download completed successfully",
-        model.id
-    );
+    tracing::info!("Model {} download completed successfully", model.id);
     Ok(())
 }
 
@@ -449,7 +457,10 @@ async fn download_file_with_progress(
         let metadata = tokio::fs::metadata(dest_path).await?;
         let existing = metadata.len();
         if existing > 0 {
-            tracing::info!("Found partial download: {} bytes, attempting resume", existing);
+            tracing::info!(
+                "Found partial download: {} bytes, attempting resume",
+                existing
+            );
             existing
         } else {
             0
@@ -461,15 +472,8 @@ async fn download_file_with_progress(
     let mut retries = 0;
 
     loop {
-        let result = download_with_resume(
-            &client,
-            app,
-            url,
-            dest_path,
-            model_name,
-            &mut downloaded,
-        )
-        .await;
+        let result =
+            download_with_resume(&client, app, url, dest_path, model_name, &mut downloaded).await;
 
         match result {
             Ok(()) => return Ok(()),
@@ -678,7 +682,10 @@ fn extract_tar_bz2(
         let path = entry.path()?.to_path_buf();
 
         // Reject entries with path traversal components
-        if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        if path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
             return Err(anyhow!(
                 "Archive contains path traversal: {}",
                 path.display()
@@ -704,7 +711,10 @@ fn extract_tar_bz2(
             path
         } else {
             // Fall back to searching if the specified directory doesn't exist
-            tracing::warn!("Specified archive directory '{}' not found, searching...", dir_name);
+            tracing::warn!(
+                "Specified archive directory '{}' not found, searching...",
+                dir_name
+            );
             find_extracted_directory(&temp_extract_dir)?
         }
     } else {

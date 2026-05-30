@@ -60,9 +60,7 @@ fn get_indicator_window(app: &AppHandle) -> Option<WebviewWindow> {
 }
 
 /// Get the recording indicator window (generic version for use from shortcut handler)
-fn get_indicator_window_generic<R: Runtime>(
-    app: &AppHandle<R>,
-) -> Option<tauri::WebviewWindow<R>> {
+fn get_indicator_window_generic<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::WebviewWindow<R>> {
     app.get_webview_window(INDICATOR_WINDOW_LABEL)
 }
 
@@ -478,9 +476,7 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
 }
 
 /// Position indicator at fixed location (generic version for shortcut handler).
-fn position_fixed_generic<R: Runtime>(
-    indicator: &tauri::WebviewWindow<R>,
-) -> Result<(), String> {
+fn position_fixed_generic<R: Runtime>(indicator: &tauri::WebviewWindow<R>) -> Result<(), String> {
     let cfg = config::get_config().unwrap_or_default();
     let pos = cfg.recorder.position;
     let style = cfg.general.indicator_style;
@@ -524,9 +520,7 @@ fn position_fixed_generic<R: Runtime>(
 }
 
 /// Position pill at top-centre (generic version for shortcut handler).
-fn position_pill_generic<R: Runtime>(
-    indicator: &tauri::WebviewWindow<R>,
-) -> Result<(), String> {
+fn position_pill_generic<R: Runtime>(indicator: &tauri::WebviewWindow<R>) -> Result<(), String> {
     let monitor = indicator
         .primary_monitor()
         .ok()
@@ -632,7 +626,9 @@ pub fn prewarm_indicator_window(app: &AppHandle) {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
                 // Window stays visible but off-screen - ready for instant positioning
-                tracing::info!("Recording indicator window pre-warmed and ready (kept visible off-screen)");
+                tracing::info!(
+                    "Recording indicator window pre-warmed and ready (kept visible off-screen)"
+                );
             }
         } else {
             tracing::warn!("Recording indicator window not found for pre-warming");
