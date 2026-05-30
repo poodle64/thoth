@@ -111,6 +111,11 @@
   let resettingPermissions = $state(false);
   let resetError = $state<string | null>(null);
 
+  /** Stale accessibility reset state */
+  let resettingAccessibility = $state(false);
+  let resetAccessibilityError = $state<string | null>(null);
+  let resetAccessibilityMessage = $state<string | null>(null);
+
   let permFixStatus = $state<{ quarantine: string; tcc: string }>({ quarantine: '', tcc: '' });
 
 
@@ -227,6 +232,34 @@
       console.error('Failed to reset TCC permissions:', error);
     } finally {
       resettingPermissions = false;
+    }
+  }
+
+  /**
+   * Reset the stale Accessibility TCC entry and guide the user to re-grant.
+   *
+   * Stale entries arise after app rebuilds or reinstalls: System Settings shows
+   * the toggle on, but AXIsProcessTrusted() returns false. tccutil reset clears
+   * the entry so macOS will prompt again on next launch.
+   */
+  async function handleResetAccessibility() {
+    resettingAccessibility = true;
+    resetAccessibilityError = null;
+    resetAccessibilityMessage = null;
+
+    try {
+      const message = await invoke<string>('reset_tcc_permissions', {
+        services: ['Accessibility', 'ListenEvent'],
+      });
+      resetAccessibilityMessage = message;
+      await checkPermissions();
+      // Guide the user to re-grant via System Settings
+      invoke('open_privacy_pane', { pane: 'accessibility' }).catch(() => {});
+    } catch (error) {
+      resetAccessibilityError = error instanceof Error ? error.message : String(error);
+      console.error('Failed to reset accessibility permission:', error);
+    } finally {
+      resettingAccessibility = false;
     }
   }
 
@@ -805,11 +838,13 @@
           <span class="status-value truncate">{deviceName}</span>
         </div>
         <div class="status-row">
-          <span class="status-dot" class:ready={allPermissionsGranted} class:warning={!allPermissionsGranted}></span>
+          <span class="status-dot" class:ready={allPermissionsGranted} class:warning={!allPermissionsGranted && accessibilityPermission !== 'stale'} class:stale={accessibilityPermission === 'stale'}></span>
           <span class="status-label">Permissions</span>
           <span class="status-value">
             {#if allPermissionsGranted}
               All granted
+            {:else if accessibilityPermission === 'stale'}
+              Accessibility stale
             {:else}
               {[
                 microphonePermission !== 'granted' ? 'Mic' : '',
@@ -819,6 +854,31 @@
             {/if}
           </span>
         </div>
+        {#if accessibilityPermission === 'stale'}
+          <div class="stale-recovery">
+            <p class="stale-recovery-desc">
+              Accessibility appears granted in System Settings but isn't working — common after an app update or reinstall. Reset clears the stale entry so macOS will prompt again.
+            </p>
+            <div class="stale-recovery-actions">
+              <button
+                class="btn-small warning"
+                onclick={handleResetAccessibility}
+                disabled={resettingAccessibility}
+              >
+                {resettingAccessibility ? 'Resetting...' : 'Reset Accessibility Permission'}
+              </button>
+              <button class="btn-small" onclick={() => invoke('open_privacy_pane', { pane: 'accessibility' })}>
+                Open System Settings
+              </button>
+            </div>
+            {#if resetAccessibilityMessage}
+              <p class="stale-recovery-ok">{resetAccessibilityMessage} — re-enable Thoth in System Settings → Privacy &amp; Security → Accessibility.</p>
+            {/if}
+            {#if resetAccessibilityError}
+              <p class="step-error">{resetAccessibilityError}</p>
+            {/if}
+          </div>
+        {/if}
         <div class="autostart-row">
           <span class="status-label">Launch at Login</span>
           <label class="toggle-switch">
@@ -1459,6 +1519,39 @@
     font-size: var(--text-xs);
     color: var(--color-text-secondary);
     line-height: 1.3;
+  }
+
+  .status-dot.stale {
+    background: var(--color-warning);
+  }
+
+  /* Stale accessibility recovery block (in System section) */
+  .stale-recovery {
+    padding: 10px 12px;
+    margin: 2px 0 4px;
+    background: color-mix(in srgb, var(--color-warning) 8%, var(--color-bg-secondary));
+    border: 1px solid color-mix(in srgb, var(--color-warning) 30%, var(--color-border-subtle));
+    border-radius: var(--radius-md);
+  }
+
+  .stale-recovery-desc {
+    margin: 0 0 10px;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    line-height: 1.4;
+  }
+
+  .stale-recovery-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .stale-recovery-ok {
+    margin: 8px 0 0;
+    font-size: var(--text-xs);
+    color: var(--color-success);
+    line-height: 1.4;
   }
 
 </style>
