@@ -137,7 +137,7 @@ Thoth is designed around **privacy-first, local-first operation**.
 - Must work fully offline with local whisper models
 - Must not change system default audio device
 - Must preserve user clipboard contents after paste
-- Must support multiple recording modes (toggle, push-to-talk, hands-free)
+- Must support toggle recording (press to start, press again to stop) via a configurable global shortcut
 
 ### Technology Constraints
 
