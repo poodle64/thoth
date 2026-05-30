@@ -90,15 +90,51 @@ impl TranscriptionService {
     }
 }
 
-/// Pad a WAV file with leading and trailing silence, writing a temporary copy.
+/// Compute the normalisation gain for a clip given its RMS and peak amplitude.
 ///
-/// Prepends 500 ms of silence so the model can initialise before speech starts,
-/// and appends 1 s of silence so it can finalise the last word.
+/// The goal is to lift quiet recordings (e.g. from a lapel mic with overall RMS
+/// ~0.01) so the soft trailing words clear the TDT decoder's blank threshold,
+/// without clipping loud recordings or amplifying pure silence.
+///
+/// Rules:
+/// - Target RMS is 0.05; gain = target / rms (or 1.0 when rms is below noise floor).
+/// - Cap gain so peak * gain ≤ 0.95 (never clip).
+/// - Never attenuate: loud recordings get gain = 1.0 (only boost, never reduce).
+pub(crate) fn normalisation_gain(rms: f32, peak: f32) -> f32 {
+    const TARGET_RMS: f32 = 0.05;
+    const NOISE_FLOOR: f32 = 1e-6;
+    const MAX_PEAK: f32 = 0.95;
+
+    let mut gain = if rms > NOISE_FLOOR {
+        TARGET_RMS / rms
+    } else {
+        // Pure silence — don't amplify noise
+        1.0
+    };
+
+    // Cap so we don't clip
+    if peak > NOISE_FLOOR {
+        gain = gain.min(MAX_PEAK / peak);
+    }
+
+    // Only boost; never attenuate a recording that is already loud enough
+    gain.max(1.0)
+}
+
+/// Pad a WAV file with leading silence and low-level trailing dither, writing a
+/// temporary copy.  The original audio is RMS-normalised before writing so that
+/// soft trailing words (common on lapel mics) clear the TDT decoder's blank
+/// threshold instead of triggering its early-exit.
+///
+/// Padding:
+/// - 500 ms of hard-zero leading silence (gives the model time to initialise).
+/// - 0.75 s of low-level dither trailing (avoids a run of consecutive blanks that
+///   fires the decoder's early-exit before it emits the final words).
 ///
 /// Returns `Ok(Some(path))` with the padded temp file, or `Ok(None)` if the
 /// original file couldn't be read (in which case FluidAudio gets the original).
 fn pad_with_silence(audio_path: &Path) -> Result<Option<PathBuf>> {
-    let mut reader = match hound::WavReader::open(audio_path) {
+    let reader = match hound::WavReader::open(audio_path) {
         Ok(r) => r,
         Err(e) => {
             tracing::warn!("Could not read WAV for padding: {}, using original", e);
@@ -116,37 +152,82 @@ fn pad_with_silence(audio_path: &Path) -> Result<Option<PathBuf>> {
     );
     let sample_rate = spec.sample_rate;
     let leading_samples = sample_rate as usize / 2; // 500 ms
-    let trailing_samples = sample_rate as usize * 3 / 2; // 1.5 seconds
+    let trailing_samples = sample_rate as usize * 3 / 4; // 0.75 s
+
+    // Collect all original samples as f32 in [-1.0, 1.0] so we can compute
+    // statistics for normalisation before writing.  We must collect first
+    // because `into_samples()` consumes the reader.
+    let samples_f32: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Int => reader
+            .into_samples::<i16>()
+            .filter_map(|s| s.ok())
+            .map(|s| s as f32 / 32768.0)
+            .collect(),
+        hound::SampleFormat::Float => reader
+            .into_samples::<f32>()
+            .filter_map(|s| s.ok())
+            .collect(),
+    };
+
+    // RMS and peak over all collected samples
+    let rms = if samples_f32.is_empty() {
+        0.0
+    } else {
+        let mean_sq = samples_f32.iter().map(|&s| s * s).sum::<f32>() / samples_f32.len() as f32;
+        mean_sq.sqrt()
+    };
+    let peak = samples_f32.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+
+    let gain = normalisation_gain(rms, peak);
+    tracing::info!(
+        "FluidAudio normalise: rms={:.4} peak={:.4} gain={:.2}x",
+        rms,
+        peak,
+        gain
+    );
 
     // Build temp path next to the original
     let tmp_path = audio_path.with_extension("padded.wav");
 
     let mut writer = hound::WavWriter::create(&tmp_path, spec)?;
 
+    // Cheap deterministic dither: sine-derived so it's non-repeating over short
+    // windows but totally reproducible.  Amplitude 0.001 is far below the speech
+    // floor yet enough to keep the decoder out of its consecutive-blank path.
+    let dither_f32 = |i: usize| -> f32 { (i as f32 * 0.000_123_f32).sin() * 0.001 };
+
+    let channels = spec.channels as usize;
+
     match spec.sample_format {
         hound::SampleFormat::Int => {
-            // Leading silence (per channel)
-            for _ in 0..leading_samples * spec.channels as usize {
+            // Leading hard-zero silence
+            for _ in 0..leading_samples * channels {
                 writer.write_sample(0i16)?;
             }
-            // Copy all existing samples
-            for sample in reader.samples::<i16>() {
-                writer.write_sample(sample?)?;
+            // Normalised original audio
+            for &s in &samples_f32 {
+                let out = (s * gain).clamp(-1.0, 1.0);
+                writer.write_sample((out * 32767.0).round() as i16)?;
             }
-            // Trailing silence (per channel)
-            for _ in 0..trailing_samples * spec.channels as usize {
-                writer.write_sample(0i16)?;
+            // Trailing low-level dither
+            for i in 0..trailing_samples * channels {
+                let out = dither_f32(i);
+                writer.write_sample((out * 32767.0).round() as i16)?;
             }
         }
         hound::SampleFormat::Float => {
-            for _ in 0..leading_samples * spec.channels as usize {
+            // Leading hard-zero silence
+            for _ in 0..leading_samples * channels {
                 writer.write_sample(0.0f32)?;
             }
-            for sample in reader.samples::<f32>() {
-                writer.write_sample(sample?)?;
+            // Normalised original audio
+            for &s in &samples_f32 {
+                let out = (s * gain).clamp(-1.0, 1.0);
+                writer.write_sample(out)?;
             }
-            for _ in 0..trailing_samples * spec.channels as usize {
-                writer.write_sample(0.0f32)?;
+            // Trailing low-level dither
+            for i in 0..trailing_samples * channels {
+                writer.write_sample(dither_f32(i))?;
             }
         }
     }
@@ -154,7 +235,7 @@ fn pad_with_silence(audio_path: &Path) -> Result<Option<PathBuf>> {
     writer.finalize()?;
 
     tracing::info!(
-        "Padded WAV with {:.1}s leading + {:.1}s trailing silence: {}",
+        "Padded WAV with {:.1}s leading silence + {:.1}s trailing dither: {}",
         leading_samples as f32 / sample_rate as f32,
         trailing_samples as f32 / sample_rate as f32,
         tmp_path.display()
@@ -251,5 +332,46 @@ mod tests {
             Ok(_service) => println!("FluidAudio service created successfully"),
             Err(e) => println!("FluidAudio service creation failed: {}", e),
         }
+    }
+
+    // --- normalisation_gain unit tests ---
+
+    /// DJI MIC MINI real-world fixture: rms=0.011, peak=0.082.
+    /// target_rms / rms = 0.05 / 0.011 ≈ 4.545; peak cap = 0.95 / 0.082 ≈ 11.59.
+    /// Peak cap does not bind; max(1.0) does not bind.  Expected gain ≈ 4.545.
+    #[test]
+    fn test_gain_typical_quiet_clip() {
+        let gain = normalisation_gain(0.011, 0.082);
+        assert!(
+            (gain - 4.545).abs() < 0.01,
+            "expected ~4.545, got {gain:.4}"
+        );
+    }
+
+    /// Pure silence: rms below noise floor → gain = 1.0 (no amplification).
+    #[test]
+    fn test_gain_pure_silence() {
+        let gain = normalisation_gain(0.0, 0.0);
+        assert_eq!(gain, 1.0, "silence should return gain 1.0");
+    }
+
+    /// Loud clip: rms=0.1, peak=0.9.  target/rms = 0.5, which is below 1.0,
+    /// so max(1.0) applies → gain = 1.0 (never attenuate).
+    #[test]
+    fn test_gain_loud_clip_not_attenuated() {
+        let gain = normalisation_gain(0.1, 0.9);
+        assert_eq!(gain, 1.0, "loud clip should not be attenuated");
+    }
+
+    /// Peak-cap case: rms=0.001, peak=0.5.
+    /// target/rms = 0.05 / 0.001 = 50; peak cap = 0.95 / 0.5 = 1.9.
+    /// Peak cap binds → gain = 1.9; max(1.0) does not further reduce it.
+    #[test]
+    fn test_gain_peak_cap_binds() {
+        let gain = normalisation_gain(0.001, 0.5);
+        assert!(
+            (gain - 1.9).abs() < 0.001,
+            "expected peak-capped gain ~1.9, got {gain:.4}"
+        );
     }
 }
