@@ -448,6 +448,12 @@ async fn run_transcription_pipeline(
         if config.apply_filtering {
             let filter_opts = transcription::FilterOptions {
                 remove_fillers: config.remove_fillers,
+                // The dictionary is applied separately below, gated by
+                // config.apply_dictionary. Disable it inside the filter so it
+                // runs exactly once and honours the user's dictionary setting
+                // (FilterOptions::default() would otherwise turn it on here and
+                // apply it a second time, ignoring config.apply_dictionary).
+                apply_dictionary: false,
                 ..Default::default()
             };
             text = transcription::filter_transcription(text, Some(filter_opts));
