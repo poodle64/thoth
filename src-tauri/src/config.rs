@@ -10,6 +10,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use crate::enhancement;
+
 /// Current config schema version
 const CURRENT_VERSION: u32 = 1;
 
@@ -165,17 +167,48 @@ impl Default for ShortcutConfig {
 }
 
 /// AI enhancement configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EnhancementConfig {
     /// Whether AI enhancement is enabled
     pub enabled: bool,
-    /// Ollama model to use for enhancement
+    /// Model name (used by whichever backend is active)
     pub model: String,
     /// Selected prompt template ID
     pub prompt_id: String,
-    /// Ollama server URL
+    /// Ollama server URL (unchanged from pre-existing config)
     pub ollama_url: String,
+    /// Active backend: "ollama" (default) or "openai_compat"
+    #[serde(default = "default_backend")]
+    pub backend: String,
+    /// OpenAI-compatible server base URL
+    #[serde(default = "default_openai_compat_url")]
+    pub openai_compat_url: String,
+    /// Optional API key for the OpenAI-compatible endpoint
+    #[serde(default)]
+    pub api_key: Option<String>,
+}
+
+impl std::fmt::Debug for EnhancementConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EnhancementConfig")
+            .field("enabled", &self.enabled)
+            .field("model", &self.model)
+            .field("prompt_id", &self.prompt_id)
+            .field("ollama_url", &self.ollama_url)
+            .field("backend", &self.backend)
+            .field("openai_compat_url", &self.openai_compat_url)
+            .field("api_key", &self.api_key.as_ref().map(|_| "***redacted***"))
+            .finish()
+    }
+}
+
+fn default_backend() -> String {
+    "ollama".to_string()
+}
+
+fn default_openai_compat_url() -> String {
+    "http://localhost:1234".to_string()
 }
 
 impl Default for EnhancementConfig {
@@ -185,26 +218,24 @@ impl Default for EnhancementConfig {
             model: "llama3.2".to_string(),
             prompt_id: "fix-grammar".to_string(),
             ollama_url: "http://localhost:11434".to_string(),
+            backend: default_backend(),
+            openai_compat_url: default_openai_compat_url(),
+            api_key: None,
         }
     }
 }
 
 /// Recording indicator visual style
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum IndicatorStyle {
     /// Small dot/square that follows the mouse cursor (default)
+    #[default]
     CursorDot,
     /// Small stationary window at a fixed screen position
     FixedFloat,
     /// Elongated horizontal bar with waveform visualisation
     Pill,
-}
-
-impl Default for IndicatorStyle {
-    fn default() -> Self {
-        Self::CursorDot
-    }
 }
 
 /// General application settings
@@ -239,7 +270,7 @@ impl Default for GeneralConfig {
 }
 
 /// Recorder window position options
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RecorderPosition {
     /// Position near the cursor when recording starts
@@ -249,6 +280,7 @@ pub enum RecorderPosition {
     /// Top-left corner of the screen
     TopLeft,
     /// Top-right corner of the screen
+    #[default]
     TopRight,
     /// Bottom-left corner of the screen
     BottomLeft,
@@ -256,12 +288,6 @@ pub enum RecorderPosition {
     BottomRight,
     /// Centre of the screen
     Centre,
-}
-
-impl Default for RecorderPosition {
-    fn default() -> Self {
-        Self::TopRight
-    }
 }
 
 /// Recorder window configuration
@@ -346,7 +372,18 @@ fn save_to_disk(config: &Config) -> Result<(), String> {
     let contents = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialise config: {}", e))?;
 
-    fs::write(&path, contents).map_err(|e| format!("Failed to write config file: {}", e))?;
+    fs::write(&path, &contents).map_err(|e| format!("Failed to write config file: {}", e))?;
+
+    // Restrict config file permissions to owner-only (rw-------) because it
+    // may contain an API key in plaintext.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = fs::Permissions::from_mode(0o600);
+        if let Err(e) = fs::set_permissions(&path, permissions) {
+            tracing::warn!("Failed to set config file permissions to 0o600: {}", e);
+        }
+    }
 
     tracing::info!(
         "Config saved to disk: device_id={:?}, toggle_recording_alt={:?}",
@@ -390,6 +427,19 @@ fn apply_migration(config: Config) -> Result<Config, String> {
         }
         v => Err(format!("Unknown config version: {}", v)),
     }
+}
+
+/// Apply the enhancement config to the global backend singleton.
+///
+/// Called on startup and after every `set_config` that touches enhancement
+/// settings, so the in-process backend always reflects persisted config.
+pub fn apply_enhancement_backend(enh: &EnhancementConfig) {
+    enhancement::configure_backend(
+        &enh.backend,
+        &enh.ollama_url,
+        &enh.openai_compat_url,
+        enh.api_key.as_deref(),
+    );
 }
 
 /// Get the global config instance
@@ -506,14 +556,19 @@ pub fn set_config(mut config: Config) -> Result<(), String> {
     save_to_disk(&config)?;
 
     // Update cached config
-    let mut cached = get_config_instance().write();
-    *cached = config;
+    {
+        let mut cached = get_config_instance().write();
+        *cached = config.clone();
+        tracing::info!(
+            "Configuration updated (device_id: {:?}, toggle_recording_alt: {:?})",
+            cached.audio.device_id,
+            cached.shortcuts.toggle_recording_alt
+        );
+    }
 
-    tracing::info!(
-        "Configuration updated (device_id: {:?}, toggle_recording_alt: {:?})",
-        cached.audio.device_id,
-        cached.shortcuts.toggle_recording_alt
-    );
+    // Reconfigure the enhancement backend to reflect any provider changes.
+    apply_enhancement_backend(&config.enhancement);
+
     Ok(())
 }
 
@@ -798,6 +853,9 @@ mod tests {
                 model: "mistral".to_string(),
                 prompt_id: "custom".to_string(),
                 ollama_url: "http://custom:8080".to_string(),
+                backend: "openai_compat".to_string(),
+                openai_compat_url: "http://localhost:1234".to_string(),
+                api_key: Some("sk-test".to_string()),
             },
             general: GeneralConfig {
                 launch_at_login: true,
@@ -887,9 +945,93 @@ mod tests {
             model: "custom-model".to_string(),
             prompt_id: "summarise".to_string(),
             ollama_url: "http://192.168.1.100:11434".to_string(),
+            ..Default::default()
         };
 
         assert!(enhancement.enabled);
         assert_eq!(enhancement.ollama_url, "http://192.168.1.100:11434");
+    }
+
+    // =========================================================================
+    // OpenAI-compat provider field tests
+    // =========================================================================
+
+    #[test]
+    fn test_enhancement_config_new_fields_roundtrip() {
+        let enh = EnhancementConfig {
+            enabled: true,
+            model: "mistral".to_string(),
+            prompt_id: "fix-grammar".to_string(),
+            ollama_url: "http://localhost:11434".to_string(),
+            backend: "openai_compat".to_string(),
+            openai_compat_url: "http://localhost:1234".to_string(),
+            api_key: Some("test-key".to_string()),
+        };
+
+        let json = serde_json::to_string(&enh).unwrap();
+        let restored: EnhancementConfig = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.backend, "openai_compat");
+        assert_eq!(restored.openai_compat_url, "http://localhost:1234");
+        assert_eq!(restored.api_key, Some("test-key".to_string()));
+    }
+
+    #[test]
+    fn test_enhancement_config_new_fields_snake_case_deserialise() {
+        // The JSON uses snake_case (as serialised by the Rust backend; no camelCase mapping)
+        let json = r#"{
+            "enabled": false,
+            "model": "llama3.2",
+            "prompt_id": "fix-grammar",
+            "ollama_url": "http://localhost:11434",
+            "backend": "openai_compat",
+            "openai_compat_url": "http://lm-studio:1234",
+            "api_key": "sk-test"
+        }"#;
+
+        let enh: EnhancementConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(enh.backend, "openai_compat");
+        assert_eq!(enh.openai_compat_url, "http://lm-studio:1234");
+        assert_eq!(enh.api_key, Some("sk-test".to_string()));
+    }
+
+    #[test]
+    fn test_old_config_without_new_fields_uses_defaults() {
+        // A config JSON that predates the new fields should parse cleanly,
+        // with the new fields taking their defaults.
+        let json = r#"{
+            "version": 1,
+            "enhancement": {
+                "enabled": false,
+                "model": "llama3.2",
+                "prompt_id": "fix-grammar",
+                "ollama_url": "http://localhost:11434"
+            }
+        }"#;
+
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.enhancement.backend, "ollama");
+        assert_eq!(
+            config.enhancement.openai_compat_url,
+            "http://localhost:1234"
+        );
+        assert_eq!(config.enhancement.api_key, None);
+        // Old field preserved
+        assert_eq!(config.enhancement.ollama_url, "http://localhost:11434");
+    }
+
+    #[test]
+    fn test_enhancement_config_api_key_cleared_when_null() {
+        // If the user clears the API key, the clear must take effect (not preserved)
+        let json = r#"{
+            "enabled": false,
+            "model": "llama3.2",
+            "prompt_id": "fix-grammar",
+            "ollama_url": "http://localhost:11434",
+            "api_key": null
+        }"#;
+
+        let enh: EnhancementConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(enh.api_key, None);
     }
 }

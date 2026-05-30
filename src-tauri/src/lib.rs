@@ -92,16 +92,13 @@ fn register_shortcuts_from_config(app: &tauri::AppHandle, cfg: &config::Config) 
             cfg.shortcuts.toggle_recording.as_str(),
             "Toggle recording",
         )),
-        cfg.shortcuts
-            .toggle_recording_alt
-            .as_deref()
-            .map(|accel| {
-                (
-                    shortcut_ids::TOGGLE_RECORDING_ALT,
-                    accel,
-                    "Toggle recording (alternative)",
-                )
-            }),
+        cfg.shortcuts.toggle_recording_alt.as_deref().map(|accel| {
+            (
+                shortcut_ids::TOGGLE_RECORDING_ALT,
+                accel,
+                "Toggle recording (alternative)",
+            )
+        }),
         cfg.shortcuts.copy_last.as_deref().map(|accel| {
             (
                 shortcut_ids::COPY_LAST_TRANSCRIPTION,
@@ -145,7 +142,11 @@ pub fn run() {
             &self,
             w: &mut tracing_subscriber::fmt::format::Writer<'_>,
         ) -> std::fmt::Result {
-            write!(w, "{}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"))
+            write!(
+                w,
+                "{}",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f")
+            )
         }
     }
 
@@ -231,10 +232,12 @@ pub fn run() {
 
             // Load config and register shortcuts
             if let Ok(cfg) = config::get_config() {
+                // Wire up the enhancement backend before the first pipeline run
+                config::apply_enhancement_backend(&cfg.enhancement);
+
                 // Register shortcuts from config
                 let app_handle = app.handle().clone();
                 register_shortcuts_from_config(&app_handle, &cfg);
-
             }
 
             // macOS-specific setup
@@ -363,6 +366,8 @@ pub fn run() {
             // Enhancement
             enhancement::check_ollama_available,
             enhancement::list_ollama_models,
+            enhancement::check_openai_compat_available,
+            enhancement::list_openai_compat_models,
             enhancement::enhance_text,
             enhancement::context::get_clipboard_context,
             enhancement::context::build_enhancement_context,

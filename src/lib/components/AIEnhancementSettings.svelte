@@ -16,6 +16,8 @@
   import { Label } from '$components/ui/label';
   import LoadingState from '$components/common/LoadingState.svelte';
   import AlertCircle from '@lucide/svelte/icons/alert-circle';
+  import Eye from '@lucide/svelte/icons/eye';
+  import EyeOff from '@lucide/svelte/icons/eye-off';
   import { superForm, defaults } from 'sveltekit-superforms';
   import { zod4 } from 'sveltekit-superforms/adapters';
   import { promptSchema } from '$lib/schemas/prompt';
@@ -27,11 +29,21 @@
     isBuiltin: boolean;
   }
 
+  // Ollama state
   let ollamaAvailable = $state(false);
   let ollamaModels = $state<string[]>([]);
-  let prompts = $state<PromptTemplate[]>([]);
   let isCheckingOllama = $state(false);
   let isLoadingModels = $state(false);
+
+  // OpenAI-compat state
+  let openaiCompatAvailable = $state(false);
+  let openaiCompatModels = $state<string[]>([]);
+  let isCheckingOpenaiCompat = $state(false);
+  let isLoadingOpenaiCompatModels = $state(false);
+  let showApiKey = $state(false);
+
+  // Shared state
+  let prompts = $state<PromptTemplate[]>([]);
   let isLoadingPrompts = $state(false);
   let error = $state<string | null>(null);
 
@@ -63,6 +75,9 @@
 
   const { form: formData, enhance, reset } = promptForm;
 
+  /** Active backend derived from config */
+  let activeBackend = $derived(configStore.config.enhancement.backend);
+
   async function checkOllama(): Promise<void> {
     isCheckingOllama = true;
     error = null;
@@ -88,6 +103,34 @@
       ollamaModels = [];
     } finally {
       isLoadingModels = false;
+    }
+  }
+
+  async function checkOpenaiCompat(): Promise<void> {
+    isCheckingOpenaiCompat = true;
+    error = null;
+    try {
+      openaiCompatAvailable = await invoke<boolean>('check_openai_compat_available');
+      if (openaiCompatAvailable) {
+        await loadOpenaiCompatModels();
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to check OpenAI-compatible connection';
+      openaiCompatAvailable = false;
+    } finally {
+      isCheckingOpenaiCompat = false;
+    }
+  }
+
+  async function loadOpenaiCompatModels(): Promise<void> {
+    isLoadingOpenaiCompatModels = true;
+    try {
+      openaiCompatModels = await invoke<string[]>('list_openai_compat_models');
+    } catch (e) {
+      console.error('Failed to load OpenAI-compat models:', e);
+      openaiCompatModels = [];
+    } finally {
+      isLoadingOpenaiCompatModels = false;
     }
   }
 
@@ -119,6 +162,18 @@
     invoke('refresh_tray_menu').catch(() => {});
   }
 
+  async function handleBackendChange(value: string | undefined): Promise<void> {
+    if (value === undefined) return;
+    configStore.updateEnhancement('backend', value);
+    error = null;
+    await saveSettings();
+    if (value === 'openai_compat') {
+      await checkOpenaiCompat();
+    } else {
+      await checkOllama();
+    }
+  }
+
   async function handleModelChange(value: string | undefined): Promise<void> {
     if (value === undefined) return;
     configStore.updateEnhancement('model', value);
@@ -140,6 +195,30 @@
   async function handleUrlBlur(): Promise<void> {
     await saveSettings();
     await checkOllama();
+  }
+
+  function handleOpenaiCompatUrlInput(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    configStore.updateEnhancement('openaiCompatUrl', input.value);
+  }
+
+  async function handleOpenaiCompatUrlBlur(): Promise<void> {
+    await saveSettings();
+    await checkOpenaiCompat();
+  }
+
+  function handleApiKeyInput(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    configStore.updateEnhancement('apiKey', input.value || null);
+  }
+
+  async function handleApiKeyBlur(): Promise<void> {
+    await saveSettings();
+  }
+
+  function handleOpenaiCompatModelInput(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    configStore.updateEnhancement('model', input.value);
   }
 
   function startNewPrompt(): void {
@@ -203,11 +282,16 @@
   /** Derive model select value — falls back to empty string so Select shows placeholder */
   let modelSelectValue = $derived(configStore.config.enhancement.model ?? '');
   let promptSelectValue = $derived(configStore.config.enhancement.promptId ?? '');
+  let backendSelectValue = $derived(configStore.config.enhancement.backend ?? 'ollama');
 
   onMount(async () => {
     await configStore.load();
     await loadPrompts();
-    await checkOllama();
+    if (configStore.config.enhancement.backend === 'openai_compat') {
+      await checkOpenaiCompat();
+    } else {
+      await checkOllama();
+    }
   });
 </script>
 
@@ -220,7 +304,8 @@
       <div class="flex flex-col gap-0.5">
         <Label class="text-sm font-medium">Enable AI enhancement</Label>
         <p class="text-xs text-muted-foreground">
-          Use Ollama to enhance transcriptions with grammar correction, formatting, and more
+          Use a local AI model to enhance transcriptions with grammar correction, formatting, and
+          more
         </p>
       </div>
       <Switch
@@ -229,96 +314,255 @@
       />
     </div>
 
-    <!-- Ollama connection -->
+    <!-- Provider selector -->
     <div class="flex flex-col gap-3">
-      <h3 class="text-sm font-semibold text-foreground">Ollama Connection</h3>
+      <h3 class="text-sm font-semibold text-foreground">Provider</h3>
 
-      <div class="flex flex-col gap-3 rounded-lg border bg-card px-4 py-3">
-        <div class="flex flex-col gap-1">
-          <Label class="text-sm font-medium">Server URL</Label>
-          <p class="text-xs text-muted-foreground">The URL of your local Ollama server</p>
-        </div>
-        <div class="flex gap-2">
-          <Input
-            type="url"
-            class="flex-1 font-mono text-sm"
-            value={configStore.config.enhancement.ollamaUrl}
-            oninput={handleUrlInput}
-            onblur={handleUrlBlur}
-            placeholder="http://localhost:11434"
-          />
-          <Button variant="outline" onclick={checkOllama} disabled={isCheckingOllama}>
-            {isCheckingOllama ? 'Testing...' : 'Test Connection'}
-          </Button>
-        </div>
-        <div class="flex items-center gap-2">
-          {#if isCheckingOllama}
-            <Badge variant="secondary">Checking…</Badge>
-          {:else if ollamaAvailable}
-            <Badge
-              class="bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20"
-              variant="outline"
-            >
-              Connected
-            </Badge>
-          {:else}
-            <Badge variant="destructive">Not connected — is Ollama running?</Badge>
-          {/if}
-        </div>
-      </div>
-
-      {#if error}
-        <Alert.Root variant="destructive">
-          <AlertCircle class="size-4" />
-          <Alert.Description>{error}</Alert.Description>
-        </Alert.Root>
-      {/if}
-
-      <!-- Model selector -->
       <div class="flex items-center justify-between gap-4 rounded-lg border bg-card px-4 py-3">
         <div class="flex flex-col gap-0.5">
-          <Label class="text-sm font-medium">Model</Label>
-          <p class="text-xs text-muted-foreground">The Ollama model used for text enhancement</p>
+          <Label class="text-sm font-medium">Backend</Label>
+          <p class="text-xs text-muted-foreground">
+            Choose your local AI server. Both run entirely on your machine — no cloud required.
+          </p>
         </div>
         <Select.Root
           type="single"
-          value={modelSelectValue}
-          onValueChange={handleModelChange}
-          disabled={!ollamaAvailable || isLoadingModels}
+          value={backendSelectValue}
+          onValueChange={handleBackendChange}
         >
-          <Select.Trigger class="w-48">
-            <SelectPrimitive.Value
-              placeholder={isLoadingModels
-                ? 'Loading models…'
-                : ollamaModels.length === 0
-                  ? configStore.config.enhancement.model
-                  : 'Select model…'}
-            />
+          <Select.Trigger class="w-64">
+            <SelectPrimitive.Value placeholder="Select backend…" />
           </Select.Trigger>
           <Select.Content>
-            {#if !isLoadingModels && ollamaModels.length === 0}
-              <Select.Item value={configStore.config.enhancement.model}>
-                {configStore.config.enhancement.model} (not available)
-              </Select.Item>
-            {:else}
-              {#each ollamaModels as model}
-                <Select.Item value={model}>{model}</Select.Item>
-              {/each}
-            {/if}
+            <Select.Item value="ollama">Ollama</Select.Item>
+            <Select.Item value="openai_compat"
+              >OpenAI-compatible (LM Studio, llama.cpp, vLLM…)</Select.Item
+            >
           </Select.Content>
         </Select.Root>
       </div>
-
-      {#if !ollamaAvailable}
-        <p class="text-xs text-muted-foreground">
-          Connect to Ollama to see available models. You can download models using
-          <code class="font-mono bg-muted px-1 py-0.5 rounded text-xs"
-            >ollama pull &lt;model&gt;</code
-          >
-          in your terminal.
-        </p>
-      {/if}
     </div>
+
+    {#if activeBackend === 'openai_compat'}
+      <!-- OpenAI-compatible server settings -->
+      <div class="flex flex-col gap-3">
+        <h3 class="text-sm font-semibold text-foreground">OpenAI-Compatible Server</h3>
+
+        <!-- Server URL -->
+        <div class="flex flex-col gap-3 rounded-lg border bg-card px-4 py-3">
+          <div class="flex flex-col gap-1">
+            <Label class="text-sm font-medium">Server URL</Label>
+            <p class="text-xs text-muted-foreground">
+              Base URL of your local OpenAI-compatible server (e.g. LM Studio, llama.cpp, vLLM)
+            </p>
+          </div>
+          <div class="flex gap-2">
+            <Input
+              type="url"
+              class="flex-1 font-mono text-sm"
+              value={configStore.config.enhancement.openaiCompatUrl}
+              oninput={handleOpenaiCompatUrlInput}
+              onblur={handleOpenaiCompatUrlBlur}
+              placeholder="http://localhost:1234"
+            />
+            <Button
+              variant="outline"
+              onclick={checkOpenaiCompat}
+              disabled={isCheckingOpenaiCompat}
+            >
+              {isCheckingOpenaiCompat ? 'Testing...' : 'Test Connection'}
+            </Button>
+          </div>
+          <div class="flex items-center gap-2">
+            {#if isCheckingOpenaiCompat}
+              <Badge variant="secondary">Checking…</Badge>
+            {:else if openaiCompatAvailable}
+              <Badge
+                class="border-green-500/20 bg-green-500/10 text-green-600 dark:text-green-400"
+                variant="outline"
+              >
+                Connected
+              </Badge>
+            {:else}
+              <Badge variant="destructive">Not connected — is your server running?</Badge>
+            {/if}
+          </div>
+        </div>
+
+        <!-- API key -->
+        <div class="flex flex-col gap-3 rounded-lg border bg-card px-4 py-3">
+          <div class="flex flex-col gap-1">
+            <Label class="text-sm font-medium">API Key</Label>
+            <p class="text-xs text-muted-foreground">
+              Optional. Leave blank if your server does not require authentication.
+            </p>
+          </div>
+          <div class="flex gap-2">
+            <Input
+              type={showApiKey ? 'text' : 'password'}
+              class="flex-1 font-mono text-sm"
+              value={configStore.config.enhancement.apiKey ?? ''}
+              oninput={handleApiKeyInput}
+              onblur={handleApiKeyBlur}
+              placeholder="(none)"
+              autocomplete="off"
+            />
+            <Button
+              variant="outline"
+              size="icon"
+              onclick={() => (showApiKey = !showApiKey)}
+              aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
+            >
+              {#if showApiKey}
+                <EyeOff class="size-4" />
+              {:else}
+                <Eye class="size-4" />
+              {/if}
+            </Button>
+          </div>
+        </div>
+
+        {#if error}
+          <Alert.Root variant="destructive">
+            <AlertCircle class="size-4" />
+            <Alert.Description>{error}</Alert.Description>
+          </Alert.Root>
+        {/if}
+
+        <!-- Model (text input + chip picker) -->
+        <div class="flex flex-col gap-3 rounded-lg border bg-card px-4 py-3">
+          <div class="flex flex-col gap-1">
+            <Label class="text-sm font-medium">Model</Label>
+            <p class="text-xs text-muted-foreground">
+              The model name your server should use. Type it directly or pick from the list if the
+              server exposes one.
+            </p>
+          </div>
+          <Input
+            type="text"
+            class="font-mono text-sm"
+            value={configStore.config.enhancement.model}
+            oninput={handleOpenaiCompatModelInput}
+            onblur={saveSettings}
+            placeholder="e.g. mistral, llama3, phi3"
+          />
+          {#if isLoadingOpenaiCompatModels}
+            <p class="text-xs text-muted-foreground">Loading models from server…</p>
+          {:else if openaiCompatAvailable && openaiCompatModels.length > 0}
+            <div class="flex flex-col gap-1.5">
+              <p class="text-xs text-muted-foreground">Available on server:</p>
+              <div class="flex flex-wrap gap-1.5">
+                {#each openaiCompatModels as model}
+                  <button
+                    class="rounded border px-2 py-0.5 text-xs transition-colors
+                      {configStore.config.enhancement.model === model
+                      ? 'border-primary/40 bg-primary/10 text-primary'
+                      : 'border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground'}"
+                    onclick={() => {
+                      configStore.updateEnhancement('model', model);
+                      saveSettings();
+                    }}
+                  >
+                    {model}
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
+        </div>
+      </div>
+    {:else}
+      <!-- Ollama connection -->
+      <div class="flex flex-col gap-3">
+        <h3 class="text-sm font-semibold text-foreground">Ollama Connection</h3>
+
+        <div class="flex flex-col gap-3 rounded-lg border bg-card px-4 py-3">
+          <div class="flex flex-col gap-1">
+            <Label class="text-sm font-medium">Server URL</Label>
+            <p class="text-xs text-muted-foreground">The URL of your local Ollama server</p>
+          </div>
+          <div class="flex gap-2">
+            <Input
+              type="url"
+              class="flex-1 font-mono text-sm"
+              value={configStore.config.enhancement.ollamaUrl}
+              oninput={handleUrlInput}
+              onblur={handleUrlBlur}
+              placeholder="http://localhost:11434"
+            />
+            <Button variant="outline" onclick={checkOllama} disabled={isCheckingOllama}>
+              {isCheckingOllama ? 'Testing...' : 'Test Connection'}
+            </Button>
+          </div>
+          <div class="flex items-center gap-2">
+            {#if isCheckingOllama}
+              <Badge variant="secondary">Checking…</Badge>
+            {:else if ollamaAvailable}
+              <Badge
+                class="border-green-500/20 bg-green-500/10 text-green-600 dark:text-green-400"
+                variant="outline"
+              >
+                Connected
+              </Badge>
+            {:else}
+              <Badge variant="destructive">Not connected — is Ollama running?</Badge>
+            {/if}
+          </div>
+        </div>
+
+        {#if error}
+          <Alert.Root variant="destructive">
+            <AlertCircle class="size-4" />
+            <Alert.Description>{error}</Alert.Description>
+          </Alert.Root>
+        {/if}
+
+        <!-- Model selector -->
+        <div class="flex items-center justify-between gap-4 rounded-lg border bg-card px-4 py-3">
+          <div class="flex flex-col gap-0.5">
+            <Label class="text-sm font-medium">Model</Label>
+            <p class="text-xs text-muted-foreground">The Ollama model used for text enhancement</p>
+          </div>
+          <Select.Root
+            type="single"
+            value={modelSelectValue}
+            onValueChange={handleModelChange}
+            disabled={!ollamaAvailable || isLoadingModels}
+          >
+            <Select.Trigger class="w-48">
+              <SelectPrimitive.Value
+                placeholder={isLoadingModels
+                  ? 'Loading models…'
+                  : ollamaModels.length === 0
+                    ? configStore.config.enhancement.model
+                    : 'Select model…'}
+              />
+            </Select.Trigger>
+            <Select.Content>
+              {#if !isLoadingModels && ollamaModels.length === 0}
+                <Select.Item value={configStore.config.enhancement.model}>
+                  {configStore.config.enhancement.model} (not available)
+                </Select.Item>
+              {:else}
+                {#each ollamaModels as model}
+                  <Select.Item value={model}>{model}</Select.Item>
+                {/each}
+              {/if}
+            </Select.Content>
+          </Select.Root>
+        </div>
+
+        {#if !ollamaAvailable}
+          <p class="text-xs text-muted-foreground">
+            Connect to Ollama to see available models. You can download models using
+            <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs"
+              >ollama pull &lt;model&gt;</code
+            >
+            in your terminal.
+          </p>
+        {/if}
+      </div>
+    {/if}
 
     <!-- Prompt templates -->
     <div class="flex flex-col gap-3">
@@ -355,7 +599,7 @@
         </div>
         {#if getSelectedPrompt()}
           <pre
-            class="text-xs font-mono text-muted-foreground whitespace-pre-wrap break-words leading-relaxed bg-muted/50 rounded px-3 py-2">{getSelectedPrompt()
+            class="whitespace-pre-wrap break-words rounded bg-muted/50 px-3 py-2 font-mono text-xs leading-relaxed text-muted-foreground">{getSelectedPrompt()
               ?.template}</pre>
         {/if}
       </div>
@@ -387,7 +631,7 @@
               <Dialog.Title>{editingPrompt ? 'Edit Prompt' : 'New Prompt'}</Dialog.Title>
               <Dialog.Description>
                 Define a custom prompt template. Use <code
-                  class="font-mono text-xs bg-muted px-1 py-0.5 rounded">{'{text}'}</code
+                  class="rounded bg-muted px-1 py-0.5 font-mono text-xs">{'{text}'}</code
                 > as the transcription placeholder.
               </Dialog.Description>
             </Dialog.Header>
@@ -417,7 +661,7 @@
                     {#snippet children({ props })}
                       <Form.Label>
                         Template
-                        <span class="text-muted-foreground font-normal ml-1 text-xs">
+                        <span class="ml-1 text-xs font-normal text-muted-foreground">
                           (use {'{text}'} as placeholder)
                         </span>
                       </Form.Label>
@@ -426,7 +670,7 @@
                         {...constraints}
                         bind:value={$formData.template}
                         rows={5}
-                        class="font-mono text-sm resize-y"
+                        class="resize-y font-mono text-sm"
                         placeholder="Enhance this text: {'{text}'}"
                       />
                     {/snippet}
@@ -457,7 +701,7 @@
                 <Button
                   variant="ghost"
                   size="sm"
-                  class="text-destructive hover:text-destructive hover:bg-destructive/10"
+                  class="text-destructive hover:bg-destructive/10 hover:text-destructive"
                   onclick={() => deletePrompt(prompt.id)}
                 >
                   Delete
@@ -465,7 +709,7 @@
               </div>
             </div>
           {:else}
-            <p class="text-sm text-muted-foreground text-center py-4">
+            <p class="py-4 text-center text-sm text-muted-foreground">
               No custom prompts yet. Click "Add Prompt" to create one.
             </p>
           {/each}
