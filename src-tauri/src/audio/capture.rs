@@ -3,12 +3,20 @@
 //! This module provides real-time safe audio recording. The audio callback
 //! uses a lock-free ring buffer to avoid allocations.
 
+use super::format::AudioConverter;
 use super::ring_buffer::AudioRingBuffer;
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+/// Target sample rate for transcription (whisper.cpp / Parakeet expect 16kHz mono).
+const TARGET_SAMPLE_RATE: u32 = 16000;
+
+/// Resampler input chunk size in frames. Matches the import path (decode.rs) so
+/// live capture and file import resample through the same well-tested path.
+const RESAMPLE_CHUNK_SIZE: usize = 1024;
 
 /// Audio recorder using cpal
 pub struct AudioRecorder {
@@ -223,7 +231,14 @@ impl AudioRecorder {
     }
 }
 
-/// Write audio from ring buffer to WAV file
+/// Write audio from ring buffer to WAV file.
+///
+/// Resamples the device-native interleaved f32 stream to 16kHz mono i16 using the
+/// same anti-aliased rubato resampler the file-import path uses (`AudioConverter`),
+/// rather than naive decimation. Decimation without a low-pass filter aliases
+/// content above 8kHz back into the speech band and corrupts transcription input;
+/// it also mislabelled any non-48kHz device (e.g. a 44.1kHz mic would have been
+/// written too fast). The WAV header is stamped at the true 16kHz output rate.
 fn write_audio_to_file(
     ring_buffer: Arc<AudioRingBuffer>,
     path: &Path,
@@ -233,48 +248,96 @@ fn write_audio_to_file(
 ) -> Result<()> {
     let spec = hound::WavSpec {
         channels: 1,
-        sample_rate: 16000,
+        sample_rate: TARGET_SAMPLE_RATE,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
 
     tracing::info!(
-        "Writer thread starting: source_rate={}, channels={}, output={}",
+        "Writer thread starting: source_rate={}, channels={}, target={}, output={}",
         source_rate,
         source_channels,
+        TARGET_SAMPLE_RATE,
         path.display()
     );
+
+    let mut converter = AudioConverter::new(
+        source_rate,
+        TARGET_SAMPLE_RATE,
+        source_channels,
+        RESAMPLE_CHUNK_SIZE,
+    )
+    .map_err(|e| anyhow!("Failed to create resampler: {}", e))?;
+
+    // The resampler consumes fixed-size chunks of interleaved frames. Accumulate
+    // the variable-sized ring-buffer reads and drain in exact chunks.
+    let frames_per_chunk = RESAMPLE_CHUNK_SIZE * source_channels;
+    let mut accumulator: Vec<f32> = Vec::with_capacity(frames_per_chunk * 2);
 
     let mut writer = hound::WavWriter::create(path, spec)?;
     let mut read_buffer = vec![0.0f32; 4096];
     let mut total_samples = 0usize;
 
+    let drain_full_chunks = |accumulator: &mut Vec<f32>,
+                             converter: &mut AudioConverter,
+                             writer: &mut hound::WavWriter<std::io::BufWriter<std::fs::File>>,
+                             total: &mut usize|
+     -> Result<()> {
+        while accumulator.len() >= frames_per_chunk {
+            let chunk: Vec<f32> = accumulator.drain(..frames_per_chunk).collect();
+            let resampled = converter
+                .process_to_i16(&chunk)
+                .map_err(|e| anyhow!("Resampling error: {}", e))?;
+            for sample in &resampled {
+                writer.write_sample(*sample)?;
+            }
+            *total += resampled.len();
+        }
+        Ok(())
+    };
+
     while !stop_signal.load(Ordering::SeqCst) {
         let read = ring_buffer.read(&mut read_buffer);
         if read > 0 {
-            let processed =
-                downsample_and_convert(&read_buffer[..read], source_rate, source_channels);
-            for sample in &processed {
-                writer.write_sample(*sample)?;
-            }
-            total_samples += processed.len();
+            accumulator.extend_from_slice(&read_buffer[..read]);
+            drain_full_chunks(
+                &mut accumulator,
+                &mut converter,
+                &mut writer,
+                &mut total_samples,
+            )?;
         } else {
             // No data available, sleep briefly
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
 
-    // Drain remaining samples from buffer
+    // Drain whatever the recorder produced after the stop signal.
     loop {
         let read = ring_buffer.read(&mut read_buffer);
         if read == 0 {
             break;
         }
-        let processed = downsample_and_convert(&read_buffer[..read], source_rate, source_channels);
-        for sample in &processed {
+        accumulator.extend_from_slice(&read_buffer[..read]);
+        drain_full_chunks(
+            &mut accumulator,
+            &mut converter,
+            &mut writer,
+            &mut total_samples,
+        )?;
+    }
+
+    // Flush the final partial chunk by zero-padding it to a full chunk (matches
+    // the import path); the trailing silence is negligible at 16kHz.
+    if !accumulator.is_empty() {
+        accumulator.resize(frames_per_chunk, 0.0);
+        let resampled = converter
+            .process_to_i16(&accumulator)
+            .map_err(|e| anyhow!("Resampling error during flush: {}", e))?;
+        for sample in &resampled {
             writer.write_sample(*sample)?;
         }
-        total_samples += processed.len();
+        total_samples += resampled.len();
     }
 
     writer.finalize()?;
@@ -282,29 +345,10 @@ fn write_audio_to_file(
     Ok(())
 }
 
-/// Downsample and convert audio to 16kHz mono i16
+/// Decimate and mix to 16kHz mono f32 for VAD processing.
 ///
-/// This is a simple decimation - proper resampling will be added in WP-02.3
-fn downsample_and_convert(samples: &[f32], source_rate: u32, channels: usize) -> Vec<i16> {
-    let ratio = (source_rate as usize) / 16000;
-
-    // Mix channels to mono and decimate
-    samples
-        .chunks(channels)
-        .step_by(ratio.max(1))
-        .map(|frame| {
-            // Average all channels for mono mix
-            let mono: f32 = frame.iter().sum::<f32>() / frame.len() as f32;
-            // Convert to i16
-            (mono * 32767.0).clamp(-32768.0, 32767.0) as i16
-        })
-        .collect()
-}
-
-/// Downsample and convert audio to 16kHz mono f32
-///
-/// Similar to `downsample_and_convert` but outputs f32 for VAD processing.
-/// Public for use by vad_recorder module.
+/// Naive integer decimation (no anti-alias filter); adequate for the coarse
+/// energy/VAD use it serves. Public for use by the vad_recorder module.
 pub fn downsample_to_mono_f32(samples: &[f32], source_rate: u32, channels: usize) -> Vec<f32> {
     let ratio = (source_rate as usize) / 16000;
 
@@ -331,21 +375,59 @@ mod tests {
     }
 
     #[test]
-    fn test_downsample_stereo_to_mono() {
-        // Stereo 48kHz -> mono 16kHz (ratio 3)
-        let stereo: Vec<f32> = vec![0.5, -0.5, 0.3, -0.3, 0.1, -0.1]; // 3 stereo frames
-        let result = downsample_and_convert(&stereo, 48000, 2);
-        // Should have 1 sample (every 3rd frame)
-        assert_eq!(result.len(), 1);
-    }
+    fn test_writer_produces_correct_rate_wav() {
+        // A recorded WAV must be stamped at 16kHz and contain roughly the
+        // expected number of 16kHz samples for the input duration — proving
+        // the writer genuinely resamples rather than relabelling decimated data.
+        // Feed 1 second of 48kHz stereo silence-ish signal through the writer.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("rate_test.wav");
 
-    #[test]
-    fn test_downsample_preserves_values() {
-        // Mono at 16kHz (no downsampling needed)
-        let mono = vec![0.5f32, 0.25, 0.0, -0.25, -0.5];
-        let result = downsample_and_convert(&mono, 16000, 1);
-        assert_eq!(result.len(), 5);
-        assert_eq!(result[0], (0.5 * 32767.0) as i16);
+        let ring = Arc::new(AudioRingBuffer::new());
+        let stop = Arc::new(AtomicBool::new(false));
+
+        // Spawn the writer, then feed it ~0.25s of 48kHz stereo audio in chunks
+        // small enough to fit the 65536-sample ring buffer, then stop.
+        let writer_ring = ring.clone();
+        let writer_stop = stop.clone();
+        let writer_path = path.clone();
+        let handle = std::thread::spawn(move || {
+            write_audio_to_file(writer_ring, &writer_path, 48000, 2, writer_stop)
+        });
+
+        // 0.25s at 48kHz stereo = 12000 frames = 24000 interleaved samples.
+        let frame = [0.2f32, -0.2f32];
+        let mut fed = 0;
+        while fed < 12000 {
+            let mut written = 0;
+            while written < frame.len() {
+                written += ring.write(&frame[written..]);
+                if written < frame.len() {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+            }
+            fed += 1;
+        }
+        // Give the writer a moment to drain, then stop.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        stop.store(true, Ordering::SeqCst);
+        handle.join().unwrap().unwrap();
+
+        let reader = hound::WavReader::open(&path).unwrap();
+        let spec = reader.spec();
+        assert_eq!(spec.sample_rate, 16000, "header must be stamped at 16kHz");
+        assert_eq!(spec.channels, 1, "output must be mono");
+
+        // 0.25s of input should yield ~4000 samples at 16kHz; allow generous
+        // tolerance for resampler latency and flush padding.
+        let n = reader.into_samples::<i16>().count();
+        assert!(
+            n > 3000 && n < 5000,
+            "expected ~4000 samples for 0.25s at 16kHz, got {}",
+            n
+        );
+
+        fs::remove_file(path).ok();
     }
 
     #[test]
