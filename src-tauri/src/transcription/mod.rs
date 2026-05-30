@@ -145,6 +145,21 @@ pub fn init_fluidaudio_transcription() -> Result<(), String> {
             tracing::warn!("Failed to write FluidAudio ready marker: {}", e);
         }
 
+        // Persist the manifest version for update-available comparisons
+        let fa_id = "fluidaudio-parakeet-tdt-coreml";
+        let manifest = manifest::get_fallback_manifest();
+        if let Some(fa_model) = manifest.models.iter().find(|m| m.id == fa_id) {
+            let version_path = manifest::get_model_directory(fa_id).join(".version");
+            if let Err(e) = std::fs::write(&version_path, fa_model.version.trim()) {
+                tracing::warn!("Failed to write .version sidecar for FluidAudio: {}", e);
+            } else {
+                tracing::debug!(
+                    "Wrote .version sidecar for FluidAudio ({})",
+                    fa_model.version
+                );
+            }
+        }
+
         tracing::info!("FluidAudio transcription service initialised (Neural Engine)");
         return Ok(());
     }

@@ -340,6 +340,24 @@ pub fn is_backend_available(model_type: &str) -> bool {
     }
 }
 
+/// Read the persisted version of an installed model, if present.
+///
+/// Returns `None` when the model predates version tracking or is not installed.
+fn read_installed_version(model_dir: &std::path::Path) -> Option<String> {
+    std::fs::read_to_string(model_dir.join(".version"))
+        .ok()
+        .map(|s| s.trim().to_string())
+}
+
+/// Whether an update is available for a model.
+///
+/// Returns `true` only when the model is downloaded and its persisted version
+/// differs from the manifest version. Returns `false` conservatively when no
+/// `.version` sidecar exists (model installed before version tracking).
+fn is_update_available(downloaded: bool, installed: Option<&str>, manifest_version: &str) -> bool {
+    downloaded && installed.map(|v| v != manifest_version).unwrap_or(false)
+}
+
 /// Convert remote model info to frontend model info
 pub fn to_model_info(remote: &RemoteModelInfo, selected_id: Option<&str>) -> ModelInfo {
     let downloaded = is_model_downloaded(remote);
@@ -384,7 +402,11 @@ pub fn to_model_info(remote: &RemoteModelInfo, selected_id: Option<&str>) -> Mod
         disk_size,
         recommended: remote.recommended,
         languages: remote.languages.clone(),
-        update_available: false, // TODO: Implement version comparison
+        update_available: is_update_available(
+            downloaded,
+            read_installed_version(&get_model_directory(&remote.id)).as_deref(),
+            &remote.version,
+        ),
         selected,
         model_type: remote.model_type.clone(),
         backend_available: is_backend_available(&remote.model_type),
@@ -507,6 +529,43 @@ mod tests {
         let dir = get_model_directory("parakeet-tdt-0.6b-v3-int8");
         assert!(dir.to_string_lossy().contains(".thoth"));
         assert!(dir.to_string_lossy().contains("models"));
+    }
+
+    #[test]
+    fn test_read_installed_version_missing() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        assert_eq!(read_installed_version(dir.path()), None);
+    }
+
+    #[test]
+    fn test_read_installed_version_present() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        std::fs::write(dir.path().join(".version"), "  2.0.0\n").unwrap();
+        assert_eq!(
+            read_installed_version(dir.path()).as_deref(),
+            Some("2.0.0")
+        );
+    }
+
+    #[test]
+    fn test_is_update_available_version_differs() {
+        assert!(is_update_available(true, Some("1.0.0"), "2.0.0"));
+    }
+
+    #[test]
+    fn test_is_update_available_version_same() {
+        assert!(!is_update_available(true, Some("2.0.0"), "2.0.0"));
+    }
+
+    #[test]
+    fn test_is_update_available_no_sidecar() {
+        // Conservative: no false positive when sidecar is absent
+        assert!(!is_update_available(true, None, "2.0.0"));
+    }
+
+    #[test]
+    fn test_is_update_available_not_downloaded() {
+        assert!(!is_update_available(false, Some("1.0.0"), "2.0.0"));
     }
 
     #[test]

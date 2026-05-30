@@ -407,6 +407,14 @@ async fn download_and_extract_model(app: &AppHandle, model: &RemoteModelInfo) ->
         return Err(anyhow!("Model download failed: required files missing"));
     }
 
+    // Persist the manifest version so update checks can compare later
+    let version_path = model_dir.join(".version");
+    if let Err(e) = std::fs::write(&version_path, model.version.trim()) {
+        tracing::warn!("Failed to write .version sidecar for {}: {}", model.id, e);
+    } else {
+        tracing::debug!("Wrote .version sidecar for {} ({})", model.id, model.version);
+    }
+
     tracing::info!(
         "Model {} download completed successfully",
         model.id
