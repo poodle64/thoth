@@ -60,6 +60,15 @@ pub struct AudioConfig {
     pub sample_rate: u32,
     /// Whether to play audio feedback sounds
     pub play_sounds: bool,
+    /// Keep the cpal input stream open between recordings ("warm stream").
+    ///
+    /// When true (default), the device is opened once and kept playing with an
+    /// armed flag gating writes to the recording buffer. Start latency drops
+    /// from ~150ms to near-zero. The stream is torn down after 45s of inactivity.
+    /// When false, the device is opened and closed on every recording (original
+    /// behaviour); the mic indicator only shows levels during active recording.
+    #[serde(default = "default_true")]
+    pub warm_stream: bool,
 }
 
 impl Default for AudioConfig {
@@ -68,6 +77,7 @@ impl Default for AudioConfig {
             device_id: None,
             sample_rate: 16000,
             play_sounds: true,
+            warm_stream: true,
         }
     }
 }
@@ -729,6 +739,7 @@ mod tests {
                 device_id: Some("test-device".to_string()),
                 sample_rate: 44100,
                 play_sounds: false,
+                warm_stream: true,
             },
             transcription: TranscriptionConfig {
                 model_id: Some("test-model".to_string()),
@@ -823,6 +834,7 @@ mod tests {
             device_id: Some("custom-mic".to_string()),
             sample_rate: 48000,
             play_sounds: false,
+            warm_stream: false,
         };
 
         assert_eq!(audio.device_id, Some("custom-mic".to_string()));

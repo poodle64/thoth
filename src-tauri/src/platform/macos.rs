@@ -571,6 +571,9 @@ pub fn register_wake_observer() {
                 // so the indicator can recover immediately, without waiting on
                 // the multi-second model re-warm below.
                 crate::mouse_tracker::notify_wake();
+                // A held cpal stream handle goes stale across sleep; drop it so
+                // the next recording opens a fresh device handle.
+                crate::audio::cool_down_recording();
                 // Then re-warm the transcription model: the CoreML/ONNX compile
                 // cache may have been evicted across sleep, so the first
                 // recording after wake would otherwise be penalised.

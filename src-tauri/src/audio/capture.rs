@@ -1,7 +1,9 @@
 //! Audio capture using cpal with lock-free ring buffer
 //!
 //! This module provides real-time safe audio recording. The audio callback
-//! uses a lock-free ring buffer to avoid allocations.
+//! uses a lock-free ring buffer to avoid allocations. The recorder keeps the
+//! cpal stream open ("warm") between recordings so that pressing record is an
+//! instant flag flip rather than a ~150ms device open.
 
 use super::format::AudioConverter;
 use super::ring_buffer::AudioRingBuffer;
@@ -18,21 +20,38 @@ const TARGET_SAMPLE_RATE: u32 = 16000;
 /// live capture and file import resample through the same well-tested path.
 const RESAMPLE_CHUNK_SIZE: usize = 1024;
 
-/// Audio recorder using cpal
+/// Audio recorder using cpal with warm-stream lifecycle.
+///
+/// Lifecycle:
+/// 1. `warm_up` — opens the cpal device and starts the stream. The callback
+///    runs continuously but only writes to the recording ring buffer while armed.
+/// 2. `arm` — starts the writer thread and flips the armed flag so samples flow
+///    into the recording buffer. Does NOT open the device (instant).
+/// 3. `disarm` — flips the armed flag and joins the writer thread. Does NOT
+///    close the device. Returns the path to the finished WAV.
+/// 4. `cool_down` — closes the device. Called after an idle timeout or when
+///    the device changes.
 pub struct AudioRecorder {
+    /// The warm cpal stream (open from `warm_up` to `cool_down`).
     stream: Option<cpal::Stream>,
+    /// Writer thread that drains the ring buffer to a WAV file.
     writer_handle: Option<std::thread::JoinHandle<Result<()>>>,
+    /// Signals the writer thread to stop draining.
     stop_signal: Arc<AtomicBool>,
+    /// Path where the current/last recording is being written.
     output_path: Option<PathBuf>,
+    /// Primary recording ring buffer (stable for the warm stream's lifetime).
     ring_buffer: Arc<AudioRingBuffer>,
-    /// Optional secondary ring buffer for VAD or other consumers
+    /// Optional secondary ring buffer for VAD or other consumers.
     secondary_buffer: Option<Arc<AudioRingBuffer>>,
-    /// Optional ring buffer for real-time metering (recording indicator waveform)
+    /// Optional ring buffer for real-time metering (recording indicator waveform).
     metering_buffer: Option<Arc<AudioRingBuffer>>,
-    /// Source sample rate (set during recording)
+    /// Source sample rate captured at warm_up time.
     source_rate: Option<u32>,
-    /// Source channel count (set during recording)
+    /// Source channel count captured at warm_up time.
     source_channels: Option<usize>,
+    /// Whether the callback should write samples to the recording ring buffer.
+    armed: Arc<AtomicBool>,
 }
 
 impl Default for AudioRecorder {
@@ -42,7 +61,7 @@ impl Default for AudioRecorder {
 }
 
 impl AudioRecorder {
-    /// Create a new audio recorder
+    /// Create a new audio recorder.
     pub fn new() -> Self {
         Self {
             stream: None,
@@ -54,131 +73,105 @@ impl AudioRecorder {
             metering_buffer: None,
             source_rate: None,
             source_channels: None,
+            armed: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    /// Set a secondary ring buffer that will receive audio data alongside the primary buffer.
+    /// Set a secondary ring buffer that will receive audio data when armed.
     ///
-    /// This allows external consumers (e.g., VAD processing) to receive audio data
-    /// without creating a separate audio input stream. Must be called before `start()`.
+    /// Must be called before `warm_up` — the callback captures buffer clones at warm-up time.
     pub fn set_secondary_buffer(&mut self, buffer: Arc<AudioRingBuffer>) {
         self.secondary_buffer = Some(buffer);
     }
 
-    /// Clear the secondary buffer
+    /// Clear the secondary buffer.
     pub fn clear_secondary_buffer(&mut self) {
         self.secondary_buffer = None;
     }
 
-    /// Set a dedicated metering ring buffer that receives audio data alongside the primary buffer.
+    /// Set a dedicated metering ring buffer.
     ///
-    /// Routes raw device-native samples to the metering consumer without opening a second
-    /// device stream. Must be called before `start()`.
+    /// The metering buffer receives samples continuously while warm (even before
+    /// arming), so the recording indicator can show levels without delay. Must be
+    /// called before `warm_up` — the callback captures the clone at warm-up time.
     pub fn set_metering_buffer(&mut self, buffer: Arc<AudioRingBuffer>) {
         self.metering_buffer = Some(buffer);
     }
 
-    /// Clear the metering buffer
+    /// Clear the metering buffer.
     pub fn clear_metering_buffer(&mut self) {
         self.metering_buffer = None;
     }
 
-    /// Check if currently recording
+    /// Whether the recorder is currently armed (actively capturing to a WAV file).
     pub fn is_recording(&self) -> bool {
+        self.armed.load(Ordering::Relaxed)
+    }
+
+    /// Whether the cpal stream is open (warm).
+    pub fn is_warm(&self) -> bool {
         self.stream.is_some()
     }
 
-    /// Start recording from the default input device
+    /// Open the cpal input stream and start it playing ("warm").
+    ///
+    /// If a warm stream is already open, this is a no-op (the same device
+    /// identity is assumed; callers must cool_down then re-warm on device change).
+    /// Buffers set via `set_metering_buffer` / `set_secondary_buffer` must be
+    /// in place before calling this.
     #[allow(deprecated)] // cpal 0.17 deprecates name() but description() is not yet stable
-    pub fn start_default(&mut self, output_path: &Path) -> Result<()> {
-        let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or_else(|| anyhow!("No default input device available"))?;
-
-        let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
-        tracing::info!("Using default input device: {}", device_name);
-
-        self.start(&device, output_path)
-    }
-
-    /// Start recording from a specific device
-    #[allow(deprecated)]
-    pub fn start(&mut self, device: &cpal::Device, output_path: &Path) -> Result<()> {
+    pub fn warm_up(&mut self, device: &cpal::Device) -> Result<()> {
         if self.stream.is_some() {
-            return Err(anyhow!("Recording already in progress"));
+            tracing::debug!("AudioRecorder::warm_up: stream already open, no-op");
+            return Ok(());
         }
 
         let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
-        tracing::info!("AudioRecorder::start called for device: {}", device_name);
+        tracing::info!("AudioRecorder::warm_up: opening device '{}'", device_name);
 
         let supported_config = device.default_input_config()?;
-        // cpal 0.17 returns u32 directly, not a tuple
         let source_rate = supported_config.sample_rate();
         let source_channels = supported_config.channels() as usize;
-        let sample_format = supported_config.sample_format();
 
         tracing::info!(
-            "Starting recording: device='{}', {}Hz, {} channels, format={:?}, output={}",
+            "Warm stream: device='{}', {}Hz, {} channels",
             device_name,
             source_rate,
             source_channels,
-            sample_format,
-            output_path.display()
         );
 
-        // Convert to StreamConfig for building the stream
-        let config = supported_config;
-
-        // Reset state
-        self.stop_signal.store(false, Ordering::SeqCst);
-        self.output_path = Some(output_path.to_path_buf());
-        self.ring_buffer = Arc::new(AudioRingBuffer::new());
         self.source_rate = Some(source_rate);
         self.source_channels = Some(source_channels);
 
-        // Clone for the writer thread
-        let ring_buffer = self.ring_buffer.clone();
-        let stop_signal = self.stop_signal.clone();
-        let writer_path = output_path.to_path_buf();
+        // Clone all buffers — the callback holds these for the stream's lifetime.
+        let callback_ring = self.ring_buffer.clone();
+        let callback_secondary = self.secondary_buffer.clone();
+        let callback_metering = self.metering_buffer.clone();
+        let callback_armed = self.armed.clone();
 
-        // Writer thread - reads from ring buffer and writes to file
-        self.writer_handle = Some(std::thread::spawn(move || {
-            write_audio_to_file(
-                ring_buffer,
-                &writer_path,
-                source_rate,
-                source_channels,
-                stop_signal,
-            )
-        }));
-
-        // Clone ring buffers for the audio callback
-        let callback_buffer = self.ring_buffer.clone();
-        let secondary_callback_buffer = self.secondary_buffer.clone();
-        let metering_callback_buffer = self.metering_buffer.clone();
-
-        // Build input stream
         let stream = device.build_input_stream(
-            &config.into(),
+            &supported_config.into(),
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                // LOCK-FREE: Ring buffer write does not allocate
-                let written = callback_buffer.write(data);
-                if written < data.len() {
-                    tracing::warn!(
-                        "Audio buffer overflow: dropped {} samples",
-                        data.len() - written
-                    );
-                }
-
-                // Write to secondary buffer if present (for VAD processing)
-                if let Some(ref secondary) = secondary_callback_buffer {
-                    secondary.write(data);
-                }
-
-                // Write to metering buffer if present (for recording-indicator waveform)
-                if let Some(ref m) = metering_callback_buffer {
+                // Metering always runs while warm (regardless of armed state) so
+                // the recording indicator can show levels before the user hits record.
+                if let Some(ref m) = callback_metering {
                     m.write(data);
+                }
+
+                // Recording buffers only receive data while armed.
+                // LOCK-FREE: armed check + ring buffer writes never allocate.
+                if callback_armed.load(Ordering::Relaxed) {
+                    let written = callback_ring.write(data);
+                    if written < data.len() {
+                        tracing::warn!(
+                            "Audio buffer overflow: dropped {} samples",
+                            data.len() - written
+                        );
+                    }
+
+                    if let Some(ref secondary) = callback_secondary {
+                        secondary.write(data);
+                    }
                 }
             },
             |err| {
@@ -189,22 +182,85 @@ impl AudioRecorder {
 
         stream.play()?;
         self.stream = Some(stream);
-
-        tracing::info!("Recording started");
+        tracing::info!("AudioRecorder::warm_up: stream open and playing");
         Ok(())
     }
 
-    /// Stop recording and return the path to the recorded file
-    pub fn stop(&mut self) -> Result<PathBuf> {
-        // Signal writer to stop
-        self.stop_signal.store(true, Ordering::SeqCst);
+    /// Convenience wrapper: open the default input device and warm up.
+    pub fn warm_up_default(&mut self) -> Result<()> {
+        let host = cpal::default_host();
+        let device = host
+            .default_input_device()
+            .ok_or_else(|| anyhow!("No default input device available"))?;
+        self.warm_up(&device)
+    }
 
-        // Stop the audio stream
-        if let Some(stream) = self.stream.take() {
-            drop(stream);
+    /// Arm the recorder: prepare the output file and start the writer thread.
+    ///
+    /// Requires the stream to already be warm. This is intentionally instant —
+    /// it sets the armed flag only AFTER the writer thread is spawned and ready.
+    pub fn arm(&mut self, output_path: &Path) -> Result<()> {
+        if self.stream.is_none() {
+            return Err(anyhow!(
+                "Cannot arm: stream is not warm. Call warm_up() first."
+            ));
+        }
+        if self.armed.load(Ordering::Relaxed) {
+            return Err(anyhow!("Already armed / recording in progress"));
         }
 
-        // Wait for writer thread to finish
+        let source_rate = self
+            .source_rate
+            .ok_or_else(|| anyhow!("source_rate not set — warm_up() must have failed"))?;
+        let source_channels = self
+            .source_channels
+            .ok_or_else(|| anyhow!("source_channels not set — warm_up() must have failed"))?;
+
+        tracing::info!("AudioRecorder::arm: output={}", output_path.display());
+
+        // Discard any samples that arrived before arming.
+        self.ring_buffer.clear();
+
+        self.stop_signal.store(false, Ordering::SeqCst);
+        self.output_path = Some(output_path.to_path_buf());
+
+        // Spawn the writer thread BEFORE setting armed=true so it is reading
+        // before any samples can flow.
+        let ring_buffer = self.ring_buffer.clone();
+        let stop_signal = self.stop_signal.clone();
+        let writer_path = output_path.to_path_buf();
+
+        self.writer_handle = Some(std::thread::spawn(move || {
+            write_audio_to_file(
+                ring_buffer,
+                &writer_path,
+                source_rate,
+                source_channels,
+                stop_signal,
+            )
+        }));
+
+        // Armed flag is set LAST so the callback doesn't write until the writer
+        // thread is running.
+        self.armed.store(true, Ordering::SeqCst);
+        tracing::info!("AudioRecorder::arm: armed, recording started");
+        Ok(())
+    }
+
+    /// Disarm the recorder: stop sampling into the recording buffer and finalise the WAV.
+    ///
+    /// The cpal stream stays open (warm). Returns the path to the finished WAV file.
+    pub fn disarm(&mut self) -> Result<PathBuf> {
+        if !self.armed.load(Ordering::Relaxed) {
+            return Err(anyhow!("Not armed / no recording in progress"));
+        }
+
+        // Stop new samples entering the recording buffer first.
+        self.armed.store(false, Ordering::SeqCst);
+
+        // Signal the writer thread to drain remaining samples and finalise.
+        self.stop_signal.store(true, Ordering::SeqCst);
+
         if let Some(handle) = self.writer_handle.take() {
             handle
                 .join()
@@ -214,18 +270,78 @@ impl AudioRecorder {
         let path = self
             .output_path
             .take()
-            .ok_or_else(|| anyhow!("No recording in progress"))?;
+            .ok_or_else(|| anyhow!("output_path missing after disarm"))?;
 
-        tracing::info!("Recording stopped: {}", path.display());
+        tracing::info!(
+            "AudioRecorder::disarm: recording saved to {}",
+            path.display()
+        );
         Ok(path)
     }
 
-    /// Get the source sample rate (only valid during recording)
+    /// Close the cpal stream ("cool down").
+    ///
+    /// Called on idle timeout, device change, or sleep/wake. Refuses to act
+    /// while a recording is armed — tearing the stream down mid-capture would
+    /// silently lose the recording. Callers must stop the recording first (via
+    /// the normal stop-and-process path) if they need to cool down during one.
+    pub fn cool_down(&mut self) {
+        if self.armed.load(Ordering::Relaxed) {
+            tracing::warn!("AudioRecorder::cool_down skipped — a recording is in progress");
+            return;
+        }
+
+        if let Some(stream) = self.stream.take() {
+            drop(stream);
+            tracing::info!("AudioRecorder::cool_down: stream closed");
+        }
+
+        self.source_rate = None;
+        self.source_channels = None;
+    }
+
+    // -------------------------------------------------------------------------
+    // Legacy single-call API (used by tests and VAD recorder path)
+    // These wrap warm_up + arm or disarm + cool_down for callers that don't
+    // need the split lifecycle.
+    // -------------------------------------------------------------------------
+
+    /// Start recording from the default input device (legacy single-call API).
+    pub fn start_default(&mut self, output_path: &Path) -> Result<()> {
+        let host = cpal::default_host();
+        let device = host
+            .default_input_device()
+            .ok_or_else(|| anyhow!("No default input device available"))?;
+        self.start(&device, output_path)
+    }
+
+    /// Start recording from a specific device (legacy single-call API).
+    #[allow(deprecated)]
+    pub fn start(&mut self, device: &cpal::Device, output_path: &Path) -> Result<()> {
+        if self.stream.is_some() {
+            return Err(anyhow!("Recording already in progress"));
+        }
+        let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+        tracing::info!("AudioRecorder::start (legacy): device='{}'", device_name);
+
+        self.warm_up(device)?;
+        self.arm(output_path)?;
+        Ok(())
+    }
+
+    /// Stop recording and return the path to the recorded file (legacy single-call API).
+    pub fn stop(&mut self) -> Result<PathBuf> {
+        let path = self.disarm()?;
+        self.cool_down();
+        Ok(path)
+    }
+
+    /// Get the source sample rate (only valid while warm).
     pub fn source_rate(&self) -> Option<u32> {
         self.source_rate
     }
 
-    /// Get the source channel count (only valid during recording)
+    /// Get the source channel count (only valid while warm).
     pub fn source_channels(&self) -> Option<usize> {
         self.source_channels
     }
@@ -372,6 +488,7 @@ mod tests {
     fn test_recorder_new() {
         let recorder = AudioRecorder::new();
         assert!(!recorder.is_recording());
+        assert!(!recorder.is_warm());
     }
 
     #[test]
@@ -443,6 +560,9 @@ mod tests {
         let output_path = dir.path().join("test_recording.wav");
 
         let mut recorder = AudioRecorder::new();
+
+        // Test both the split lifecycle and the warm/is_warm checks.
+        assert!(!recorder.is_warm());
         assert!(recorder.start_default(&output_path).is_ok());
         assert!(recorder.is_recording());
 
@@ -462,5 +582,20 @@ mod tests {
 
         // Clean up
         fs::remove_file(result_path).ok();
+    }
+
+    #[test]
+    fn test_arm_requires_warm() {
+        let dir = tempdir().unwrap();
+        let output_path = dir.path().join("test.wav");
+        let mut recorder = AudioRecorder::new();
+        // Calling arm without warming up must return an error.
+        assert!(recorder.arm(&output_path).is_err());
+    }
+
+    #[test]
+    fn test_disarm_without_arm_returns_error() {
+        let mut recorder = AudioRecorder::new();
+        assert!(recorder.disarm().is_err());
     }
 }

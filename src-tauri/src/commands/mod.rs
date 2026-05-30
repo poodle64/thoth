@@ -113,10 +113,13 @@ pub fn get_show_in_dock() -> bool {
 ///
 /// Uses a dedicated command (rather than full config save) to prevent
 /// the device_id from being accidentally overwritten by other config saves.
+/// Also cools down the warm stream so the next recording opens the new device.
 #[tauri::command]
 pub fn set_audio_device(device_id: Option<String>) -> Result<(), String> {
     crate::config::set_audio_device_config(device_id.clone())
         .map_err(|e| format!("Failed to save audio device: {}", e))?;
+    // Cool down the warm stream — the new device must be opened fresh.
+    crate::audio::cool_down_recording();
     tracing::info!("Audio device set to: {:?}", device_id);
     Ok(())
 }
@@ -187,9 +190,15 @@ pub fn open_privacy_pane(pane: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let url = match pane.as_str() {
-            "accessibility" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
-            "input-monitoring" => "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
-            "microphone" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+            "accessibility" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            }
+            "input-monitoring" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+            }
+            "microphone" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+            }
             _ => return Err(format!("Unknown pane: {}", pane)),
         };
         std::process::Command::new("open")
