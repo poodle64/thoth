@@ -158,24 +158,38 @@ function createPipelineStore() {
     }
     isInitialised = true;
 
-    // Listen for progress events
-    const progressUnlisten = await listen<PipelineProgress>('pipeline-progress', (event) => {
-      debug(' Progress event received:', event.payload);
-      state = event.payload.state;
-      message = event.payload.message;
+    // Authoritative state mirror: the backend is the single source of truth.
+    // This listener owns `state` and `isRunning`. Nothing else sets them.
+    // The payload is always derived from get_pipeline_state() on the Rust side,
+    // so a late completion from clip A cannot clobber an active clip-B recording
+    // (because get_pipeline_state() prioritises is_recording()).
+    const recordingStateUnlisten = await listen<PipelineState>('recording-state', (event) => {
+      const incoming = event.payload;
+      debug(' recording-state event received:', incoming);
+      state = incoming;
       isRunning = state !== 'idle' && state !== 'completed' && state !== 'failed';
-      debug(' State updated to:', state, 'isRunning:', isRunning);
+      if (state !== 'recording') {
+        recordingStartTime = null;
+      }
+      debug(' State mirrored to:', state, 'isRunning:', isRunning);
+    });
+    unlisteners.push(recordingStateUnlisten);
+
+    // Progress events: update the display message only.
+    // State is owned by recording-state; pipeline-progress must not set it.
+    const progressUnlisten = await listen<PipelineProgress>('pipeline-progress', (event) => {
+      debug(' pipeline-progress message update:', event.payload.message);
+      message = event.payload.message;
     });
     unlisteners.push(progressUnlisten);
 
-    // Listen for completion events
+    // Completion events: store the result payload only.
+    // State is owned by recording-state; pipeline-complete must not set it.
+    // The Rust side emits recording-state after emitting pipeline-complete, so
+    // the authoritative state update always follows the result delivery.
     const completeUnlisten = await listen<PipelineResult>('pipeline-complete', (event) => {
-      debug(' pipeline-complete event received:', event.payload);
+      debug(' pipeline-complete result received');
       lastResult = event.payload;
-      state = 'completed';
-      isRunning = false;
-      recordingStartTime = null;
-      debug(' State set to completed from event');
     });
     unlisteners.push(completeUnlisten);
 
@@ -188,7 +202,10 @@ function createPipelineStore() {
     });
     unlisteners.push(cancelUnlisten);
 
-    // Listen for shortcut events to trigger recording
+    // Listen for shortcut events to trigger recording.
+    // The start-vs-stop decision is made by the Rust pipeline_toggle_recording
+    // command (which reads is_recording() — the single authority). The frontend
+    // does NOT re-decide here; it only updates display state from the outcome.
     debug(' Setting up shortcut-triggered listener...');
     const shortcutUnlisten = await listen<string>('shortcut-triggered', async (event) => {
       const shortcutId = event.payload;
@@ -202,28 +219,24 @@ function createPipelineStore() {
         isRunning
       );
 
-      // Handle toggle recording shortcuts
       if (shortcutId === 'toggle_recording' || shortcutId === 'toggle_recording_alt') {
-        debug(`${timestamp} Calling toggleRecording...`);
+        debug(`${timestamp} Calling pipeline_toggle_recording (Rust authority)...`);
         await toggleRecording();
-        debug(`${timestamp} toggleRecording completed, new state:`, state);
+        debug(`${timestamp} toggle completed, new state:`, state);
       }
     });
     debug(' shortcut-triggered listener registered');
     unlisteners.push(shortcutUnlisten);
 
-    // Sync with backend state (e.g., after hot reload)
+    // Seed the mirror from the backend's current state so a reload/HMR shows
+    // the true state rather than defaulting to idle.
     try {
-      const running = await invoke<boolean>('is_pipeline_running');
-      if (running) {
-        // Backend is running, sync our state
-        const backendState = await invoke<string>('get_pipeline_state');
-        debug(' Syncing with backend state:', backendState, 'running:', running);
-        state = backendState as PipelineState;
-        isRunning = true;
-      }
+      const backendState = await invoke<PipelineState>('get_pipeline_state');
+      debug(' Seeding state from backend:', backendState);
+      state = backendState;
+      isRunning = state !== 'idle' && state !== 'completed' && state !== 'failed';
     } catch (e) {
-      console.warn('[Pipeline] Failed to sync with backend state:', e);
+      console.warn('[Pipeline] Failed to seed state from backend:', e);
     }
 
     debug(' Initialization complete, state:', state, 'isRunning:', isRunning);
@@ -244,10 +257,14 @@ function createPipelineStore() {
    * Start recording
    */
   async function startRecording(): Promise<{ success: boolean; error?: string }> {
-    debug(' startRecording() called, isRunning:', isRunning);
-    if (isRunning) {
-      debug(' Already running, returning early');
-      return { success: false, error: 'Pipeline is already running' };
+    debug(' startRecording() called, state:', state, 'isRunning:', isRunning);
+    // Guard on capture state only — not on isRunning.
+    // isRunning is true during background transcription (pipeline-progress events set it),
+    // but a press while transcribing is a valid IDLE→RECORDING start per the state machine.
+    // The only thing that blocks a new start is already capturing audio.
+    if (state === 'recording') {
+      debug(' Already capturing, returning early');
+      return { success: false, error: 'Already recording' };
     }
 
     error = null;
@@ -261,15 +278,14 @@ function createPipelineStore() {
       const path = await invoke<string>('pipeline_start_recording');
       debug(' Recording started at path:', path);
 
-      // Play the dictation-style begin tone only AFTER the backend confirms the
-      // recording actually started. Playing it earlier would lie when the
-      // backend rejects the start (e.g. the previous pipeline is still
-      // processing), leaving the user talking to a dead mic.
-      soundStore.playRecordingStart();
+      // NOTE: The begin bong is now played from Rust in the shortcut handlers
+      // (manager.rs, keyboard_service.rs, tray.rs), gated on !is_pipeline_running
+      // && !is_recording && is_transcription_ready — so it fires only on a true
+      // start and only before the IPC round-trip delay.
 
+      // State is owned by the recording-state event emitted by Rust after
+      // start_recording succeeds. We only set local non-state fields here.
       audioPath = path;
-      state = 'recording';
-      isRunning = true;
       recordingStartTime = Date.now();
       recordingDuration = 0;
 
@@ -323,25 +339,14 @@ function createPipelineStore() {
 
     try {
       debug(' Calling pipeline_stop_and_process...');
-      const result = await invoke<PipelineResult>('pipeline_stop_and_process', {
+      // The command returns immediately after capture stops (Result<(), String>).
+      // State is owned by the recording-state event; Rust emits Transcribing
+      // immediately after stopping capture, before spawning the detached task.
+      await invoke<void>('pipeline_stop_and_process', {
         config: fullConfig,
       });
-      debug(' Received result from backend:', result);
-      lastResult = result;
-
-      if (result.success) {
-        debug(' Setting state to completed');
-        state = 'completed';
-        debug(' State after update:', state);
-        return { success: true, result };
-      } else {
-        debug(' Result was not successful:', result.error);
-        state = 'failed';
-        error = result.error ?? 'Unknown error';
-        // Play error sound on failure
-        soundStore.playError();
-        return { success: false, error: result.error ?? 'Unknown error' };
-      }
+      debug(' pipeline_stop_and_process returned (processing is detached)');
+      return { success: true };
     } catch (e) {
       const errorMsg = `${e}`;
       console.error('[Pipeline] Exception in stopAndProcess:', errorMsg);
@@ -350,21 +355,25 @@ function createPipelineStore() {
       // Play error sound on exception
       soundStore.playError();
       return { success: false, error: errorMsg };
-    } finally {
-      debug(' finally block - setting isRunning=false');
-      isRunning = false;
-      recordingStartTime = null;
     }
   }
 
   /**
-   * Toggle recording (start if idle, stop and process if recording)
+   * Toggle recording — thin caller of the Rust authority command.
+   *
+   * Start-vs-stop is decided by `pipeline_toggle_recording` in Rust, which
+   * reads `is_recording()` — the single source of truth.  The frontend does NOT
+   * branch on `state` here; it updates display from the returned outcome.
+   *
+   * Sound is also owned by Rust:
+   * - BING is played by the shortcut handler the instant the key is pressed.
+   * - BONG is played by pipeline_toggle_recording before capture disarms.
    */
   async function toggleRecording(
     config?: Partial<PipelineConfig>
   ): Promise<{ success: boolean; result?: PipelineResult; error?: string }> {
     // Cooldown: ignore toggles that arrive too soon after the last state change.
-    // This prevents key bounce from immediately reversing a start or stop.
+    // Prevents key bounce from immediately reversing a start or stop.
     const now = Date.now();
     const elapsed = now - lastToggleTime;
     if (elapsed < TOGGLE_COOLDOWN_MS) {
@@ -372,7 +381,6 @@ function createPipelineStore() {
       return { success: false, error: 'Toggle cooldown active' };
     }
 
-    // Prevent concurrent toggle calls
     if (isToggling) {
       debug(' Toggle already in progress, ignoring');
       return { success: false, error: 'Toggle already in progress' };
@@ -381,48 +389,47 @@ function createPipelineStore() {
     lastToggleTime = now;
 
     try {
-      // Check recording mode from settings
-      const isPttMode = settingsStore.isPttMode;
+      debug(' toggleRecording: calling pipeline_toggle_recording (Rust authority)');
 
-      debug(' toggleRecording called:', {
-        state,
-        isPttMode,
-        isRunning,
-        isInitialised: settingsStore.isInitialised,
-      });
+      // Build config for the stop path (start path ignores it).
+      const defaultConfig = await getDefaultConfig();
+      const fullConfig: PipelineConfig = { ...defaultConfig, ...config };
 
-      // In toggle mode, we start or stop based on current state
-      if (!isPttMode) {
-        if (state === 'recording') {
-          debug(' Stopping recording (toggle mode)');
-          return await stopAndProcess(config);
-        } else if (state === 'idle' || state === 'completed' || state === 'failed') {
-          debug(' Starting recording (toggle mode)');
-          const startResult = await startRecording();
-          return { success: startResult.success, error: startResult.error };
-        } else {
-          // Processing in progress: a start press arrived while the previous
-          // recording is still transcribing/enhancing/pasting (the backend
-          // holds the pipeline lock across that whole window). Give the user
-          // explicit feedback instead of silently dropping the press and
-          // leaving them dictating to a mic that never opened.
-          debug(' Processing in progress, ignoring toggle');
-          soundStore.playError();
-          toast.info('Still processing the last recording…');
-          return { success: false, error: 'Processing in progress' };
-        }
+      type ToggleOutcome = { action: 'started'; path: string } | { action: 'stopped' };
+
+      let outcome: ToggleOutcome;
+      try {
+        outcome = await invoke<ToggleOutcome>('pipeline_toggle_recording', {
+          config: fullConfig,
+        });
+      } catch (e) {
+        const errorMsg = `${e}`;
+        debug(' pipeline_toggle_recording error:', errorMsg);
+        error = errorMsg;
+        state = 'failed';
+        invoke('hide_recording_indicator').catch(() => {});
+        soundStore.playError();
+        return { success: false, error: errorMsg };
       }
 
-      // In PTT mode, toggle is handled differently (key down/up events)
-      // This function will act as a toggle for manual button clicks
-      if (state === 'recording') {
-        return await stopAndProcess(config);
-      } else if (state === 'idle' || state === 'completed' || state === 'failed') {
-        const startResult = await startRecording();
-        return { success: startResult.success, error: startResult.error };
+      if (outcome.action === 'started') {
+        debug(' Rust decided: START, path:', outcome.path);
+        // State is owned by the recording-state event emitted by Rust.
+        // Set only local non-state fields here.
+        error = null;
+        lastResult = null;
+        audioPath = outcome.path;
+        recordingStartTime = Date.now();
+        recordingDuration = 0;
+        startDurationTimer();
+      } else {
+        debug(' Rust decided: STOP — recording-state event will update state');
+        // BONG already played by Rust; indicator hidden by pipeline_stop_and_process.
+        // State is owned by the recording-state Transcribing event emitted before
+        // the detached task is spawned.
       }
 
-      return { success: false, error: 'Invalid state for toggle' };
+      return { success: true };
     } finally {
       isToggling = false;
     }

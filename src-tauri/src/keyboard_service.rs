@@ -706,11 +706,18 @@ fn emit_shortcut_event(app: &AppHandle, id: &str, state: &str) {
     tracing::info!("Modifier shortcut {}: {}", state, id);
 
     if state == "pressed" {
-        // Show recording indicator immediately
-        if id.contains("toggle_recording") {
+        // Show indicator and play bing only when this press is a START.
+        // Guard on is_recording() only — the armed flag is the single authority
+        // for "am I capturing?". Background processing (PIPELINE_RUNNING already
+        // cleared at capture-stop) must never block a new start.
+        if id.contains("toggle_recording")
+            && !crate::audio::is_recording()
+            && crate::transcription::is_transcription_ready()
+        {
             if let Err(e) = crate::recording_indicator::show_indicator_instant(app) {
                 tracing::warn!("Failed to show recording indicator: {}", e);
             }
+            crate::sound::play_sound(crate::sound::SoundEvent::RecordingStart);
         }
 
         // Emit shortcut-triggered for toggle mode compatibility

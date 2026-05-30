@@ -343,6 +343,7 @@ pub fn run() {
             audio::start_recording,
             audio::stop_recording,
             audio::is_recording,
+            audio::warm_up_recording,
             audio::set_vad_enabled,
             audio::is_vad_enabled,
             audio::get_vad_config_cmd,
@@ -476,6 +477,7 @@ pub fn run() {
             // Pipeline (full recording -> transcription -> output flow)
             pipeline::pipeline_start_recording,
             pipeline::pipeline_stop_and_process,
+            pipeline::pipeline_toggle_recording,
             pipeline::pipeline_transcribe_file,
             pipeline::pipeline_retranscribe,
             pipeline::pipeline_cancel,

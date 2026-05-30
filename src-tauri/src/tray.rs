@@ -642,12 +642,17 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
         menu_ids::TOGGLE_RECORDING => {
             tracing::info!("Toggle recording clicked from tray menu");
 
-            // Show recording indicator immediately if not already recording
-            // This is especially important on Wayland where keyboard shortcuts may not work
-            if !crate::pipeline::is_pipeline_running() {
+            // Show indicator and play bing only when this press is a START.
+            // Guard on is_recording() only — the armed flag is the single authority
+            // for "am I capturing?". Background processing (PIPELINE_RUNNING already
+            // cleared at capture-stop) must never block a new start.
+            if !crate::audio::is_recording()
+                && crate::transcription::is_transcription_ready()
+            {
                 if let Err(e) = crate::recording_indicator::show_indicator_instant(app) {
                     tracing::warn!("Failed to show recording indicator from tray: {}", e);
                 }
+                crate::sound::play_sound(crate::sound::SoundEvent::RecordingStart);
             }
 
             // Emit the same event as keyboard shortcut would

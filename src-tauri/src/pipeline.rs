@@ -14,10 +14,9 @@ use crate::dictionary;
 use crate::enhancement;
 use crate::transcription;
 use crate::tray;
-use cpal::traits::DeviceTrait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tauri::{AppHandle, Emitter};
 
 /// Pipeline execution state
@@ -134,20 +133,46 @@ pub struct PipelineProgress {
     pub device_name: Option<String>,
 }
 
-/// Track if pipeline is currently running
+/// True only while a capture stream is open (arm → disarm/stop).
+/// A new recording is rejected only when this is true.
 static PIPELINE_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Counts how many detached process_audio tasks are in-flight.
+/// Used by get_pipeline_state to distinguish Recording vs Transcribing vs Idle.
+static PROCESSING_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 /// Cancellation signal for file import operations
 static IMPORT_CANCELLED: AtomicBool = AtomicBool::new(false);
 
+/// Serialises clipboard-save → paste → clipboard-restore across concurrent
+/// detached process_audio tasks. Without this, two jobs could race the system
+/// clipboard and corrupt the restored content.
+static OUTPUT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// RAII guard that resets PIPELINE_RUNNING to false on drop.
-/// Prevents the pipeline from being permanently locked if a command
-/// panics or returns early without explicit cleanup.
+/// Used for recording capture only (not for processing).
 struct PipelineGuard;
 
 impl Drop for PipelineGuard {
     fn drop(&mut self) {
         PIPELINE_RUNNING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// RAII guard that decrements PROCESSING_COUNT on drop.
+/// Ensures PROCESSING_COUNT stays balanced even if process_audio panics.
+struct ProcessingGuard;
+
+impl ProcessingGuard {
+    fn new() -> Self {
+        PROCESSING_COUNT.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for ProcessingGuard {
+    fn drop(&mut self) {
+        PROCESSING_COUNT.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -183,51 +208,30 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
         });
     }
 
-    // Get device ID from config
-    let config = crate::config::get_config().ok();
-    let device_id = config.as_ref().and_then(|c| c.audio.device_id.clone());
-
-    // Get the device name for display
-    let resolved_device = crate::audio::get_recording_device(device_id.as_deref());
-    let device_name = resolved_device
-        .as_ref()
-        .map(crate::audio::device::get_device_display_name);
-
-    // Detect device fallback: configured device didn't match the resolved one
-    if let Some(ref configured_id) = device_id {
-        let resolved_id = resolved_device
-            .as_ref()
-            .and_then(|d| d.id().ok())
-            .map(|id| id.to_string());
-        if resolved_id.as_deref() != Some(configured_id.as_str()) {
-            tracing::warn!(
-                "Device fallback: configured '{}', using '{}'",
-                configured_id,
-                device_name.as_deref().unwrap_or("unknown")
-            );
-            let _ = app.emit(
-                "device-fallback-warning",
-                serde_json::json!({
-                    "configuredId": configured_id,
-                    "actualName": device_name.as_deref().unwrap_or("System Default"),
-                }),
-            );
-        }
-    }
-
-    // Emit recording state with device name
-    emit_progress_with_device(
-        &app,
-        PipelineState::Recording,
-        "Recording audio...",
-        device_name.clone(),
-    );
+    // Emit recording state early so the UI updates before the device opens.
+    // Device name will be filled from audio::last_device_name() after start_recording
+    // returns; we emit a second progress event with the name then.
+    // This avoids the ~90ms CoreAudio device resolution call that used to happen here.
+    emit_progress(&app, PipelineState::Recording, "Recording audio...");
 
     tracing::info!("Pipeline: Calling audio::start_recording");
-    // Start recording
     match crate::audio::start_recording() {
         Ok(path) => {
             tracing::info!("Pipeline: Recording started at {}", path);
+
+            // Now that start_recording has resolved (and stored) the device name,
+            // emit a follow-up progress event that includes it for the UI.
+            let device_name = crate::audio::last_device_name();
+            emit_progress_with_device(
+                &app,
+                PipelineState::Recording,
+                "Recording audio...",
+                device_name,
+            );
+
+            // Emit authoritative state: is_recording() is now true so
+            // get_pipeline_state() returns Recording.
+            emit_recording_state(&app);
 
             // Update tray to show recording state
             tray::set_recording_state(&app, true);
@@ -255,7 +259,11 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
     }
 }
 
-/// Stop recording and run the full transcription pipeline
+/// Stop recording and kick off the transcription pipeline asynchronously.
+///
+/// Returns immediately after capture has stopped so a new recording can start
+/// without waiting for transcription to finish. The actual result is delivered
+/// via the `pipeline-complete` event (which the frontend already handles).
 ///
 /// Emits `pipeline-progress` events as each stage completes.
 /// Emits `pipeline-complete` when finished with the final result.
@@ -264,12 +272,9 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
 pub async fn pipeline_stop_and_process(
     app: AppHandle,
     config: Option<PipelineConfig>,
-) -> Result<PipelineResult, String> {
+) -> Result<(), String> {
     tracing::info!("Pipeline: stop_and_process called");
     let config = config.unwrap_or_default();
-
-    // RAII guard ensures PIPELINE_RUNNING is reset even on early return
-    let _guard = PipelineGuard;
 
     // Stop recording metering
     crate::audio::stop_recording_metering();
@@ -277,13 +282,12 @@ pub async fn pipeline_stop_and_process(
     // Update tray to show idle state
     tray::set_recording_state(&app, false);
 
-    // Hide the recording indicator (but keep it visible during processing - it will show spinner)
-    // Actually, let's hide it when recording stops since we have processing state in the main window
+    // Hide the recording indicator
     if let Err(e) = crate::recording_indicator::hide_recording_indicator(app.clone()) {
         tracing::warn!("Pipeline: Failed to hide recording indicator: {}", e);
     }
 
-    // Stop recording
+    // Stop recording — releases the capture lock so a new recording can start.
     let audio_path = match crate::audio::stop_recording() {
         Ok(path) => path,
         Err(e) => {
@@ -292,31 +296,54 @@ pub async fn pipeline_stop_and_process(
                 PipelineState::Failed,
                 &format!("Stop recording failed: {}", e),
             );
+            // Release capture flag so the next start is not blocked.
+            PIPELINE_RUNNING.store(false, Ordering::SeqCst);
             return Err(e);
         }
     };
 
-    tracing::info!("Pipeline: Recording stopped, processing {}", audio_path);
+    // Capture has stopped — release PIPELINE_RUNNING so a new recording can start
+    // immediately while this task processes.
+    PIPELINE_RUNNING.store(false, Ordering::SeqCst);
 
-    // Run the processing pipeline
-    let result = process_audio(&app, &audio_path, &config).await;
+    tracing::info!("Pipeline: Recording stopped, spawning detached process task for {}", audio_path);
 
-    // Emit completion event
-    match &result {
-        Ok(r) => {
-            tracing::info!("Pipeline: Emitting pipeline-complete event");
-            if let Err(e) = app.emit("pipeline-complete", r) {
-                tracing::error!("Pipeline: Failed to emit pipeline-complete: {}", e);
-            }
-        }
-        Err(e) => {
-            tracing::error!("Pipeline: Processing failed: {}", e);
-            emit_progress(&app, PipelineState::Failed, e);
-        }
+    // Emit authoritative state: capture ended and processing is starting.
+    // We emit Transcribing directly here rather than calling get_pipeline_state()
+    // because the ProcessingGuard is not yet acquired (it runs inside the spawned
+    // task), so get_pipeline_state() would incorrectly return Idle at this point.
+    if let Err(e) = app.emit("recording-state", PipelineState::Transcribing) {
+        tracing::warn!("Failed to emit recording-state (stop): {}", e);
     }
 
-    tracing::info!("Pipeline: Returning result from stop_and_process");
-    result
+    // Detach processing: transcription, filtering, enhancement, output and history
+    // run in a separate task. PROCESSING_COUNT tracks in-flight tasks so
+    // get_pipeline_state can report Transcribing when appropriate.
+    tokio::spawn(async move {
+        let _processing_guard = ProcessingGuard::new();
+        let result = process_audio(&app, &audio_path, &config).await;
+        match result {
+            Ok(r) => {
+                tracing::info!("Pipeline: Emitting pipeline-complete event");
+                if let Err(e) = app.emit("pipeline-complete", &r) {
+                    tracing::error!("Pipeline: Failed to emit pipeline-complete: {}", e);
+                }
+                // Emit authoritative state after completion. get_pipeline_state()
+                // returns Recording if a new clip started while this task ran,
+                // so this can never clobber an active recording with Idle.
+                emit_recording_state(&app);
+            }
+            Err(e) => {
+                tracing::error!("Pipeline: Processing failed: {}", e);
+                emit_progress(&app, PipelineState::Failed, &e);
+                // Emit authoritative state; if a new recording is active this
+                // will correctly report Recording rather than Failed.
+                emit_recording_state(&app);
+            }
+        }
+    });
+
+    Ok(())
 }
 
 /// Cancel the current pipeline execution
@@ -345,6 +372,7 @@ pub fn pipeline_cancel(app: AppHandle) -> Result<(), String> {
 
     PIPELINE_RUNNING.store(false, Ordering::SeqCst);
     emit_progress(&app, PipelineState::Idle, "Pipeline cancelled");
+    emit_recording_state(&app);
     app.emit("pipeline-cancelled", ()).ok();
 
     tracing::info!("Pipeline: Cancelled");
@@ -360,14 +388,13 @@ pub fn is_pipeline_running() -> bool {
 /// Get the current pipeline state
 #[tauri::command]
 pub fn get_pipeline_state() -> PipelineState {
-    if !PIPELINE_RUNNING.load(Ordering::SeqCst) {
-        PipelineState::Idle
-    } else if crate::audio::is_recording() {
+    if crate::audio::is_recording() {
         PipelineState::Recording
-    } else {
-        // Could be transcribing, filtering, enhancing, or outputting
-        // The exact state is tracked by the async processing
+    } else if PROCESSING_COUNT.load(Ordering::SeqCst) > 0 {
+        // Capture has stopped but at least one detached process_audio task is running.
         PipelineState::Transcribing
+    } else {
+        PipelineState::Idle
     }
 }
 
@@ -415,7 +442,15 @@ async fn run_transcription_pipeline(
     }
     emit_progress(app, PipelineState::Transcribing, "Transcribing audio...");
     let transcription_start = std::time::Instant::now();
-    let raw_text = transcription::transcribe_file(audio_path.to_string())?;
+    // transcribe_file is CPU-bound (whisper/sherpa inference). Running it on a
+    // dedicated blocking thread avoids starving the shared async worker pool,
+    // which matters now that process_audio runs as a detached task.
+    let audio_path_owned = audio_path.to_string();
+    let raw_text = tokio::task::spawn_blocking(move || {
+        transcription::transcribe_file(audio_path_owned)
+    })
+    .await
+    .map_err(|e| format!("Transcription task panicked: {}", e))??;
     let transcription_duration_seconds = transcription_start.elapsed().as_secs_f64();
 
     tracing::info!(
@@ -555,39 +590,18 @@ async fn process_audio(
     );
     emit_progress(app, PipelineState::Outputting, "Outputting text...");
 
-    let uses_clipboard_paste = config.auto_paste && config.insertion_method != "typing";
+    // Serialise clipboard-save → paste → clipboard-restore across concurrent
+    // detached process_audio tasks. Without this, two overlapping recordings
+    // can race the system clipboard and corrupt the restored content.
+    {
+        let _output_guard = OUTPUT_LOCK.lock().await;
 
-    // Save the user's original clipboard BEFORE any modification.
-    // This must happen before copy_transcription or insert_text_by_paste,
-    // both of which overwrite the clipboard.
-    let saved_clipboard = if uses_clipboard_paste {
-        arboard::Clipboard::new()
-            .ok()
-            .and_then(|mut cb| cb.get_text().ok())
-    } else {
-        None
-    };
+        let uses_clipboard_paste = config.auto_paste && config.insertion_method != "typing";
 
-    if config.auto_copy {
-        tracing::debug!("Pipeline: Copying to clipboard...");
-        if let Err(e) =
-            clipboard::copy_transcription(app.clone(), output_text.clone(), output.is_enhanced)
-                .await
-        {
-            tracing::warn!("Pipeline: Failed to copy to clipboard: {}", e);
-        } else {
-            tracing::debug!("Pipeline: Copied to clipboard successfully");
-        }
-    }
-
-    if config.auto_paste {
-        tracing::debug!("Pipeline: Pasting text...");
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-        let uses_clipboard = config.insertion_method != "typing";
-
-        // Preserve clipboard before paste overwrites it
-        let saved_clipboard = if uses_clipboard {
+        // Save the user's original clipboard BEFORE any modification.
+        // This must happen before copy_transcription or insert_text_by_paste,
+        // both of which overwrite the clipboard.
+        let saved_clipboard = if uses_clipboard_paste {
             arboard::Clipboard::new()
                 .ok()
                 .and_then(|mut cb| cb.get_text().ok())
@@ -595,41 +609,49 @@ async fn process_audio(
             None
         };
 
-        let insert_result = if config.insertion_method == "typing" {
-            crate::text_insert::insert_text_by_typing(output_text.clone(), None, None)
-        } else {
-            crate::text_insert::insert_text_by_paste(output_text.clone(), None)
-        };
-
-        if let Err(e) = insert_result {
-            tracing::warn!("Pipeline: Failed to insert text: {}", e);
-        } else {
-            tracing::debug!("Pipeline: Pasted text successfully");
+        if config.auto_copy {
+            tracing::debug!("Pipeline: Copying to clipboard...");
+            if let Err(e) =
+                clipboard::copy_transcription(app.clone(), output_text.clone(), output.is_enhanced)
+                    .await
+            {
+                tracing::warn!("Pipeline: Failed to copy to clipboard: {}", e);
+            } else {
+                tracing::debug!("Pipeline: Copied to clipboard successfully");
+            }
         }
 
-        // Restore original clipboard after paste completes
+        if config.auto_paste {
+            tracing::debug!("Pipeline: Pasting text...");
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+            let insert_result = if config.insertion_method == "typing" {
+                crate::text_insert::insert_text_by_typing(output_text.clone(), None, None)
+            } else {
+                crate::text_insert::insert_text_by_paste(output_text.clone(), None)
+            };
+
+            if let Err(e) = insert_result {
+                tracing::warn!("Pipeline: Failed to insert text: {}", e);
+            } else {
+                tracing::debug!("Pipeline: Pasted text successfully");
+            }
+        }
+
+        // Restore the user's original clipboard after paste completes.
+        // Uses the configurable restore delay from clipboard settings to give
+        // the target application time to process the paste before we overwrite
+        // the clipboard again.
         if let Some(original) = saved_clipboard {
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            let restore_delay = clipboard::get_restore_delay();
+            tracing::debug!("Pipeline: Restoring clipboard in {}ms", restore_delay);
+            tokio::time::sleep(tokio::time::Duration::from_millis(restore_delay)).await;
             match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(original)) {
                 Ok(()) => tracing::debug!("Pipeline: Clipboard restored"),
                 Err(e) => tracing::warn!("Pipeline: Failed to restore clipboard: {}", e),
             }
         }
-    }
-
-    // Restore the user's original clipboard after paste completes.
-    // Uses the configurable restore delay from clipboard settings to give
-    // the target application time to process the paste before we overwrite
-    // the clipboard again.
-    if let Some(original) = saved_clipboard {
-        let restore_delay = clipboard::get_restore_delay();
-        tracing::debug!("Pipeline: Restoring clipboard in {}ms", restore_delay);
-        tokio::time::sleep(tokio::time::Duration::from_millis(restore_delay)).await;
-        match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(original)) {
-            Ok(()) => tracing::debug!("Pipeline: Clipboard restored"),
-            Err(e) => tracing::warn!("Pipeline: Failed to restore clipboard: {}", e),
-        }
-    }
+    } // OUTPUT_LOCK released
 
     // 5. Save to history
     tracing::info!("Pipeline: Saving to history...");
@@ -988,6 +1010,73 @@ pub async fn pipeline_retranscribe(
     Ok(result)
 }
 
+/// Toggle recording from the single source of truth: the armed flag.
+///
+/// Reads `crate::audio::is_recording()` — the authority — and either starts or
+/// stops.  The frontend must NOT decide start vs stop independently; it calls
+/// this command and updates its display from the returned `ToggleOutcome`.
+///
+/// Sound is decided here too:
+/// - Start path: indicator + BING have already been played by the shortcut
+///   handler the instant the key was pressed (instant, before IPC round-trip).
+///   We do NOT play them again here.
+/// - Stop path: BONG is played here, immediately before capture disarms, so it
+///   is always matched to the decided action.
+#[tauri::command]
+pub async fn pipeline_toggle_recording(
+    app: AppHandle,
+    config: Option<PipelineConfig>,
+) -> Result<ToggleOutcome, String> {
+    if crate::audio::is_recording() {
+        // --- STOP ---
+        // Play BONG now, before disarming, so the sound is always paired with
+        // the action decided from the authority.
+        crate::sound::play_sound(crate::sound::SoundEvent::RecordingStop);
+
+        pipeline_stop_and_process(app, config).await?;
+        Ok(ToggleOutcome::Stopped)
+    } else {
+        // --- START ---
+        // BING and indicator are played by the shortcut handler on keypress
+        // (keyboard_service.rs / manager.rs / tray.rs) so they fire before the
+        // IPC round-trip.  pipeline_start_recording does not duplicate them.
+        let path = pipeline_start_recording(app)?;
+        Ok(ToggleOutcome::Started { path })
+    }
+}
+
+/// The outcome of a `pipeline_toggle_recording` call.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum ToggleOutcome {
+    /// A new recording was started; contains the WAV path.
+    Started { path: String },
+    /// An active recording was stopped; processing is detached.
+    Stopped,
+}
+
+/// Decide the toggle action from the single source of truth: the armed flag.
+///
+/// Extracted as a pure function so it can be unit-tested without touching the
+/// global `is_recording()` state.
+#[cfg_attr(not(test), allow(dead_code))]
+#[inline]
+pub(crate) fn toggle_action_from_capturing(is_capturing: bool) -> ToggleAction {
+    if is_capturing {
+        ToggleAction::Stop
+    } else {
+        ToggleAction::Start
+    }
+}
+
+/// What a toggle-recording press will do.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ToggleAction {
+    Start,
+    Stop,
+}
+
 /// Emit a pipeline progress event
 fn emit_progress(app: &AppHandle, state: PipelineState, message: &str) {
     emit_progress_with_device(app, state, message, None);
@@ -1007,6 +1096,19 @@ fn emit_progress_with_device(
     };
     if let Err(e) = app.emit("pipeline-progress", &progress) {
         tracing::warn!("Failed to emit pipeline progress: {}", e);
+    }
+}
+
+/// Emit the authoritative system state on the `recording-state` channel.
+///
+/// The payload is always derived from `get_pipeline_state()` so that a
+/// completion event from a detached task cannot report `Idle` or `Completed`
+/// while a new recording is already active (because `get_pipeline_state()`
+/// prioritises `Recording` via `is_recording()`).
+fn emit_recording_state(app: &AppHandle) {
+    let current = get_pipeline_state();
+    if let Err(e) = app.emit("recording-state", current) {
+        tracing::warn!("Failed to emit recording-state: {}", e);
     }
 }
 
@@ -1061,5 +1163,41 @@ mod tests {
         assert!(json.contains("\"success\":true"));
         assert!(json.contains("\"text\":\"Hello world\""));
         assert!(json.contains("\"transcriptionModelName\""));
+    }
+
+    #[test]
+    fn test_toggle_action_from_capturing() {
+        // The one invariant: is_capturing is the single authority.
+        // IDLE (not capturing) → start; pressing while background processing
+        // is in-flight must also → start (processing does NOT gate the action).
+        assert_eq!(
+            toggle_action_from_capturing(false),
+            ToggleAction::Start,
+            "not capturing → start"
+        );
+        assert_eq!(
+            toggle_action_from_capturing(true),
+            ToggleAction::Stop,
+            "capturing → stop"
+        );
+    }
+
+    #[test]
+    fn test_processing_guard_increments_and_decrements() {
+        // Baseline: whatever value is in the static before this test.
+        let before = PROCESSING_COUNT.load(Ordering::SeqCst);
+
+        {
+            let _g1 = ProcessingGuard::new();
+            assert_eq!(PROCESSING_COUNT.load(Ordering::SeqCst), before + 1);
+            {
+                let _g2 = ProcessingGuard::new();
+                assert_eq!(PROCESSING_COUNT.load(Ordering::SeqCst), before + 2);
+            }
+            // _g2 dropped
+            assert_eq!(PROCESSING_COUNT.load(Ordering::SeqCst), before + 1);
+        }
+        // _g1 dropped
+        assert_eq!(PROCESSING_COUNT.load(Ordering::SeqCst), before);
     }
 }
