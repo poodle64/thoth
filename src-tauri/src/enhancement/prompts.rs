@@ -66,6 +66,13 @@ pub fn get_builtin_prompts() -> Vec<PromptTemplate> {
             template: "Rewrite the following text in pirate dialect. Use pirate vocabulary and speech patterns. Keep the same meaning and approximate length. Do not add extra content or explanations. Only output the rewritten text:\n\n{text}".to_string(),
             is_builtin: true,
         },
+        PromptTemplate {
+            id: "ai-dev".to_string(),
+            name: "AI / Dev (Compressed)".to_string(),
+            // Strips dictation noise for token-efficient input to AI coding tools.
+            template: "Remove all filler words (um, uh, like, you know, basically, sort of, kind of), hedging phrases (I think maybe, I guess, perhaps we could), meta-commentary (let me think, what I'm trying to say is, does that make sense), and rhetorical questions addressed to the listener. Collapse rambling into direct, declarative statements. Preserve every technical fact, name, number, identifier, and the actual request or intent — do not summarise away content, only remove noise. Output only the cleaned text with no preamble, no explanation, and no quotes:\n\n{text}".to_string(),
+            is_builtin: true,
+        },
     ]
 }
 
@@ -296,6 +303,7 @@ mod tests {
             ids.contains(&"pirate-speak"),
             "Should have pirate-speak prompt"
         );
+        assert!(ids.contains(&"ai-dev"), "Should have ai-dev prompt");
     }
 
     // =========================================================================
