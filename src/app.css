@@ -1,28 +1,136 @@
-@import "tailwindcss";
-@import "tw-animate-css";
+@import 'tailwindcss';
+@import 'tw-animate-css';
 
 @custom-variant dark (&:is(.dark *));
 
-/* Design tokens for Thoth - Scribe's Amber theme */
+/* shadcn token bridge — Scribe's Amber palette mapped to shadcn vocabulary.
+   Thoth is dark-only; identical values in :root and .dark so the tokens work
+   whether or not the .dark class is present on the document root. */
+:root {
+  --radius: 0.5rem;
+
+  /* Core surfaces */
+  --background: #1c1b1a;
+  --foreground: #ede8e0;
+
+  --card: #272523;
+  --card-foreground: #ede8e0;
+
+  --popover: #272523;
+  --popover-foreground: #ede8e0;
+
+  /* Brand */
+  --primary: #d08b3e;
+  --primary-foreground: #1c1b1a;
+
+  /* Secondary surface (slightly raised) */
+  --secondary: #272523;
+  --secondary-foreground: #ede8e0;
+
+  /* Muted / subtle */
+  --muted: #363330;
+  --muted-foreground: #9c9488;
+
+  /* Accent — shadcn convention: subtle hover surface, NOT the amber brand */
+  --accent: #363330;
+  --accent-foreground: #ede8e0;
+
+  /* Destructive */
+  --destructive: #e05545;
+  --destructive-foreground: #ffffff;
+
+  /* Structural */
+  --border: #363330;
+  --input: #363330;
+  --ring: #d08b3e;
+
+  /* Sidebar */
+  --sidebar: #1c1b1a;
+  --sidebar-foreground: #ede8e0;
+  --sidebar-primary: #d08b3e;
+  --sidebar-primary-foreground: #1c1b1a;
+  --sidebar-accent: #363330;
+  --sidebar-accent-foreground: #ede8e0;
+  --sidebar-border: #363330;
+  --sidebar-ring: #d08b3e;
+
+  /* Charts */
+  --chart-1: #d08b3e;
+  --chart-2: #4aba6a;
+  --chart-3: #e8c547;
+  --chart-4: #e05545;
+  --chart-5: #6b645a;
+}
+
+.dark {
+  --radius: 0.5rem;
+
+  --background: #1c1b1a;
+  --foreground: #ede8e0;
+
+  --card: #272523;
+  --card-foreground: #ede8e0;
+
+  --popover: #272523;
+  --popover-foreground: #ede8e0;
+
+  --primary: #d08b3e;
+  --primary-foreground: #1c1b1a;
+
+  --secondary: #272523;
+  --secondary-foreground: #ede8e0;
+
+  --muted: #363330;
+  --muted-foreground: #9c9488;
+
+  --accent: #363330;
+  --accent-foreground: #ede8e0;
+
+  --destructive: #e05545;
+  --destructive-foreground: #ffffff;
+
+  --border: #363330;
+  --input: #363330;
+  --ring: #d08b3e;
+
+  --sidebar: #1c1b1a;
+  --sidebar-foreground: #ede8e0;
+  --sidebar-primary: #d08b3e;
+  --sidebar-primary-foreground: #1c1b1a;
+  --sidebar-accent: #363330;
+  --sidebar-accent-foreground: #ede8e0;
+  --sidebar-border: #363330;
+  --sidebar-ring: #d08b3e;
+
+  --chart-1: #d08b3e;
+  --chart-2: #4aba6a;
+  --chart-3: #e8c547;
+  --chart-4: #e05545;
+  --chart-5: #6b645a;
+}
+
+/* Thoth design tokens — Scribe's Amber theme.
+   Existing components consume these via var(--color-*) references.
+   Do NOT remove; the shadcn bridge above adds new names alongside. */
 @theme {
   /* Colours - Scribe's Amber palette */
-  --color-bg-primary: #1C1B1A;
+  --color-bg-primary: #1c1b1a;
   --color-bg-secondary: #272523;
   --color-bg-tertiary: #363330;
-  --color-bg-hover: #403D3A;
-  --color-bg-active: #4D4A46;
+  --color-bg-hover: #403d3a;
+  --color-bg-active: #4d4a46;
 
-  --color-text-primary: #EDE8E0;
-  --color-text-secondary: #9C9488;
-  --color-text-tertiary: #6B645A;
+  --color-text-primary: #ede8e0;
+  --color-text-secondary: #9c9488;
+  --color-text-tertiary: #6b645a;
 
-  --color-accent: #D08B3E;
-  --color-accent-hover: #DE9E56;
-  --color-accent-active: #B57530;
+  --color-accent: #d08b3e;
+  --color-accent-hover: #de9e56;
+  --color-accent-active: #b57530;
 
-  --color-success: #4ABA6A;
-  --color-warning: #E8C547;
-  --color-error: #E05545;
+  --color-success: #4aba6a;
+  --color-warning: #e8c547;
+  --color-error: #e05545;
 
   --color-border: #363330;
   --color-border-subtle: #272523;
@@ -35,7 +143,8 @@
   --spacing-xl: 2rem;
 
   /* Typography */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', monospace;
 
   --text-xs: 0.75rem;
@@ -65,25 +174,77 @@
   --transition-slow: 300ms ease;
 
   /* Chart tokens (governance required) */
-  --color-chart-1: #D08B3E;
-  --color-chart-2: #4ABA6A;
-  --color-chart-3: #E8C547;
-  --color-chart-4: #E05545;
-  --color-chart-5: #6B645A;
+  --color-chart-1: #d08b3e;
+  --color-chart-2: #4aba6a;
+  --color-chart-3: #e8c547;
+  --color-chart-4: #e05545;
+  --color-chart-5: #6b645a;
 
   /* Sidebar tokens (governance required) */
-  --color-sidebar: #1C1B1A;
-  --color-sidebar-foreground: #EDE8E0;
-  --color-sidebar-primary: #D08B3E;
-  --color-sidebar-primary-foreground: #1C1B1A;
+  --color-sidebar: #1c1b1a;
+  --color-sidebar-foreground: #ede8e0;
+  --color-sidebar-primary: #d08b3e;
+  --color-sidebar-primary-foreground: #1c1b1a;
   --color-sidebar-accent: #363330;
-  --color-sidebar-accent-foreground: #EDE8E0;
+  --color-sidebar-accent-foreground: #ede8e0;
   --color-sidebar-border: #363330;
-  --color-sidebar-ring: #D08B3E;
+  --color-sidebar-ring: #d08b3e;
 }
 
-*, *::before, *::after {
-  outline-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
+/* shadcn Tailwind utility bridge — maps CSS custom properties to Tailwind v4
+   utility classes (bg-background, text-foreground, border-border, etc.).
+   Uses 'inline' to avoid generating a separate CSS layer. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  /* --color-accent intentionally not remapped here: the existing @theme
+     block defines --color-accent: #D08B3E (amber brand) and one existing
+     component (LoadingState) uses `border-accent` expecting amber.
+     The shadcn --accent token (#363330, subtle hover surface) is available
+     via var(--accent) directly. During component migration, replace
+     `border-accent` with `border-primary` in LoadingState and then add
+     --color-accent here pointing to var(--accent). */
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* Radius utilities derived from the shadcn --radius base */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
 }
 
 /* Base styles */
@@ -565,7 +726,11 @@ textarea::placeholder {
 
 /* Animations */
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
-
