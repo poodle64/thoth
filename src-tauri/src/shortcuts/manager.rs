@@ -84,22 +84,9 @@ pub fn get_defaults() -> Vec<ShortcutInfo> {
     ]
 }
 
-/// Payload for shortcut events
-#[derive(Debug, Clone, Serialize)]
-pub struct ShortcutEvent {
-    /// Shortcut identifier
-    pub id: String,
-    /// Key state: "pressed" or "released"
-    pub state: String,
-}
-
 /// Register a global shortcut with the given ID and accelerator
 ///
-/// The shortcut will emit events to the frontend when triggered:
-/// - Event name: "shortcut-triggered" (for backwards compatibility, key pressed only)
-/// - Event name: "shortcut-pressed" (key down)
-/// - Event name: "shortcut-released" (key up, for PTT mode)
-/// - Payload: ShortcutEvent with id and state
+/// The shortcut will emit a "shortcut-triggered" event to the frontend on key down.
 pub fn register<R: Runtime>(
     app: &AppHandle<R>,
     id: String,
@@ -159,16 +146,6 @@ pub fn register<R: Runtime>(
                 shortcut_accel,
                 shortcut
             );
-            let state_str = match event.state {
-                ShortcutState::Pressed => "pressed",
-                ShortcutState::Released => "released",
-            };
-
-            let shortcut_event = ShortcutEvent {
-                id: shortcut_id.clone(),
-                state: state_str.to_string(),
-            };
-
             match event.state {
                 ShortcutState::Pressed => {
                     // Debounce rapid press events (key bounce protection).
@@ -233,25 +210,15 @@ pub fn register<R: Runtime>(
                         return;
                     }
 
-                    // Emit legacy event for backwards compatibility
                     match app_handle.emit("shortcut-triggered", shortcut_id.clone()) {
                         Ok(_) => {
                             tracing::info!("Emitted shortcut-triggered event for: {}", shortcut_id)
                         }
                         Err(e) => tracing::error!("Failed to emit shortcut-triggered event: {}", e),
                     }
-                    // Emit new event with full state info
-                    match app_handle.emit("shortcut-pressed", &shortcut_event) {
-                        Ok(_) => tracing::debug!("Emitted shortcut-pressed event"),
-                        Err(e) => tracing::error!("Failed to emit shortcut-pressed event: {}", e),
-                    }
                 }
                 ShortcutState::Released => {
-                    tracing::info!("Shortcut released: {}", shortcut_id);
-                    // Emit release event for PTT mode
-                    if let Err(e) = app_handle.emit("shortcut-released", &shortcut_event) {
-                        tracing::error!("Failed to emit shortcut-released event: {}", e);
-                    }
+                    tracing::debug!("Shortcut released: {}", shortcut_id);
                 }
             }
         })

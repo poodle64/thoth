@@ -134,8 +134,6 @@ pub enum RecordingMode {
     /// Toggle mode: press to start, press again to stop
     #[default]
     Toggle,
-    /// Push-to-talk mode: hold to record, release to stop
-    PushToTalk,
 }
 
 /// Keyboard shortcut configuration
@@ -710,10 +708,6 @@ mod tests {
             serde_json::to_string(&RecordingMode::Toggle).unwrap(),
             "\"toggle\""
         );
-        assert_eq!(
-            serde_json::to_string(&RecordingMode::PushToTalk).unwrap(),
-            "\"push_to_talk\""
-        );
     }
 
     #[test]
@@ -721,10 +715,6 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<RecordingMode>("\"toggle\"").unwrap(),
             RecordingMode::Toggle
-        );
-        assert_eq!(
-            serde_json::from_str::<RecordingMode>("\"push_to_talk\"").unwrap(),
-            RecordingMode::PushToTalk
         );
     }
 
@@ -763,7 +753,7 @@ mod tests {
                 toggle_recording: "F12".to_string(),
                 toggle_recording_alt: None,
                 copy_last: None,
-                recording_mode: RecordingMode::PushToTalk,
+                recording_mode: RecordingMode::Toggle,
             },
             enhancement: EnhancementConfig {
                 enabled: true,
@@ -801,7 +791,7 @@ mod tests {
 
         assert_eq!(restored.shortcuts.toggle_recording, "F12");
         assert!(restored.shortcuts.toggle_recording_alt.is_none());
-        assert_eq!(restored.shortcuts.recording_mode, RecordingMode::PushToTalk);
+        assert_eq!(restored.shortcuts.recording_mode, RecordingMode::Toggle);
 
         assert!(restored.enhancement.enabled);
         assert_eq!(restored.enhancement.model, "mistral");

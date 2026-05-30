@@ -42,8 +42,6 @@ pub struct AudioRecorder {
     output_path: Option<PathBuf>,
     /// Primary recording ring buffer (stable for the warm stream's lifetime).
     ring_buffer: Arc<AudioRingBuffer>,
-    /// Optional secondary ring buffer for VAD or other consumers.
-    secondary_buffer: Option<Arc<AudioRingBuffer>>,
     /// Optional ring buffer for real-time metering (recording indicator waveform).
     metering_buffer: Option<Arc<AudioRingBuffer>>,
     /// Source sample rate captured at warm_up time.
@@ -69,24 +67,11 @@ impl AudioRecorder {
             stop_signal: Arc::new(AtomicBool::new(false)),
             output_path: None,
             ring_buffer: Arc::new(AudioRingBuffer::new()),
-            secondary_buffer: None,
             metering_buffer: None,
             source_rate: None,
             source_channels: None,
             armed: Arc::new(AtomicBool::new(false)),
         }
-    }
-
-    /// Set a secondary ring buffer that will receive audio data when armed.
-    ///
-    /// Must be called before `warm_up` — the callback captures buffer clones at warm-up time.
-    pub fn set_secondary_buffer(&mut self, buffer: Arc<AudioRingBuffer>) {
-        self.secondary_buffer = Some(buffer);
-    }
-
-    /// Clear the secondary buffer.
-    pub fn clear_secondary_buffer(&mut self) {
-        self.secondary_buffer = None;
     }
 
     /// Set a dedicated metering ring buffer.
@@ -117,8 +102,7 @@ impl AudioRecorder {
     ///
     /// If a warm stream is already open, this is a no-op (the same device
     /// identity is assumed; callers must cool_down then re-warm on device change).
-    /// Buffers set via `set_metering_buffer` / `set_secondary_buffer` must be
-    /// in place before calling this.
+    /// The metering buffer set via `set_metering_buffer` must be in place before calling this.
     #[allow(deprecated)] // cpal 0.17 deprecates name() but description() is not yet stable
     pub fn warm_up(&mut self, device: &cpal::Device) -> Result<()> {
         if self.stream.is_some() {
@@ -145,7 +129,6 @@ impl AudioRecorder {
 
         // Clone all buffers — the callback holds these for the stream's lifetime.
         let callback_ring = self.ring_buffer.clone();
-        let callback_secondary = self.secondary_buffer.clone();
         let callback_metering = self.metering_buffer.clone();
         let callback_armed = self.armed.clone();
 
@@ -167,10 +150,6 @@ impl AudioRecorder {
                             "Audio buffer overflow: dropped {} samples",
                             data.len() - written
                         );
-                    }
-
-                    if let Some(ref secondary) = callback_secondary {
-                        secondary.write(data);
                     }
                 }
             },
@@ -440,23 +419,6 @@ fn write_audio_to_file(
     writer.finalize()?;
     tracing::debug!("Audio writer finished: {} samples written", total_samples);
     Ok(())
-}
-
-/// Decimate and mix to 16kHz mono f32 for VAD processing.
-///
-/// Naive integer decimation (no anti-alias filter); adequate for the coarse
-/// energy/VAD use it serves. Public for use by the vad_recorder module.
-pub fn downsample_to_mono_f32(samples: &[f32], source_rate: u32, channels: usize) -> Vec<f32> {
-    let ratio = (source_rate as usize) / 16000;
-
-    samples
-        .chunks(channels)
-        .step_by(ratio.max(1))
-        .map(|frame| {
-            // Average all channels for mono mix
-            frame.iter().sum::<f32>() / frame.len() as f32
-        })
-        .collect()
 }
 
 #[cfg(test)]

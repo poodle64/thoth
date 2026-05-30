@@ -12,12 +12,10 @@ pub mod database;
 pub mod dictionary;
 pub mod enhancement;
 pub mod export;
-pub mod handsfree;
 pub mod keyboard_service;
 pub mod mouse_tracker;
 pub mod pipeline;
 pub mod platform;
-pub mod ptt;
 pub mod recording_indicator;
 pub mod shortcuts;
 pub mod sound;
@@ -230,20 +228,6 @@ pub fn run() {
                 let app_handle = app.handle().clone();
                 register_shortcuts_from_config(&app_handle, &cfg);
 
-                // Sync PTT mode from config
-                let ptt_enabled = cfg.shortcuts.recording_mode == config::RecordingMode::PushToTalk;
-                if let Err(e) = ptt::set_ptt_mode_enabled(ptt_enabled) {
-                    tracing::warn!("Failed to set initial PTT mode: {}", e);
-                } else {
-                    tracing::info!(
-                        "Recording mode initialised: {}",
-                        if ptt_enabled {
-                            "push-to-talk"
-                        } else {
-                            "toggle"
-                        }
-                    );
-                }
             }
 
             // macOS-specific setup
@@ -344,22 +328,6 @@ pub fn run() {
             audio::stop_recording,
             audio::is_recording,
             audio::warm_up_recording,
-            audio::set_vad_enabled,
-            audio::is_vad_enabled,
-            audio::get_vad_config_cmd,
-            audio::set_vad_config_cmd,
-            audio::set_vad_aggressiveness,
-            audio::set_vad_frame_duration,
-            audio::set_vad_speech_start_frames,
-            audio::set_vad_speech_end_frames,
-            audio::set_vad_pre_speech_padding,
-            audio::set_vad_post_speech_padding,
-            audio::get_vad_status,
-            audio::start_recording_with_vad,
-            audio::stop_recording_with_vad,
-            audio::is_recording_with_vad,
-            audio::was_vad_auto_stop_triggered,
-            audio::set_vad_auto_stop_silence,
             // Transcription
             transcription::init_transcription,
             transcription::init_whisper_transcription,
@@ -460,13 +428,6 @@ pub fn run() {
             clipboard::restore_clipboard,
             clipboard::get_restore_delay,
             clipboard::paste_transcription,
-            // Push-to-talk
-            ptt::ptt_key_down,
-            ptt::ptt_key_up,
-            ptt::is_ptt_active,
-            ptt::set_ptt_mode_enabled,
-            ptt::is_ptt_mode_enabled,
-            ptt::ptt_cancel,
             // Sound feedback
             sound::play_recording_start_sound,
             sound::play_recording_stop_sound,
@@ -483,19 +444,6 @@ pub fn run() {
             pipeline::pipeline_cancel,
             pipeline::is_pipeline_running,
             pipeline::get_pipeline_state,
-            // Hands-free (VAD-based automatic recording)
-            handsfree::manager::set_handsfree_enabled,
-            handsfree::manager::is_handsfree_enabled,
-            handsfree::manager::get_handsfree_status,
-            handsfree::manager::get_handsfree_state,
-            handsfree::manager::handsfree_activate,
-            handsfree::manager::handsfree_cancel,
-            handsfree::manager::handsfree_acknowledge,
-            handsfree::manager::handsfree_timeout,
-            handsfree::manager::set_handsfree_timeout,
-            handsfree::manager::get_handsfree_timeout,
-            handsfree::manager::get_last_handsfree_transcription,
-            handsfree::manager::reset_handsfree_state,
             // Recording indicator
             recording_indicator::show_recording_indicator,
             recording_indicator::hide_recording_indicator,

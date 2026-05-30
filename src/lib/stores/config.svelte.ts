@@ -36,7 +36,7 @@ export interface TranscriptionConfig {
 }
 
 /** Recording mode options */
-export type RecordingMode = 'toggle' | 'push_to_talk';
+export type RecordingMode = 'toggle';
 
 /** Keyboard shortcut configuration */
 export interface ShortcutConfig {

@@ -710,26 +710,8 @@ fn emit_shortcut_event(app: &AppHandle, id: &str, state: &str) {
             crate::recording_indicator::maybe_play_start_indicator(app);
         }
 
-        // Emit shortcut-triggered for toggle mode compatibility
         if let Err(e) = app.emit("shortcut-triggered", id.to_string()) {
             tracing::error!("Failed to emit shortcut-triggered: {}", e);
-        }
-
-        // Emit shortcut-pressed with full info
-        let event = serde_json::json!({
-            "id": id,
-            "state": "pressed"
-        });
-        if let Err(e) = app.emit("shortcut-pressed", &event) {
-            tracing::error!("Failed to emit shortcut-pressed: {}", e);
-        }
-    } else if state == "released" {
-        let event = serde_json::json!({
-            "id": id,
-            "state": "released"
-        });
-        if let Err(e) = app.emit("shortcut-released", &event) {
-            tracing::error!("Failed to emit shortcut-released: {}", e);
         }
     }
 }

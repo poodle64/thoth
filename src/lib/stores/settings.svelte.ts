@@ -8,7 +8,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { configStore, type RecordingMode } from './config.svelte';
+import { configStore } from './config.svelte';
 
 /** Audio device information from the Tauri backend */
 export interface AudioDevice {
@@ -34,18 +34,6 @@ export function createSettingsStore() {
   let deviceChangedUnlisten: UnlistenFn | null = null;
   let promptChangedUnlisten: UnlistenFn | null = null;
   let enhancementToggledUnlisten: UnlistenFn | null = null;
-
-  /**
-   * Synchronise PTT mode with the backend
-   */
-  async function syncPttMode(): Promise<void> {
-    try {
-      const isPttEnabled = configStore.shortcuts.recordingMode === 'push_to_talk';
-      await invoke('set_ptt_mode_enabled', { enabled: isPttEnabled });
-    } catch (e) {
-      console.error('Failed to sync PTT mode with backend:', e);
-    }
-  }
 
   /**
    * Load available audio input devices from the backend
@@ -110,17 +98,6 @@ export function createSettingsStore() {
   }
 
   /**
-   * Set the recording mode (toggle or push-to-talk)
-   *
-   * @param mode - The recording mode to set
-   */
-  async function setRecordingMode(mode: RecordingMode): Promise<void> {
-    configStore.updateShortcuts('recordingMode', mode);
-    await configStore.save();
-    await syncPttMode();
-  }
-
-  /**
    * Set whether to auto-paste transcription to active app
    */
   async function setAutoPaste(enabled: boolean): Promise<void> {
@@ -141,7 +118,6 @@ export function createSettingsStore() {
    */
   async function resetToDefaults(): Promise<void> {
     await configStore.reset();
-    await syncPttMode();
   }
 
   /**
@@ -153,7 +129,6 @@ export function createSettingsStore() {
     // Load config from backend first
     await configStore.load();
     await loadAudioDevices();
-    await syncPttMode();
     isInitialised = true;
 
     // Listen for device changes from the tray menu so the UI stays in sync
@@ -203,12 +178,6 @@ export function createSettingsStore() {
     get error() {
       return error;
     },
-    get recordingMode() {
-      return configStore.shortcuts.recordingMode;
-    },
-    get isPttMode() {
-      return configStore.shortcuts.recordingMode === 'push_to_talk';
-    },
     get autoCopy() {
       return configStore.transcription.autoCopy;
     },
@@ -222,7 +191,6 @@ export function createSettingsStore() {
     selectAudioDevice,
     getSelectedDevice,
     resetAudioDevice,
-    setRecordingMode,
     setAutoCopy,
     setAutoPaste,
     resetToDefaults,

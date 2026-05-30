@@ -31,7 +31,7 @@
 	import OverviewPane from '../components/OverviewPane.svelte';
 	import AboutDialog from '../components/AboutDialog.svelte';
 	import ShortcutInput from '../components/ShortcutInput.svelte';
-	import { configStore, type RecordingMode, type IndicatorStyle } from '../stores/config.svelte';
+	import { configStore, type IndicatorStyle } from '../stores/config.svelte';
 	import { pipelineStore } from '../stores/pipeline.svelte';
 	import { shortcutsStore, type ShortcutInfo } from '../stores/shortcuts.svelte';
 	import { soundStore } from '../stores/sound.svelte';
@@ -192,18 +192,6 @@
     await configStore.save();
   }
 
-  async function handleRecordingModeChange(mode: RecordingMode) {
-    configStore.updateShortcuts('recordingMode', mode);
-    await saveShortcutConfig();
-
-    const isPttEnabled = mode === 'push_to_talk';
-    try {
-      await invoke('set_ptt_mode_enabled', { enabled: isPttEnabled });
-    } catch (error) {
-      console.error('Failed to set PTT mode:', error);
-    }
-  }
-
   async function handleIndicatorStyleChange(style: IndicatorStyle) {
     configStore.updateGeneral('indicatorStyle', style);
     await configStore.save();
@@ -314,29 +302,10 @@
             <div class="section-header">
               <h2 class="section-title">Shortcuts</h2>
               <p class="section-description">
-                Tap to start recording, tap again to stop. Hold for push-to-talk.
+                Tap to start recording, tap again to stop.
               </p>
             </div>
             <div class="section-content">
-              <div class="mode-selector">
-                <button
-                  class="mode-option"
-                  class:active={configStore.shortcuts.recordingMode === 'toggle'}
-                  onclick={() => handleRecordingModeChange('toggle')}
-                >
-                  <span class="mode-title">Toggle Mode</span>
-                  <span class="mode-description">Press to start, press again to stop</span>
-                </button>
-                <button
-                  class="mode-option"
-                  class:active={configStore.shortcuts.recordingMode === 'push_to_talk'}
-                  onclick={() => handleRecordingModeChange('push_to_talk')}
-                >
-                  <span class="mode-title">Push-to-Talk</span>
-                  <span class="mode-description">Hold to record, release to stop</span>
-                </button>
-              </div>
-
               {#if !shortcutsStore.isLoading}
                 <div class="shortcuts-list">
                   {#each allShortcuts as shortcut, i (shortcut.id)}
@@ -716,8 +685,6 @@
     gap: 24px;
   }
 
-  /* Mode selector */
-  .mode-selector,
   .indicator-style-selector {
     display: flex;
     gap: 12px;
