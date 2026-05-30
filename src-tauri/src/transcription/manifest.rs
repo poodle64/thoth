@@ -224,24 +224,27 @@ pub fn get_fallback_manifest() -> ModelManifest {
             manifest
         }
         Err(e) => {
-            tracing::error!("Failed to parse bundled manifest: {}. Using minimal fallback.", e);
+            tracing::error!(
+                "Failed to parse bundled manifest: {}. Using minimal fallback.",
+                e
+            );
             // Minimal fallback if bundled manifest is somehow corrupted
             let now = chrono::Utc::now().to_rfc3339();
             ModelManifest {
-                version: 9,
+                version: 10,
                 updated: now,
                 models: vec![RemoteModelInfo {
                     id: "fluidaudio-parakeet-tdt-coreml".to_string(),
-                    name: "Parakeet TDT (Neural Engine)".to_string(),
-                    description: "Fastest on Apple Silicon (~210x real-time). Uses Apple Neural Engine via CoreML.".to_string(),
-                    version: "1.0.0".to_string(),
+                    name: "Parakeet TDT v3 (Neural Engine)".to_string(),
+                    description: "Fastest on Apple Silicon (~210x real-time). Parakeet TDT 0.6B v3 on the Apple Neural Engine via CoreML, multilingual.".to_string(),
+                    version: "3.0.0".to_string(),
                     download_url: String::new(),
                     download_size: 500_000_000,
                     extracted_size: 500_000_000,
                     sha256: None,
                     required_files: vec![".fluidaudio_ready".to_string()],
                     archive_directory: None,
-                    languages: vec!["en".to_string()],
+                    languages: vec!["en".to_string(), "multilingual".to_string()],
                     model_type: "fluidaudio_coreml".to_string(),
                     recommended: true,
                     min_app_version: None,
@@ -278,7 +281,10 @@ pub fn is_model_downloaded(model: &RemoteModelInfo) -> bool {
 pub fn get_model_directory(model_id: &str) -> PathBuf {
     // Use model ID as directory name (sanitized)
     let safe_id = model_id.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
-    home_dir_or_fallback().join(".thoth").join("models").join(safe_id)
+    home_dir_or_fallback()
+        .join(".thoth")
+        .join("models")
+        .join(safe_id)
 }
 
 /// Get disk size for a downloaded model
@@ -482,12 +488,15 @@ mod tests {
     #[test]
     fn test_fallback_manifest() {
         let manifest = get_fallback_manifest();
-        assert_eq!(manifest.version, 9);
+        assert_eq!(manifest.version, 10);
         assert_eq!(manifest.models.len(), 6);
 
         // FluidAudio is the recommended model
         let recommended = manifest.models.iter().find(|m| m.recommended);
-        assert!(recommended.is_some(), "Manifest should have a recommended model");
+        assert!(
+            recommended.is_some(),
+            "Manifest should have a recommended model"
+        );
         assert_eq!(recommended.unwrap().id, "fluidaudio-parakeet-tdt-coreml");
     }
 
@@ -500,8 +509,12 @@ mod tests {
             .filter(|m| m.model_type == "nemo_transducer")
             .collect();
         assert_eq!(parakeet_models.len(), 2);
-        assert!(parakeet_models.iter().any(|m| m.id == "parakeet-tdt-0.6b-v2-int8"));
-        assert!(parakeet_models.iter().any(|m| m.id == "parakeet-tdt-0.6b-v3-int8"));
+        assert!(parakeet_models
+            .iter()
+            .any(|m| m.id == "parakeet-tdt-0.6b-v2-int8"));
+        assert!(parakeet_models
+            .iter()
+            .any(|m| m.id == "parakeet-tdt-0.6b-v3-int8"));
     }
 
     #[test]
@@ -541,10 +554,7 @@ mod tests {
     fn test_read_installed_version_present() {
         let dir = tempfile::tempdir().expect("failed to create temp dir");
         std::fs::write(dir.path().join(".version"), "  2.0.0\n").unwrap();
-        assert_eq!(
-            read_installed_version(dir.path()).as_deref(),
-            Some("2.0.0")
-        );
+        assert_eq!(read_installed_version(dir.path()).as_deref(), Some("2.0.0"));
     }
 
     #[test]

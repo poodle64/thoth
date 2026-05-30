@@ -1,6 +1,6 @@
 {
-  "version": 9,
-  "updated": "2026-02-22T00:00:00Z",
+  "version": 10,
+  "updated": "2026-05-30T00:00:00Z",
   "models": [
     {
       "id": "ggml-large-v3-turbo",
@@ -84,16 +84,16 @@
     },
     {
       "id": "fluidaudio-parakeet-tdt-coreml",
-      "name": "Parakeet TDT (Neural Engine)",
-      "description": "RECOMMENDED - Fastest on Apple Silicon (~210x real-time). Uses Apple Neural Engine via CoreML. Models managed by FluidAudio (~500 MB on first use).",
-      "version": "1.0.0",
+      "name": "Parakeet TDT v3 (Neural Engine)",
+      "description": "RECOMMENDED - Fastest on Apple Silicon (~210x real-time). Parakeet TDT 0.6B v3 on the Apple Neural Engine via CoreML, with multilingual auto-detection (25 European languages plus Japanese and Chinese). Models managed by FluidAudio (~500 MB on first use).",
+      "version": "3.0.0",
       "download_url": "",
       "download_size": 500000000,
       "extracted_size": 500000000,
       "sha256": null,
       "required_files": [".fluidaudio_ready"],
       "archive_directory": null,
-      "languages": ["en"],
+      "languages": ["en", "multilingual"],
       "model_type": "fluidaudio_coreml",
       "recommended": true,
       "min_app_version": null
