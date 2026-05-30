@@ -1055,28 +1055,6 @@ pub enum ToggleOutcome {
     Stopped,
 }
 
-/// Decide the toggle action from the single source of truth: the armed flag.
-///
-/// Extracted as a pure function so it can be unit-tested without touching the
-/// global `is_recording()` state.
-#[cfg_attr(not(test), allow(dead_code))]
-#[inline]
-pub(crate) fn toggle_action_from_capturing(is_capturing: bool) -> ToggleAction {
-    if is_capturing {
-        ToggleAction::Stop
-    } else {
-        ToggleAction::Start
-    }
-}
-
-/// What a toggle-recording press will do.
-#[cfg_attr(not(test), allow(dead_code))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ToggleAction {
-    Start,
-    Stop,
-}
-
 /// Emit a pipeline progress event
 fn emit_progress(app: &AppHandle, state: PipelineState, message: &str) {
     emit_progress_with_device(app, state, message, None);
@@ -1163,6 +1141,25 @@ mod tests {
         assert!(json.contains("\"success\":true"));
         assert!(json.contains("\"text\":\"Hello world\""));
         assert!(json.contains("\"transcriptionModelName\""));
+    }
+
+    /// What a toggle-recording press will do.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ToggleAction {
+        Start,
+        Stop,
+    }
+
+    /// Decide the toggle action from the single source of truth: the armed flag.
+    ///
+    /// Pure function so it can be unit-tested without touching global `is_recording()` state.
+    #[inline]
+    fn toggle_action_from_capturing(is_capturing: bool) -> ToggleAction {
+        if is_capturing {
+            ToggleAction::Stop
+        } else {
+            ToggleAction::Start
+        }
     }
 
     #[test]

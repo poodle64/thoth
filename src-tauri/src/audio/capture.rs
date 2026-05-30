@@ -186,15 +186,6 @@ impl AudioRecorder {
         Ok(())
     }
 
-    /// Convenience wrapper: open the default input device and warm up.
-    pub fn warm_up_default(&mut self) -> Result<()> {
-        let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or_else(|| anyhow!("No default input device available"))?;
-        self.warm_up(&device)
-    }
-
     /// Arm the recorder: prepare the output file and start the writer thread.
     ///
     /// Requires the stream to already be warm. This is intentionally instant —
@@ -334,16 +325,6 @@ impl AudioRecorder {
         let path = self.disarm()?;
         self.cool_down();
         Ok(path)
-    }
-
-    /// Get the source sample rate (only valid while warm).
-    pub fn source_rate(&self) -> Option<u32> {
-        self.source_rate
-    }
-
-    /// Get the source channel count (only valid while warm).
-    pub fn source_channels(&self) -> Option<usize> {
-        self.source_channels
     }
 }
 

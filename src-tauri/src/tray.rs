@@ -20,7 +20,6 @@ use crate::audio;
 use crate::config;
 use crate::database;
 use crate::enhancement;
-use crate::pipeline::PipelineState;
 use crate::platform;
 use crate::transcription;
 
@@ -38,8 +37,6 @@ struct TrayState {
     is_recording: bool,
     /// Last transcription text (truncated for display)
     last_transcription: Option<String>,
-    /// Current pipeline state
-    pipeline_state: PipelineState,
 }
 
 
@@ -546,11 +543,6 @@ pub fn set_recording_state(app: &AppHandle, is_recording: bool) {
     {
         let mut state = get_tray_state().write();
         state.is_recording = is_recording;
-        state.pipeline_state = if is_recording {
-            PipelineState::Recording
-        } else {
-            PipelineState::Idle
-        };
     }
 
     // Update tray icon
@@ -642,18 +634,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
         menu_ids::TOGGLE_RECORDING => {
             tracing::info!("Toggle recording clicked from tray menu");
 
-            // Show indicator and play bing only when this press is a START.
-            // Guard on is_recording() only — the armed flag is the single authority
-            // for "am I capturing?". Background processing (PIPELINE_RUNNING already
-            // cleared at capture-stop) must never block a new start.
-            if !crate::audio::is_recording()
-                && crate::transcription::is_transcription_ready()
-            {
-                if let Err(e) = crate::recording_indicator::show_indicator_instant(app) {
-                    tracing::warn!("Failed to show recording indicator from tray: {}", e);
-                }
-                crate::sound::play_sound(crate::sound::SoundEvent::RecordingStart);
-            }
+            crate::recording_indicator::maybe_play_start_indicator(app);
 
             // Emit the same event as keyboard shortcut would
             if let Err(e) = app.emit("shortcut-triggered", "toggle_recording") {

@@ -254,111 +254,6 @@ function createPipelineStore() {
   }
 
   /**
-   * Start recording
-   */
-  async function startRecording(): Promise<{ success: boolean; error?: string }> {
-    debug(' startRecording() called, state:', state, 'isRunning:', isRunning);
-    // Guard on capture state only — not on isRunning.
-    // isRunning is true during background transcription (pipeline-progress events set it),
-    // but a press while transcribing is a valid IDLE→RECORDING start per the state machine.
-    // The only thing that blocks a new start is already capturing audio.
-    if (state === 'recording') {
-      debug(' Already capturing, returning early');
-      return { success: false, error: 'Already recording' };
-    }
-
-    error = null;
-    lastResult = null;
-
-    // NOTE: Recording indicator is shown directly from the Rust shortcut handler
-    // for instant response. No need to call it from here.
-
-    try {
-      debug(' Calling pipeline_start_recording...');
-      const path = await invoke<string>('pipeline_start_recording');
-      debug(' Recording started at path:', path);
-
-      // NOTE: The begin bong is now played from Rust in the shortcut handlers
-      // (manager.rs, keyboard_service.rs, tray.rs), gated on !is_pipeline_running
-      // && !is_recording && is_transcription_ready — so it fires only on a true
-      // start and only before the IPC round-trip delay.
-
-      // State is owned by the recording-state event emitted by Rust after
-      // start_recording succeeds. We only set local non-state fields here.
-      audioPath = path;
-      recordingStartTime = Date.now();
-      recordingDuration = 0;
-
-      // Start duration timer
-      startDurationTimer();
-
-      return { success: true };
-    } catch (e) {
-      const errorMsg = `${e}`;
-      error = errorMsg;
-      state = 'failed';
-      // Hide indicator on failure
-      invoke('hide_recording_indicator').catch(() => {});
-      // Play error sound
-      soundStore.playError();
-      return { success: false, error: errorMsg };
-    }
-  }
-
-  /**
-   * Stop recording and process the audio
-   */
-  async function stopAndProcess(
-    config?: Partial<PipelineConfig>
-  ): Promise<{ success: boolean; result?: PipelineResult; error?: string }> {
-    debug(' stopAndProcess() called, state:', state, 'isRunning:', isRunning);
-    if (!isRunning || state !== 'recording') {
-      debug(' Not recording, returning early');
-      return { success: false, error: 'Not currently recording' };
-    }
-
-    // Build the full config
-    const defaultConfig = await getDefaultConfig();
-    const fullConfig: PipelineConfig = {
-      ...defaultConfig,
-      ...config,
-    };
-
-    debug(' Built config:', fullConfig);
-
-    // Hide recording indicator
-    debug(' Hiding recording indicator');
-    try {
-      await invoke('hide_recording_indicator');
-    } catch (e) {
-      console.warn('[Pipeline] Failed to hide recording indicator:', e);
-    }
-
-    // Play the stop tone immediately on button press
-    soundStore.playRecordingStop();
-
-    try {
-      debug(' Calling pipeline_stop_and_process...');
-      // The command returns immediately after capture stops (Result<(), String>).
-      // State is owned by the recording-state event; Rust emits Transcribing
-      // immediately after stopping capture, before spawning the detached task.
-      await invoke<void>('pipeline_stop_and_process', {
-        config: fullConfig,
-      });
-      debug(' pipeline_stop_and_process returned (processing is detached)');
-      return { success: true };
-    } catch (e) {
-      const errorMsg = `${e}`;
-      console.error('[Pipeline] Exception in stopAndProcess:', errorMsg);
-      error = errorMsg;
-      state = 'failed';
-      // Play error sound on exception
-      soundStore.playError();
-      return { success: false, error: errorMsg };
-    }
-  }
-
-  /**
    * Toggle recording — thin caller of the Rust authority command.
    *
    * Start-vs-stop is decided by `pipeline_toggle_recording` in Rust, which
@@ -613,8 +508,6 @@ function createPipelineStore() {
     // Actions
     initialise,
     cleanup,
-    startRecording,
-    stopAndProcess,
     toggleRecording,
     transcribeFile,
     cancel,

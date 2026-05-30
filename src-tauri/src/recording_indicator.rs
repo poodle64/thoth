@@ -549,6 +549,20 @@ fn position_pill_generic<R: Runtime>(
     Ok(())
 }
 
+/// Show the indicator and play the start bing, but only when a new recording
+/// is actually starting: not already capturing and the model is ready.
+///
+/// Extracted from the three identical guard blocks in manager.rs,
+/// keyboard_service.rs, and tray.rs so the logic lives in one place.
+pub(crate) fn maybe_play_start_indicator<R: Runtime>(app: &AppHandle<R>) {
+    if !crate::audio::is_recording() && crate::transcription::is_transcription_ready() {
+        if let Err(e) = show_indicator_instant(app) {
+            tracing::warn!("Failed to show recording indicator: {}", e);
+        }
+        crate::sound::play_sound(crate::sound::SoundEvent::RecordingStart);
+    }
+}
+
 /// Pre-warm the recording indicator window by loading its content.
 ///
 /// This eliminates the delay on first show by ensuring the webview

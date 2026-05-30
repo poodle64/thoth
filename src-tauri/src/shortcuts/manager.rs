@@ -196,22 +196,10 @@ pub fn register<R: Runtime>(
 
                     // For recording shortcuts, show indicator and play bing IMMEDIATELY
                     // in Rust before emitting to frontend. This eliminates JS round-trip delay.
-                    // Guard on is_recording() only — the armed flag is the single authority
-                    // for "am I capturing?". Background processing (PIPELINE_RUNNING already
-                    // cleared at capture-stop) must never block a new start.
                     let is_toggle_recording = shortcut_id == shortcut_ids::TOGGLE_RECORDING
                         || shortcut_id == shortcut_ids::TOGGLE_RECORDING_ALT;
-                    if is_toggle_recording
-                        && !crate::audio::is_recording()
-                        && crate::transcription::is_transcription_ready()
-                    {
-                        if let Err(e) = recording_indicator::show_indicator_instant(&app_handle) {
-                            tracing::warn!(
-                                "Failed to show recording indicator from shortcut: {}",
-                                e
-                            );
-                        }
-                        crate::sound::play_sound(crate::sound::SoundEvent::RecordingStart);
+                    if is_toggle_recording {
+                        recording_indicator::maybe_play_start_indicator(&app_handle);
                     }
 
                     // Handle copy-last-transcription directly in Rust
