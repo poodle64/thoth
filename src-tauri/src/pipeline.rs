@@ -54,6 +54,10 @@ pub struct PipelineConfig {
     pub apply_filtering: bool,
     /// Whether to remove hesitation sounds (um, uh, er, ah)
     pub remove_fillers: bool,
+    /// Whether to convert US spellings to Australian/British equivalents
+    pub australian_spelling: bool,
+    /// Whether to convert spoken number words to digits
+    pub spoken_numbers_to_digits: bool,
     /// Whether AI enhancement is enabled
     pub enhancement_enabled: bool,
     /// Ollama model for enhancement
@@ -74,6 +78,8 @@ impl Default for PipelineConfig {
             apply_dictionary: true,
             apply_filtering: true,
             remove_fillers: true,
+            australian_spelling: false,
+            spoken_numbers_to_digits: false,
             enhancement_enabled: false,
             enhancement_model: "llama3.2".to_string(),
             enhancement_prompt: DEFAULT_ENHANCEMENT_PROMPT.to_string(),
@@ -483,6 +489,8 @@ async fn run_transcription_pipeline(
         if config.apply_filtering {
             let filter_opts = transcription::FilterOptions {
                 remove_fillers: config.remove_fillers,
+                australian_spelling: config.australian_spelling,
+                spoken_numbers_to_digits: config.spoken_numbers_to_digits,
                 // The dictionary is applied separately below, gated by
                 // config.apply_dictionary. Disable it inside the filter so it
                 // runs exactly once and honours the user's dictionary setting
@@ -1100,6 +1108,8 @@ mod tests {
         assert!(config.apply_dictionary);
         assert!(config.apply_filtering);
         assert!(config.remove_fillers);
+        assert!(!config.australian_spelling);
+        assert!(!config.spoken_numbers_to_digits);
         assert!(!config.enhancement_enabled);
         assert!(!config.auto_copy);
         assert!(config.auto_paste);

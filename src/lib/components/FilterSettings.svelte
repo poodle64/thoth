@@ -14,6 +14,8 @@
     normalise_whitespace: boolean;
     cleanup_punctuation: boolean;
     sentence_case: boolean;
+    australian_spelling: boolean;
+    spoken_numbers_to_digits: boolean;
   }
 
   interface Props {
@@ -33,6 +35,8 @@
     normalise_whitespace: true,
     cleanup_punctuation: true,
     sentence_case: false,
+    australian_spelling: false,
+    spoken_numbers_to_digits: false,
   };
 
   /** Current filter options state - intentionally captures initialOptions once */
@@ -97,7 +101,9 @@
     options.remove_fillers !== defaultOptions.remove_fillers ||
       options.normalise_whitespace !== defaultOptions.normalise_whitespace ||
       options.cleanup_punctuation !== defaultOptions.cleanup_punctuation ||
-      options.sentence_case !== defaultOptions.sentence_case
+      options.sentence_case !== defaultOptions.sentence_case ||
+      options.australian_spelling !== defaultOptions.australian_spelling ||
+      options.spoken_numbers_to_digits !== defaultOptions.spoken_numbers_to_digits
   );
 
   /** Filter option definitions for rendering */
@@ -121,6 +127,16 @@
       key: 'sentence_case' as const,
       label: 'Apply sentence case',
       description: 'Capitalises the first letter of each sentence',
+    },
+    {
+      key: 'australian_spelling' as const,
+      label: 'Australian spelling',
+      description: 'Converts US spellings to Australian/British equivalents (color→colour, organize→organise)',
+    },
+    {
+      key: 'spoken_numbers_to_digits' as const,
+      label: 'Convert spoken numbers to digits',
+      description: 'Converts number words to digits (twenty three→23, one hundred→100)',
     },
   ];
 

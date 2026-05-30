@@ -42,6 +42,10 @@ export interface PipelineConfig {
   applyFiltering: boolean;
   /** Whether to remove hesitation sounds (um, uh, er, ah) */
   removeFillers: boolean;
+  /** Whether to convert US spellings to Australian/British equivalents */
+  australianSpelling: boolean;
+  /** Whether to convert spoken number words to digits */
+  spokenNumbersToDigits: boolean;
   /** Whether AI enhancement is enabled */
   enhancementEnabled: boolean;
   /** Ollama model for enhancement */
@@ -114,6 +118,8 @@ async function getDefaultConfig(): Promise<PipelineConfig> {
     applyDictionary: true,
     applyFiltering: true,
     removeFillers: config.transcription.removeFillers,
+    australianSpelling: config.transcription.australianSpelling,
+    spokenNumbersToDigits: config.transcription.spokenNumbersToDigits,
     enhancementEnabled: config.enhancement.enabled,
     enhancementModel: config.enhancement.model,
     enhancementPrompt,

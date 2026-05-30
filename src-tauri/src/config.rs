@@ -100,6 +100,12 @@ pub struct TranscriptionConfig {
     /// Whether to remove hesitation sounds (um, uh, er, ah) from transcription
     #[serde(default = "default_true")]
     pub remove_fillers: bool,
+    /// Whether to convert US spellings to Australian/British equivalents
+    #[serde(default)]
+    pub australian_spelling: bool,
+    /// Whether to convert spoken number words to digits
+    #[serde(default)]
+    pub spoken_numbers_to_digits: bool,
 }
 
 fn default_true() -> bool {
@@ -115,6 +121,8 @@ impl Default for TranscriptionConfig {
             auto_paste: true,
             add_leading_space: false,
             remove_fillers: true,
+            australian_spelling: false,
+            spoken_numbers_to_digits: false,
         }
     }
 }
@@ -748,6 +756,8 @@ mod tests {
                 auto_paste: true,
                 add_leading_space: true,
                 remove_fillers: false,
+                australian_spelling: false,
+                spoken_numbers_to_digits: false,
             },
             shortcuts: ShortcutConfig {
                 toggle_recording: "F12".to_string(),

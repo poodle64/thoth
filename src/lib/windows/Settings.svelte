@@ -31,7 +31,6 @@
 	import OverviewPane from '../components/OverviewPane.svelte';
 	import AboutDialog from '../components/AboutDialog.svelte';
 	import ShortcutInput from '../components/ShortcutInput.svelte';
-	import UpdateNotificationBanner from '../components/UpdateNotificationBanner.svelte';
 	import { configStore, type RecordingMode, type IndicatorStyle } from '../stores/config.svelte';
 	import { pipelineStore } from '../stores/pipeline.svelte';
 	import { shortcutsStore, type ShortcutInfo } from '../stores/shortcuts.svelte';
@@ -50,6 +49,8 @@
     normalise_whitespace: boolean;
     cleanup_punctuation: boolean;
     sentence_case: boolean;
+    australian_spelling: boolean;
+    spoken_numbers_to_digits: boolean;
   }
 
   /** Available settings panes matching Swift app */
@@ -186,6 +187,8 @@
 
   async function handleFilterChange(options: FilterOptions) {
     configStore.updateTranscription('removeFillers', options.remove_fillers);
+    configStore.updateTranscription('australianSpelling', options.australian_spelling);
+    configStore.updateTranscription('spokenNumbersToDigits', options.spoken_numbers_to_digits);
     await configStore.save();
   }
 
@@ -289,9 +292,6 @@
 
 		<!-- Content -->
 		<main class="content">
-			<!-- Update notification banner (shown at top when update available) -->
-			<UpdateNotificationBanner />
-
 			{#if activePane === 'overview'}
         <div class="pane">
           <OverviewPane onNavigate={(paneId) => (activePane = paneId)} />
@@ -579,6 +579,8 @@
                   normalise_whitespace: true,
                   cleanup_punctuation: true,
                   sentence_case: false,
+                  australian_spelling: configStore.transcription.australianSpelling,
+                  spoken_numbers_to_digits: configStore.transcription.spokenNumbersToDigits,
                 }}
                 onchange={handleFilterChange}
                 onOpenDictionary={() => (activePane = 'dictionary')}

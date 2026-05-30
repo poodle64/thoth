@@ -29,6 +29,10 @@ export interface TranscriptionConfig {
   addLeadingSpace: boolean;
   /** Whether to remove hesitation sounds (um, uh, er, ah) from transcription */
   removeFillers: boolean;
+  /** Whether to convert US spellings to Australian/British equivalents */
+  australianSpelling: boolean;
+  /** Whether to convert spoken number words to digits */
+  spokenNumbersToDigits: boolean;
 }
 
 /** Recording mode options */
@@ -131,6 +135,8 @@ interface ConfigRaw {
     auto_paste: boolean;
     add_leading_space: boolean;
     remove_fillers: boolean;
+    australian_spelling: boolean;
+    spoken_numbers_to_digits: boolean;
   };
   shortcuts: {
     toggle_recording: string;
@@ -175,6 +181,8 @@ function parseConfig(raw: ConfigRaw): Config {
       autoPaste: raw.transcription.auto_paste,
       addLeadingSpace: raw.transcription.add_leading_space,
       removeFillers: raw.transcription.remove_fillers,
+      australianSpelling: raw.transcription.australian_spelling,
+      spokenNumbersToDigits: raw.transcription.spoken_numbers_to_digits,
     },
     shortcuts: {
       toggleRecording: raw.shortcuts.toggle_recording,
@@ -220,6 +228,8 @@ function serialiseConfig(config: Config): ConfigRaw {
       auto_paste: config.transcription.autoPaste,
       add_leading_space: config.transcription.addLeadingSpace,
       remove_fillers: config.transcription.removeFillers,
+      australian_spelling: config.transcription.australianSpelling,
+      spoken_numbers_to_digits: config.transcription.spokenNumbersToDigits,
     },
     shortcuts: {
       toggle_recording: config.shortcuts.toggleRecording,
@@ -265,6 +275,8 @@ function getDefaultConfig(): Config {
       autoPaste: true,
       addLeadingSpace: false,
       removeFillers: true,
+      australianSpelling: false,
+      spokenNumbersToDigits: false,
     },
     shortcuts: {
       toggleRecording: 'F13',
