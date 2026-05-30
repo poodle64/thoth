@@ -207,13 +207,7 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  /* --color-accent intentionally not remapped here: the existing @theme
-     block defines --color-accent: #D08B3E (amber brand) and one existing
-     component (LoadingState) uses `border-accent` expecting amber.
-     The shadcn --accent token (#363330, subtle hover surface) is available
-     via var(--accent) directly. During component migration, replace
-     `border-accent` with `border-primary` in LoadingState and then add
-     --color-accent here pointing to var(--accent). */
+  --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
