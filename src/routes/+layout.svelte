@@ -5,6 +5,19 @@
   import { Sonner } from '$components/ui/sonner';
   import { ModeWatcher } from 'mode-watcher';
   import type { Snippet } from 'svelte';
+  import { installTauriMock } from '$lib/dev/tauri-mock';
+  import { thothMockCommands } from '$lib/dev/thoth-mock-data';
+
+  // Install the mock transport synchronously, before any child component mounts
+  // and before any store calls invoke() or listen(). The DEV guard is evaluated at
+  // module-eval time (synchronous), so this runs before the component body and
+  // before App.svelte's onMount. Vite tree-shakes both imports and this block from
+  // production builds because import.meta.env.DEV is false at build time.
+  // The __TAURI_INTERNALS__ guard ensures the real Tauri runtime (which injects
+  // that global before app code) is never replaced by the mock.
+  if (import.meta.env.DEV && !('__TAURI_INTERNALS__' in window)) {
+    installTauriMock(thothMockCommands);
+  }
 
   interface Props {
     children?: Snippet;
