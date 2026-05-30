@@ -417,7 +417,14 @@ fn write_audio_to_file(
     }
 
     writer.finalize()?;
-    tracing::debug!("Audio writer finished: {} samples written", total_samples);
+    let duration_secs = total_samples as f32 / TARGET_SAMPLE_RATE as f32;
+    tracing::info!(
+        "Audio writer finished: {} samples, {:.2}s at {}Hz -> {}",
+        total_samples,
+        duration_secs,
+        TARGET_SAMPLE_RATE,
+        path.display()
+    );
     Ok(())
 }
 

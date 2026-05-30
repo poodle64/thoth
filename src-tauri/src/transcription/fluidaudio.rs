@@ -75,15 +75,18 @@ impl TranscriptionService {
             let _ = std::fs::remove_file(tmp);
         }
 
+        let text = result.text.clone();
+        let word_count = text.split_whitespace().count();
         tracing::info!(
-            "FluidAudio transcribed {:.2}s audio in {:.3}s (RTFx: {:.0}, confidence: {:.1}%)",
+            "FluidAudio transcript: {} chars, {} words (decoded {:.2}s audio in {:.3}s, RTFx: {:.0}, confidence: {:.1}%)",
+            text.len(),
+            word_count,
             result.duration,
             duration.as_secs_f32(),
             result.rtfx,
             result.confidence * 100.0
         );
-
-        Ok(result.text)
+        Ok(text)
     }
 }
 
@@ -104,6 +107,13 @@ fn pad_with_silence(audio_path: &Path) -> Result<Option<PathBuf>> {
     };
 
     let spec = reader.spec();
+    tracing::info!(
+        "FluidAudio pad_with_silence: loaded {:.2}s ({} frames) at {}Hz from {}",
+        reader.duration() as f32 / spec.sample_rate as f32,
+        reader.duration(),
+        spec.sample_rate,
+        audio_path.display()
+    );
     let sample_rate = spec.sample_rate;
     let leading_samples = sample_rate as usize / 2; // 500 ms
     let trailing_samples = sample_rate as usize * 3 / 2; // 1.5 seconds
