@@ -588,6 +588,116 @@ pub fn spoken_numbers_to_digits(text: &str) -> String {
         }
     }
 
+    // Expand hyphenated number compounds into individual sub-tokens so the
+    // run-scanner below treats them the same as space-separated words.
+    //
+    // A token is expanded only when every hyphen-separated piece (after
+    // stripping leading/trailing punctuation from the whole token) is itself a
+    // recognised number word. This is conservative by design:
+    //   "twenty-three"    → ["twenty", "three"]   ✓ (all pieces are number words)
+    //   "well-known"      → kept intact            ✗ ("well" is not a number word)
+    //   "twenty-something"→ kept intact            ✗ ("something" is not a number word)
+    //   "x-ray"           → kept intact            ✗ ("x" and "ray" are not number words)
+    // The leading punctuation of the first piece and trailing punctuation of the
+    // last piece are preserved; the hyphen itself is discarded.
+    //
+    // Two-phase approach to satisfy the borrow checker:
+    //   Phase 1 — classify each token; tokens that expand produce owned Strings
+    //             stored in `owned_pieces`; everything else records its original
+    //             slice indices for phase 2.
+    //   Phase 2 — build the final `&str` slice pairs from either the original
+    //             `text`-backed slices or the owned Strings.
+    //
+    // An enum avoids any mutation of `owned_pieces` while borrowing from it.
+    enum TokenKind<'t> {
+        // Original whitespace-delimited token — borrow directly from `text`.
+        Original((&'t str, &'t str)),
+        // Hyphenated number compound — index range into `owned_pieces`; the
+        // first sub-token carries the original preceding whitespace.
+        Expanded {
+            ws: &'t str,
+            range: std::ops::Range<usize>,
+        },
+    }
+
+    let mut owned_pieces: Vec<String> = Vec::new();
+    let mut kinds: Vec<TokenKind> = Vec::with_capacity(tokens.len());
+
+    for (ws, word) in &tokens {
+        let (ws, word) = (*ws, *word);
+
+        // Fast path: no hyphen means nothing to expand.
+        if !word.contains('-') {
+            kinds.push(TokenKind::Original((ws, word)));
+            continue;
+        }
+
+        let core = alpha_core(word);
+        if core.is_empty() || !core.contains('-') {
+            kinds.push(TokenKind::Original((ws, word)));
+            continue;
+        }
+
+        // Split the alphabetic core on hyphens and check every piece.
+        let pieces: Vec<&str> = core.split('-').collect();
+        let all_number_words = pieces.iter().all(|p| {
+            !p.is_empty() && (word_to_value(p).is_some() || word_to_multiplier(p).is_some())
+        });
+
+        if !all_number_words {
+            kinds.push(TokenKind::Original((ws, word)));
+            continue;
+        }
+
+        // Locate where the core sits inside the original word so we can
+        // extract any leading/trailing punctuation envelope.
+        let core_start = word.find(core).unwrap_or(0);
+        let core_end = core_start + core.len();
+        let leading_punct = &word[..core_start];
+        let trailing_punct = &word[core_end..];
+
+        let n_pieces = pieces.len();
+        let base_idx = owned_pieces.len();
+
+        for (idx, piece) in pieces.iter().enumerate() {
+            // Build a synthetic token with punctuation only on the first/last piece.
+            let synthetic = if idx == 0 && idx == n_pieces - 1 {
+                // Single piece — cannot happen since we checked for '-' above.
+                format!("{leading_punct}{piece}{trailing_punct}")
+            } else if idx == 0 {
+                format!("{leading_punct}{piece}")
+            } else if idx == n_pieces - 1 {
+                format!("{piece}{trailing_punct}")
+            } else {
+                piece.to_string()
+            };
+            owned_pieces.push(synthetic);
+        }
+
+        kinds.push(TokenKind::Expanded {
+            ws,
+            range: base_idx..owned_pieces.len(),
+        });
+    }
+
+    // Phase 2: owned_pieces is fully built; borrow from it freely.
+    let mut expanded_tokens: Vec<(&str, &str)> = Vec::with_capacity(kinds.len());
+    for kind in &kinds {
+        match kind {
+            TokenKind::Original((ws, word)) => {
+                expanded_tokens.push((ws, word));
+            }
+            TokenKind::Expanded { ws, range } => {
+                for (idx, owned) in owned_pieces[range.clone()].iter().enumerate() {
+                    let preceding = if idx == 0 { *ws } else { "" };
+                    expanded_tokens.push((preceding, owned.as_str()));
+                }
+            }
+        }
+    }
+
+    let tokens = expanded_tokens;
+
     let n = tokens.len();
     let mut out = String::with_capacity(text.len());
     let mut i = 0;
@@ -1168,6 +1278,67 @@ mod tests {
         assert_eq!(
             spoken_numbers_to_digits("There were forty two people at the event"),
             "There were 42 people at the event"
+        );
+    }
+
+    // ── Hyphenated number compound tests ──────────────────────────────────
+    // Parakeet/FluidAudio emits compounds like "twenty-three" as a single
+    // whitespace-delimited token. The expansion step splits them before the
+    // number-run scanner so they convert identically to space-separated forms.
+
+    #[test]
+    fn test_itn_hyphenated_twenty_three() {
+        assert_eq!(spoken_numbers_to_digits("twenty-three"), "23");
+    }
+
+    #[test]
+    fn test_itn_hyphenated_forty_two_in_sentence() {
+        assert_eq!(spoken_numbers_to_digits("forty-two items"), "42 items");
+    }
+
+    #[test]
+    fn test_itn_hyphenated_ninety_nine() {
+        assert_eq!(spoken_numbers_to_digits("ninety-nine"), "99");
+    }
+
+    #[test]
+    fn test_itn_hyphenated_trailing_punctuation() {
+        // Trailing punctuation on the compound token must survive on the digit.
+        assert_eq!(
+            spoken_numbers_to_digits("I have twenty-three apples."),
+            "I have 23 apples."
+        );
+    }
+
+    #[test]
+    fn test_itn_hyphenated_non_number_unchanged() {
+        // Neither "well" nor "known" is a number word — token must pass through intact.
+        assert_eq!(spoken_numbers_to_digits("well-known"), "well-known");
+    }
+
+    #[test]
+    fn test_itn_hyphenated_x_ray_unchanged() {
+        assert_eq!(spoken_numbers_to_digits("x-ray"), "x-ray");
+    }
+
+    #[test]
+    fn test_itn_hyphenated_mixed_with_space_separated() {
+        // Hyphenated compound and space-separated run must both convert when
+        // they appear in separate (non-adjacent) number runs within a sentence.
+        assert_eq!(
+            spoken_numbers_to_digits("twenty-three items costing one hundred dollars"),
+            "23 items costing 100 dollars"
+        );
+    }
+
+    #[test]
+    fn test_itn_hyphenated_twenty_something_unchanged() {
+        // "something" is not a number word, so the conservative rule leaves the
+        // whole token intact rather than converting only the "twenty" piece.
+        // This avoids surprising output like "20-something".
+        assert_eq!(
+            spoken_numbers_to_digits("twenty-something"),
+            "twenty-something"
         );
     }
 
