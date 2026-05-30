@@ -2,6 +2,11 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
+  import { Button } from '$components/ui/button';
+  import { Badge } from '$components/ui/badge';
+  import * as Card from '$components/ui/card';
+  import * as AlertDialog from '$components/ui/alert-dialog';
+  import * as Alert from '$components/ui/alert';
 
   interface ModelInfo {
     id: string;
@@ -100,7 +105,6 @@
     loading = true;
     error = null;
     try {
-      // Use the new manifest-based API
       models = await invoke<ModelInfo[]>('fetch_model_manifest', { forceRefresh });
       downloadState = await invoke<DownloadState>('get_download_progress');
     } catch (e) {
@@ -276,11 +280,11 @@
   }
 </script>
 
-<div class="model-manager">
-  <div class="setting-row card">
-    <div class="setting-info">
-      <span class="setting-label">Model Updates</span>
-      <span class="setting-description">
+<div class="flex flex-col gap-6">
+  <div class="flex items-center justify-between rounded-lg border p-4">
+    <div class="flex flex-col gap-1">
+      <span class="text-sm font-medium">Model Updates</span>
+      <span class="text-muted-foreground text-xs">
         {#if lastChecked}
           Last checked: {lastChecked}
         {:else}
@@ -288,8 +292,9 @@
         {/if}
       </span>
     </div>
-    <button
-      class="btn-small"
+    <Button
+      variant="outline"
+      size="sm"
       onclick={checkForUpdates}
       disabled={checking || isDownloading()}
     >
@@ -298,543 +303,193 @@
       {:else}
         Check for Updates
       {/if}
-    </button>
+    </Button>
   </div>
 
   {#if loading}
-    <div class="loading">
-      <div class="spinner"></div>
-      <span>Loading models...</span>
+    <div class="text-muted-foreground flex items-center gap-3 p-6">
+      <div
+        class="border-muted-foreground border-t-primary h-5 w-5 animate-spin rounded-full border-2"
+      ></div>
+      <span class="text-sm">Loading models...</span>
     </div>
   {:else if error}
-    <div class="error-row">
-      <span class="error-message">{error}</span>
-      <button class="btn-small" onclick={() => (error = null)}>Dismiss</button>
-    </div>
+    <Alert.Root variant="destructive">
+      <Alert.Description class="flex items-center justify-between gap-3">
+        <span>{error}</span>
+        <Button variant="ghost" size="sm" onclick={() => (error = null)}>Dismiss</Button>
+      </Alert.Description>
+    </Alert.Root>
   {/if}
 
-  <div class="model-list">
+  <div class="flex flex-col gap-3">
     {#each sortedModels(models) as model (model.id)}
-      <div
-        class="model-card"
-        class:downloaded={model.downloaded}
-        class:selected={model.selected}
-        class:unavailable={!model.backend_available}
+      <Card.Root
+        class={model.selected
+          ? 'border-primary'
+          : !model.backend_available
+            ? 'opacity-55'
+            : ''}
       >
-        <!-- Top row: name + primary badge -->
-        <div class="model-header">
-          <div class="model-title-row">
-            <span class="model-name">{model.name}</span>
-            {#if model.selected}
-              <span class="badge badge-active">Active</span>
-            {:else if model.recommended}
-              <span class="badge badge-recommended">Recommended</span>
+        <Card.Content class="flex flex-col gap-2 p-4">
+          <!-- Top row: name + primary badge -->
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex min-w-0 items-center gap-2">
+              <span class="truncate text-sm font-semibold">{model.name}</span>
+              {#if model.selected}
+                <Badge>Active</Badge>
+              {:else if model.recommended}
+                <Badge variant="secondary">Recommended</Badge>
+              {/if}
+            </div>
+            {#if model.update_available}
+              <Badge variant="outline">Update</Badge>
             {/if}
           </div>
-          {#if model.update_available}
-            <span class="badge badge-update">Update</span>
-          {/if}
-        </div>
 
-        <!-- Description -->
-        <p class="model-description">{model.description}</p>
+          <!-- Description -->
+          <p class="text-muted-foreground text-xs leading-relaxed">{model.description}</p>
 
-        <!-- Metadata row -->
-        <div class="model-meta">
-          <span class="meta-item">{backendLabel(model.model_type)}</span>
-          <span class="meta-sep"></span>
-          <span class="meta-item">{formatLanguages(model.languages)}</span>
-          <span class="meta-sep"></span>
-          {#if model.downloaded && model.disk_size}
-            <span class="meta-item">{formatBytes(model.disk_size)}</span>
-          {:else}
-            <span class="meta-item">~{model.size_mb} MB</span>
-          {/if}
-        </div>
-
-        <!-- Backend warning -->
-        {#if !model.backend_available}
-          <p class="backend-warning">
-            {#if model.model_type === 'fluidaudio_coreml'}
-              Requires macOS with Apple Silicon (M1 or later).
-            {:else if model.model_type === 'nemo_transducer'}
-              Requires the Parakeet backend (not available in this build).
+          <!-- Metadata row -->
+          <div class="text-muted-foreground flex flex-wrap items-center gap-0 text-xs">
+            <span class="whitespace-nowrap">{backendLabel(model.model_type)}</span>
+            <span class="px-1.5 opacity-40">&middot;</span>
+            <span class="whitespace-nowrap">{formatLanguages(model.languages)}</span>
+            <span class="px-1.5 opacity-40">&middot;</span>
+            {#if model.downloaded && model.disk_size}
+              <span class="whitespace-nowrap">{formatBytes(model.disk_size)}</span>
             {:else}
-              Backend not available in this build.
+              <span class="whitespace-nowrap">~{model.size_mb} MB</span>
             {/if}
-          </p>
-        {/if}
+          </div>
 
-        <!-- Actions -->
-        <div class="model-actions">
-          {#if isDownloading(model.id)}
-            <div class="progress-section">
-              {#if progress}
-                <div class="progress-bar">
-                  <div
-                    class="progress-fill"
-                    style:width="{Math.min(progress.percentage, 100)}%"
-                  ></div>
-                </div>
-                <span class="progress-text">{progress.status}</span>
-              {:else if downloadState === 'Extracting'}
-                <div class="progress-bar">
-                  <div class="progress-fill extracting"></div>
-                </div>
-                <span class="progress-text">Extracting model files...</span>
+          <!-- Backend warning -->
+          {#if !model.backend_available}
+            <p class="bg-warning/10 text-warning rounded-sm px-2.5 py-1.5 text-xs leading-snug">
+              {#if model.model_type === 'fluidaudio_coreml'}
+                Requires macOS with Apple Silicon (M1 or later).
+              {:else if model.model_type === 'nemo_transducer'}
+                Requires the Parakeet backend (not available in this build).
               {:else}
-                <span class="progress-text">Preparing download...</span>
+                Backend not available in this build.
               {/if}
-            </div>
-          {:else if isFailed() && downloadingModelId === model.id}
-            <div class="failed-section">
-              <span class="failed-text">Download failed: {getFailedMessage()}</span>
-              <button class="retry-btn" onclick={() => resetState()}>Reset</button>
-            </div>
-          {:else if initialisingModelId === model.id}
-            <div class="progress-section">
-              <div class="progress-bar">
-                <div class="progress-fill extracting"></div>
-              </div>
-              <span class="progress-text">
-                {model.model_type === 'fluidaudio_coreml'
-                  ? 'Compiling for Neural Engine\u2026 this may take a minute'
-                  : 'Loading model\u2026'}
-              </span>
-            </div>
-          {:else if model.downloaded && model.selected}
-            <button
-              class="btn-outline btn-danger"
-              onclick={() => confirmDelete(model)}
-              disabled={isDownloading() || initialisingModelId !== null}
-            >
-              Delete
-            </button>
-          {:else if model.downloaded}
-            <button
-              class="btn-primary"
-              onclick={() => selectModel(model)}
-              disabled={isDownloading() || initialisingModelId !== null || !model.backend_available}
-            >
-              {model.backend_available ? 'Use Model' : 'Unavailable'}
-            </button>
-            <button
-              class="btn-outline btn-danger"
-              onclick={() => confirmDelete(model)}
-              disabled={isDownloading() || initialisingModelId !== null}
-            >
-              Delete
-            </button>
-          {:else}
-            <button
-              class="btn-primary"
-              onclick={() => downloadModel(model)}
-              disabled={isDownloading() || !model.backend_available}
-            >
-              {#if !model.backend_available}
-                Unavailable
-              {:else if model.model_type === 'fluidaudio_coreml'}
-                Initialise
-              {:else}
-                Download
-              {/if}
-            </button>
+            </p>
           {/if}
-        </div>
-      </div>
+
+          <!-- Actions -->
+          <div class="flex items-center gap-2 pt-2">
+            {#if isDownloading(model.id)}
+              <div class="flex flex-1 flex-col gap-2">
+                {#if progress}
+                  <!-- Custom progress bar: bespoke because it shows download % with animation -->
+                  <div class="bg-muted h-1.5 w-full overflow-hidden rounded-full">
+                    <div
+                      class="bg-primary h-full rounded-full transition-[width] duration-300"
+                      style:width="{Math.min(progress.percentage, 100)}%"
+                    ></div>
+                  </div>
+                  <span class="text-muted-foreground text-xs">{progress.status}</span>
+                {:else if downloadState === 'Extracting'}
+                  <div class="bg-muted h-1.5 w-full overflow-hidden rounded-full">
+                    <div class="bg-primary h-full w-full animate-pulse rounded-full"></div>
+                  </div>
+                  <span class="text-muted-foreground text-xs">Extracting model files...</span>
+                {:else}
+                  <span class="text-muted-foreground text-xs">Preparing download...</span>
+                {/if}
+              </div>
+            {:else if isFailed() && downloadingModelId === model.id}
+              <div class="flex flex-1 items-center gap-3">
+                <span class="text-destructive flex-1 text-xs">
+                  Download failed: {getFailedMessage()}
+                </span>
+                <Button variant="secondary" size="sm" onclick={() => resetState()}>Reset</Button>
+              </div>
+            {:else if initialisingModelId === model.id}
+              <div class="flex flex-1 flex-col gap-2">
+                <!-- Custom progress bar: bespoke indeterminate pulse for compile/load -->
+                <div class="bg-muted h-1.5 w-full overflow-hidden rounded-full">
+                  <div class="bg-primary h-full w-full animate-pulse rounded-full"></div>
+                </div>
+                <span class="text-muted-foreground text-xs">
+                  {model.model_type === 'fluidaudio_coreml'
+                    ? 'Compiling for Neural Engine… this may take a minute'
+                    : 'Loading model…'}
+                </span>
+              </div>
+            {:else if model.downloaded && model.selected}
+              <Button
+                variant="destructive"
+                size="sm"
+                onclick={() => confirmDelete(model)}
+                disabled={isDownloading() || initialisingModelId !== null}
+              >
+                Delete
+              </Button>
+            {:else if model.downloaded}
+              <Button
+                size="sm"
+                onclick={() => selectModel(model)}
+                disabled={isDownloading() ||
+                  initialisingModelId !== null ||
+                  !model.backend_available}
+              >
+                {model.backend_available ? 'Use Model' : 'Unavailable'}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onclick={() => confirmDelete(model)}
+                disabled={isDownloading() || initialisingModelId !== null}
+              >
+                Delete
+              </Button>
+            {:else}
+              <Button
+                size="sm"
+                onclick={() => downloadModel(model)}
+                disabled={isDownloading() || !model.backend_available}
+              >
+                {#if !model.backend_available}
+                  Unavailable
+                {:else if model.model_type === 'fluidaudio_coreml'}
+                  Initialise
+                {:else}
+                  Download
+                {/if}
+              </Button>
+            {/if}
+          </div>
+        </Card.Content>
+      </Card.Root>
     {/each}
   </div>
 
   {#if models.length === 0 && !loading}
-    <div class="empty-state">
+    <div class="text-muted-foreground p-8 text-center text-sm">
       <p>No models available. Click "Check for Updates" to refresh the list.</p>
-    </div>
-  {/if}
-
-  <!-- Delete confirmation dialog -->
-  {#if showDeleteConfirm && modelToDelete}
-    <div
-      class="modal-overlay"
-      role="presentation"
-      onclick={() => (showDeleteConfirm = false)}
-      onkeydown={(e) => e.key === 'Escape' && (showDeleteConfirm = false)}
-    >
-      <div
-        class="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="delete-dialog-title"
-        tabindex="-1"
-        onclick={(e) => e.stopPropagation()}
-        onkeydown={(e) => e.stopPropagation()}
-      >
-        <h4 id="delete-dialog-title">Delete Model?</h4>
-        <p>
-          Are you sure you want to delete "{modelToDelete.name}"? You will need to download it again
-          to use offline transcription.
-        </p>
-        <div class="modal-actions">
-          <button class="cancel-btn" onclick={() => (showDeleteConfirm = false)}> Cancel </button>
-          <button class="confirm-delete-btn" onclick={deleteModel}> Delete </button>
-        </div>
-      </div>
     </div>
   {/if}
 </div>
 
-<style>
-  .model-manager {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-  }
-
-  .loading {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 24px;
-    color: var(--color-text-secondary);
-  }
-
-  .spinner {
-    width: 20px;
-    height: 20px;
-    border: 2px solid var(--color-border);
-    border-top-color: var(--color-accent);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
-  .error-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 10px 14px;
-    background: color-mix(in srgb, var(--color-error) 10%, transparent);
-    border-radius: var(--radius-md);
-  }
-
-  .error-row .error-message {
-    margin: 0;
-    padding: 0;
-    background: none;
-  }
-
-  .model-list {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  /* ── Card ───────────────────────────────────────────────────────── */
-  .model-card {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 14px 16px;
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-md);
-    transition: border-color var(--transition-fast);
-  }
-
-  .model-card.selected {
-    border-color: var(--color-accent);
-    background: color-mix(in srgb, var(--color-accent) 4%, var(--color-bg-secondary));
-  }
-
-  .model-card.downloaded:not(.selected) {
-    border-color: var(--color-border);
-  }
-
-  .model-card.unavailable {
-    opacity: 0.55;
-  }
-
-  /* ── Header ────────────────────────────────────────────────────── */
-  .model-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  .model-title-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .model-name {
-    font-size: var(--text-base);
-    font-weight: 600;
-    color: var(--color-text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* ── Badges ────────────────────────────────────────────────────── */
-  .badge {
-    flex-shrink: 0;
-    padding: 1px 8px;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    border-radius: var(--radius-full);
-    white-space: nowrap;
-  }
-
-  .badge-active {
-    background: var(--color-accent);
-    color: white;
-  }
-
-  .badge-recommended {
-    background: color-mix(in srgb, var(--color-accent) 15%, transparent);
-    color: var(--color-accent);
-  }
-
-  .badge-update {
-    background: color-mix(in srgb, var(--color-warning) 15%, transparent);
-    color: var(--color-warning);
-  }
-
-  /* ── Description ───────────────────────────────────────────────── */
-  .model-description {
-    margin: 0;
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    line-height: 1.45;
-  }
-
-  /* ── Metadata row ──────────────────────────────────────────────── */
-  .model-meta {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 4px 0;
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
-  }
-
-  .meta-item {
-    white-space: nowrap;
-  }
-
-  .meta-sep::after {
-    content: '\00b7';
-    padding: 0 6px;
-    opacity: 0.4;
-  }
-
-  /* ── Backend warning ───────────────────────────────────────────── */
-  .backend-warning {
-    margin: 2px 0 0;
-    padding: 6px 10px;
-    font-size: var(--text-xs);
-    color: var(--color-warning);
-    background: color-mix(in srgb, var(--color-warning) 8%, transparent);
-    border-radius: var(--radius-sm);
-    line-height: 1.4;
-  }
-
-  /* ── Actions ───────────────────────────────────────────────────── */
-  .model-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding-top: 8px;
-  }
-
-  .btn-primary,
-  .btn-outline,
-  .retry-btn {
-    padding: 6px 14px;
-    font-size: var(--text-sm);
-    font-weight: 500;
-    border-radius: var(--radius-md);
-    transition: all var(--transition-fast);
-    cursor: pointer;
-  }
-
-  .btn-primary {
-    background: var(--color-accent);
-    color: white;
-    border: none;
-  }
-
-  .btn-primary:hover:not(:disabled) {
-    background: var(--color-accent-hover);
-  }
-
-  .btn-primary:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .btn-outline {
-    background: transparent;
-    border: 1px solid var(--color-border);
-    color: var(--color-text-secondary);
-  }
-
-  .btn-outline:hover:not(:disabled) {
-    border-color: var(--color-text-tertiary);
-  }
-
-  .btn-outline.btn-danger {
-    border-color: color-mix(in srgb, var(--color-error) 40%, transparent);
-    color: var(--color-error);
-  }
-
-  .btn-outline.btn-danger:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--color-error) 8%, transparent);
-    border-color: var(--color-error);
-  }
-
-  .btn-outline:disabled,
-  .btn-outline.btn-danger:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .retry-btn {
-    background: var(--color-bg-tertiary);
-    border: none;
-  }
-
-  .progress-section {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .progress-bar {
-    height: 6px;
-    background: var(--color-bg-tertiary);
-    border-radius: var(--radius-full);
-    overflow: hidden;
-  }
-
-  .progress-fill {
-    height: 100%;
-    background: var(--color-accent);
-    border-radius: var(--radius-full);
-    transition: width 0.3s ease;
-  }
-
-  .progress-fill.extracting {
-    width: 100%;
-    animation: pulse 1.5s ease-in-out infinite;
-  }
-
-  @keyframes pulse {
-    0%,
-    100% {
-      opacity: 0.6;
-    }
-    50% {
-      opacity: 1;
-    }
-  }
-
-  .progress-text {
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
-  }
-
-  .failed-section {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .failed-text {
-    flex: 1;
-    font-size: var(--text-xs);
-    color: var(--color-error);
-  }
-
-  .empty-state {
-    padding: 32px;
-    text-align: center;
-    color: var(--color-text-tertiary);
-    font-size: var(--text-sm);
-  }
-
-  /* Modal styles */
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  }
-
-  .modal {
-    width: 90%;
-    max-width: 400px;
-    padding: 24px;
-    background: var(--color-bg-primary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg);
-  }
-
-  .modal h4 {
-    margin: 0 0 12px 0;
-    font-size: var(--text-lg);
-    font-weight: 600;
-    color: var(--color-text-primary);
-  }
-
-  .modal p {
-    margin: 0 0 20px 0;
-    font-size: var(--text-base);
-    color: var(--color-text-secondary);
-    line-height: 1.5;
-  }
-
-  .modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 12px;
-  }
-
-  .cancel-btn {
-    padding: 8px 16px;
-    font-size: var(--text-sm);
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-primary);
-    border-radius: var(--radius-md);
-  }
-
-  .confirm-delete-btn {
-    padding: 8px 16px;
-    font-size: var(--text-sm);
-    background: var(--color-error);
-    color: white;
-    border-radius: var(--radius-md);
-  }
-
-  .confirm-delete-btn:hover {
-    background: color-mix(in srgb, var(--color-error) 85%, white);
-  }
-</style>
+<!-- Delete confirmation dialog -->
+<AlertDialog.Root bind:open={showDeleteConfirm}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>Delete Model?</AlertDialog.Title>
+      <AlertDialog.Description>
+        Are you sure you want to delete "{modelToDelete?.name}"? You will need to download it again
+        to use offline transcription.
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+      <AlertDialog.Action
+        class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+        onclick={deleteModel}
+      >
+        Delete
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

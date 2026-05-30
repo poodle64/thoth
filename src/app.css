@@ -279,13 +279,13 @@ body {
 
 /* Selection */
 ::selection {
-  background: var(--color-accent);
+  background: var(--primary);
   color: white;
 }
 
 /* Focus styles */
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
 
@@ -315,20 +315,6 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* Primary button variant */
-button.primary {
-  background: var(--color-accent);
-  color: white;
-}
-
-button.primary:hover {
-  background: var(--color-accent-hover);
-}
-
-button.primary:active {
-  background: var(--color-accent-active);
-}
-
 /* Input base */
 input,
 textarea,
@@ -355,103 +341,9 @@ textarea::placeholder {
   color: var(--color-text-tertiary);
 }
 
-/* Toggle switch */
-.toggle {
-  position: relative;
-  width: 44px;
-  height: 24px;
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-full);
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.toggle.active {
-  background: var(--color-accent);
-}
-
-.toggle::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 20px;
-  height: 20px;
-  background: white;
-  border-radius: var(--radius-full);
-  transition: transform var(--transition-fast);
-}
-
-.toggle.active::after {
-  transform: translateX(20px);
-}
-
 /* =============================================================================
    Shared Component Styles
    ============================================================================= */
-
-/* Toggle Switch - checkbox-based variant used in settings */
-.toggle-switch {
-  position: relative;
-  width: 40px;
-  height: 22px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--color-border);
-  background-color: var(--color-bg-tertiary);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition:
-    background-color var(--transition-fast),
-    border-color var(--transition-fast);
-}
-
-.toggle-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-  position: absolute;
-}
-
-.toggle-switch .toggle-slider {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.toggle-switch .toggle-slider::before {
-  position: absolute;
-  content: '';
-  height: 16px;
-  width: 16px;
-  top: 2px;
-  left: 2px;
-  background-color: white;
-  border-radius: 50%;
-  transition: transform var(--transition-fast);
-}
-
-.toggle-switch:hover:not(:has(input:disabled)) {
-  border-color: var(--color-text-tertiary);
-}
-
-.toggle-switch:has(input:checked) {
-  background-color: var(--color-accent);
-  border-color: var(--color-accent);
-}
-
-.toggle-switch:has(input:checked):hover:not(:has(input:disabled)) {
-  background-color: var(--color-accent-hover);
-  border-color: var(--color-accent-hover);
-}
-
-.toggle-switch:has(input:checked) .toggle-slider::before {
-  transform: translateX(18px);
-}
-
-.toggle-switch:has(input:disabled) {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 
 /* Setting Row - card layout for settings items */
 .setting-row {
@@ -518,72 +410,6 @@ textarea::placeholder {
   color: var(--color-text-tertiary);
 }
 
-/* Setting group with uppercase label */
-.setting-group {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.setting-group h3,
-.section-heading {
-  margin: 0;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-/* Button variants */
-.btn-small {
-  padding: 4px 12px;
-  font-size: var(--text-xs);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  color: var(--color-text-primary);
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.btn-small:hover {
-  background: var(--color-bg-tertiary);
-}
-
-.btn-icon {
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  color: var(--color-text-tertiary);
-  cursor: pointer;
-  font-size: 14px;
-  border-radius: var(--radius-sm);
-  transition: color var(--transition-fast);
-}
-
-.btn-icon:hover {
-  color: var(--color-text-primary);
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.btn-outline {
-  padding: 4px 12px;
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-accent);
-  font-size: var(--text-xs);
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.btn-outline:hover {
-  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-}
-
 /* Error and status messages */
 .error-message {
   padding: 8px 12px;
@@ -591,112 +417,6 @@ textarea::placeholder {
   border-radius: var(--radius-md);
   color: var(--color-error);
   font-size: var(--text-sm);
-}
-
-.setting-error {
-  padding: 8px 12px;
-  background: color-mix(in srgb, var(--color-error) 10%, transparent);
-  border-radius: var(--radius-sm);
-  color: var(--color-error);
-  font-size: var(--text-xs);
-  margin-top: 8px;
-}
-
-/* Status badges */
-.status-badge {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--text-xs);
-  color: var(--color-text-secondary);
-}
-
-.status-badge.success {
-  color: var(--color-success);
-}
-
-.status-badge.warning {
-  color: var(--color-warning);
-}
-
-.status-badge.error {
-  color: var(--color-error);
-}
-
-/* Status indicator dot */
-.status-indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.status-indicator.connected {
-  background: var(--color-success);
-}
-
-.status-indicator.disconnected {
-  background: var(--color-warning);
-}
-
-.status-indicator.checking {
-  background: var(--color-text-tertiary);
-  animation: pulse 1s ease-in-out infinite;
-}
-
-/* Connection status panel */
-.connection-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
-}
-
-.connection-status.connected {
-  background: color-mix(in srgb, var(--color-success) 10%, transparent);
-  color: var(--color-success);
-}
-
-.connection-status.disconnected {
-  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
-  color: var(--color-warning);
-}
-
-/* Form controls */
-.select-control {
-  padding: 6px 12px;
-  font-size: var(--text-xs);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  color: var(--color-text-primary);
-  cursor: pointer;
-  min-width: 120px;
-}
-
-.select-control:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.text-input {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  font-size: var(--text-sm);
-}
-
-.text-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-.text-input.mono {
-  font-family: var(--font-mono);
 }
 
 /* Hint text */
@@ -716,15 +436,4 @@ textarea::placeholder {
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: 11px;
-}
-
-/* Animations */
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
 }

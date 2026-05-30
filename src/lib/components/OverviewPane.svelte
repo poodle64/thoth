@@ -5,18 +5,21 @@
    * Displays summary cards, model performance, and system status.
    * Data refreshes automatically on each pane visit (component remounts).
    */
-	import { onMount, onDestroy } from 'svelte';
-	import { invoke } from '@tauri-apps/api/core';
-	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-	import { getVersion } from '@tauri-apps/api/app';
-	import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
-	import { configStore } from '../stores/config.svelte';
-	import { settingsStore } from '../stores/settings.svelte';
-	import {
-		formatDuration,
-		formatTotalDuration
-	} from '../utils/format';
-	import { getUpdaterState, checkForUpdate } from '../stores/updater.svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import { invoke } from '@tauri-apps/api/core';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import { getVersion } from '@tauri-apps/api/app';
+  import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
+  import { configStore } from '../stores/config.svelte';
+  import { settingsStore } from '../stores/settings.svelte';
+  import { formatDuration, formatTotalDuration } from '../utils/format';
+  import { getUpdaterState, checkForUpdate } from '../stores/updater.svelte';
+  import { Button } from '$components/ui/button';
+  import { Switch } from '$components/ui/switch';
+  import { Badge } from '$components/ui/badge';
+  import * as Card from '$components/ui/card';
+  import * as AlertDialog from '$components/ui/alert-dialog';
+  import * as Alert from '$components/ui/alert';
 
   interface ModelStats {
     name: string;
@@ -54,25 +57,23 @@
     onNavigate: (paneId: string) => void;
   }
 
-	let { onNavigate }: Props = $props();
+  let { onNavigate }: Props = $props();
 
-	let stats = $state<TranscriptionStats | null>(null);
-	let transcriptionReady = $state(false);
-	let modelDownloaded = $state(false);
-	let isLoading = $state(true);
-	let ollamaStatus = $state<'checking' | 'connected' | 'unavailable' | 'not-configured'>(
-		'checking'
-	);
-	let gpuInfo = $state<GpuInfo | null>(null);
+  let stats = $state<TranscriptionStats | null>(null);
+  let transcriptionReady = $state(false);
+  let modelDownloaded = $state(false);
+  let isLoading = $state(true);
+  let ollamaStatus = $state<'checking' | 'connected' | 'unavailable' | 'not-configured'>(
+    'checking'
+  );
+  let gpuInfo = $state<GpuInfo | null>(null);
 
-	const updaterState = getUpdaterState();
-	let currentVersion = $state('');
+  const updaterState = getUpdaterState();
+  let currentVersion = $state('');
 
   /** Average recording duration */
   let avgRecordingDuration = $derived(
-    stats && stats.analysableCount > 0
-      ? stats.totalAudioDuration / stats.analysableCount
-      : 0
+    stats && stats.analysableCount > 0 ? stats.totalAudioDuration / stats.analysableCount : 0
   );
 
   /** Selected device display name */
@@ -103,8 +104,8 @@
   /** Whether all permissions are granted (and functional) */
   let allPermissionsGranted = $derived(
     microphonePermission === 'granted' &&
-    accessibilityPermission === 'granted' &&
-    inputMonitoringPermission === 'granted'
+      accessibilityPermission === 'granted' &&
+      inputMonitoringPermission === 'granted'
   );
 
   /** TCC reset state */
@@ -118,18 +119,17 @@
 
   let permFixStatus = $state<{ quarantine: string; tcc: string }>({ quarantine: '', tcc: '' });
 
-
-  async function handleAutostartToggle() {
+  async function handleAutostartToggle(checked: boolean) {
     autostartLoading = true;
     autostartError = null;
 
     try {
-      if (autostartEnabled) {
-        await disable();
-        autostartEnabled = false;
-      } else {
+      if (checked) {
         await enable();
         autostartEnabled = true;
+      } else {
+        await disable();
+        autostartEnabled = false;
       }
     } catch (error) {
       autostartError =
@@ -157,12 +157,11 @@
     }
   }
 
-  async function handleDockToggle() {
+  async function handleDockToggle(checked: boolean) {
     dockLoading = true;
     try {
-      const newValue = !showInDock;
-      await invoke('set_show_in_dock', { show: newValue });
-      showInDock = newValue;
+      await invoke('set_show_in_dock', { show: checked });
+      showInDock = checked;
     } catch (error) {
       console.error('Failed to toggle dock visibility:', error);
     } finally {
@@ -221,7 +220,6 @@
   async function resetPermissions(services: string[]) {
     resettingPermissions = true;
     resetError = null;
-
 
     try {
       await invoke<string>('reset_tcc_permissions', { services });
@@ -327,9 +325,12 @@
 
     try {
       // Listen for progress events
-      const progressUn = await listen<{ percentage: number }>('model-download-progress', (event) => {
-        downloadProgress = event.payload.percentage;
-      });
+      const progressUn = await listen<{ percentage: number }>(
+        'model-download-progress',
+        (event) => {
+          downloadProgress = event.payload.percentage;
+        }
+      );
       downloadUnlisteners.push(progressUn);
 
       const completeUn = await listen<string>('model-download-complete', async () => {
@@ -379,7 +380,9 @@
     if (allRequiredDone && !hasShownCelebration && !isLoading) {
       showCelebration = true;
       hasShownCelebration = true;
-      setTimeout(() => { showCelebration = false; }, 3000);
+      setTimeout(() => {
+        showCelebration = false;
+      }, 3000);
     }
   });
 
@@ -392,13 +395,19 @@
   onMount(async () => {
     loadAutostartState();
     loadDockState();
-    getVersion().then((v) => { currentVersion = v; }).catch(() => {});
+    getVersion()
+      .then((v) => {
+        currentVersion = v;
+      })
+      .catch(() => {});
 
     // Listen for permission-changed events from the backend (microphone
     // dialog completion handler fires this for an immediate update).
     listen<string>('permission-changed', () => {
       checkPermissions();
-    }).then((unlisten) => { permissionChangedUnlisten = unlisten; });
+    }).then((unlisten) => {
+      permissionChangedUnlisten = unlisten;
+    });
 
     await checkPermissions();
 
@@ -451,11 +460,14 @@
 </script>
 
 {#if isLoading}
-  <div class="loading">Loading...</div>
+  <div class="flex items-center justify-center p-8 text-muted-foreground text-sm">Loading...</div>
 {:else if stats && stats.totalCount === 0}
   <!-- First-run setup: stepped checklist -->
-  <div class="empty-state" class:celebrating={showCelebration}>
-    <div class="empty-icon">
+  <div
+    class="flex flex-col items-center px-6 pt-8 pb-4 text-center"
+    class:celebrating={showCelebration}
+  >
+    <div class="w-12 h-12 text-muted-foreground mb-4 opacity-50">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <path
           d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"
@@ -470,33 +482,56 @@
       </svg>
     </div>
     {#if allRequiredDone}
-      <p class="empty-title">Ready to go</p>
-      <p class="empty-hint">Press your shortcut key to start recording.</p>
+      <p class="m-0 text-lg font-semibold text-foreground">Ready to go</p>
+      <p class="mt-1.5 text-sm text-muted-foreground">
+        Press your shortcut key to start recording.
+      </p>
     {:else}
-      <p class="empty-title">Set up Thoth</p>
-      <p class="empty-hint">Three quick steps and you're recording.</p>
+      <p class="m-0 text-lg font-semibold text-foreground">Set up Thoth</p>
+      <p class="mt-1.5 text-sm text-muted-foreground">Three quick steps and you're recording.</p>
     {/if}
   </div>
 
   <!-- Setup steps -->
-  <div class="setup-checklist">
+  <div class="flex flex-col gap-3">
     <!-- Step 1: Download speech model -->
-    <div class="setup-step" class:completed={modelStepDone}>
-      <div class="step-indicator" class:pending={!modelStepDone} class:done={modelStepDone}>
+    <div
+      class={[
+        'flex gap-3.5 p-4 bg-secondary border rounded-md transition-colors',
+        modelStepDone && 'border-green-500/30',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      <div
+        class={[
+          'w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-semibold',
+          !modelStepDone && 'bg-muted text-muted-foreground',
+          modelStepDone && 'bg-green-500/15 text-green-600',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
         {#if modelStepDone}
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+          <svg
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="w-3.5 h-3.5"
+          >
             <path d="M3 8.5l3.5 3.5 6.5-7" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         {:else}
           1
         {/if}
       </div>
-      <div class="step-body">
-        <p class="step-title">Download speech model</p>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-semibold text-foreground m-0 mb-1">Download speech model</p>
         {#if modelStepDone}
-          <p class="step-description done">Model ready</p>
+          <p class="text-sm text-muted-foreground m-0">Model ready</p>
         {:else}
-          <p class="step-description">
+          <p class="text-sm text-muted-foreground m-0 mb-3 leading-snug">
             {#if setupState === 'downloading'}
               Downloading... {Math.round(downloadProgress)}%
             {:else if setupState === 'initialising'}
@@ -517,19 +552,15 @@
             </div>
           {/if}
           {#if setupState === 'needed'}
-            <div class="step-actions">
-              <button class="btn-setup" onclick={downloadRecommendedModel}>
-                Download Recommended Model
-              </button>
-              <button class="btn-setup-alt" onclick={() => onNavigate('models')}>
+            <div class="flex gap-2.5 items-center mt-3">
+              <Button onclick={downloadRecommendedModel}>Download Recommended Model</Button>
+              <Button variant="ghost" onclick={() => onNavigate('models')}>
                 Choose a different model
-              </button>
+              </Button>
             </div>
           {:else if setupState === 'error'}
-            <div class="step-actions">
-              <button class="btn-setup" onclick={retryDownload}>
-                Retry Download
-              </button>
+            <div class="flex gap-2.5 items-center mt-3">
+              <Button onclick={retryDownload}>Retry Download</Button>
             </div>
           {/if}
         {/if}
@@ -537,34 +568,81 @@
     </div>
 
     <!-- Step 2: Allow microphone -->
-    <div class="setup-step" class:completed={micStepDone}>
-      <div class="step-indicator" class:pending={!micStepDone} class:done={micStepDone}>
+    <div
+      class={[
+        'flex gap-3.5 p-4 bg-secondary border rounded-md transition-colors',
+        micStepDone && 'border-green-500/30',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      <div
+        class={[
+          'w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-semibold',
+          !micStepDone && 'bg-muted text-muted-foreground',
+          micStepDone && 'bg-green-500/15 text-green-600',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
         {#if micStepDone}
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+          <svg
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="w-3.5 h-3.5"
+          >
             <path d="M3 8.5l3.5 3.5 6.5-7" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         {:else}
           2
         {/if}
       </div>
-      <div class="step-body">
-        <p class="step-title">Allow microphone access</p>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-semibold text-foreground m-0 mb-1">Allow microphone access</p>
         {#if micStepDone}
-          <p class="step-description done">Microphone access granted</p>
+          <p class="text-sm text-muted-foreground m-0">Microphone access granted</p>
         {:else}
-          <p class="step-description">Thoth needs to hear you to transcribe your speech.</p>
-          <div class="step-actions">
-            <button class="btn-setup" onclick={() => requestPermission('request_microphone_permission')}>Allow</button>
+          <p class="text-sm text-muted-foreground m-0 mb-3 leading-snug">
+            Thoth needs to hear you to transcribe your speech.
+          </p>
+          <div class="flex gap-2.5 items-center">
+            <Button onclick={() => requestPermission('request_microphone_permission')}>Allow</Button
+            >
           </div>
         {/if}
       </div>
     </div>
 
     <!-- Step 3: Allow global shortcut -->
-    <div class="setup-step" class:completed={shortcutStepDone} class:stale={accessibilityStale}>
-      <div class="step-indicator" class:pending={!shortcutStepDone && !accessibilityStale} class:done={shortcutStepDone} class:warn={accessibilityStale}>
+    <div
+      class={[
+        'flex gap-3.5 p-4 bg-secondary border rounded-md transition-colors',
+        shortcutStepDone && 'border-green-500/30',
+        accessibilityStale && 'border-yellow-500/40',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      <div
+        class={[
+          'w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-semibold',
+          !shortcutStepDone && !accessibilityStale && 'bg-muted text-muted-foreground',
+          shortcutStepDone && 'bg-green-500/15 text-green-600',
+          accessibilityStale && 'bg-yellow-500/15 text-yellow-600 font-bold',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
         {#if shortcutStepDone}
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+          <svg
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="w-3.5 h-3.5"
+          >
             <path d="M3 8.5l3.5 3.5 6.5-7" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         {:else if accessibilityStale}
@@ -573,24 +651,33 @@
           3
         {/if}
       </div>
-      <div class="step-body">
-        <p class="step-title">Allow global shortcut</p>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-semibold text-foreground m-0 mb-1">Allow global shortcut</p>
         {#if shortcutStepDone}
-          <p class="step-description done">Shortcut access granted</p>
+          <p class="text-sm text-muted-foreground m-0">Shortcut access granted</p>
         {:else if accessibilityStale}
-          <p class="step-description stale-warning">Permission appears granted but isn't working. This can happen after app updates or reinstalls.</p>
-          <div class="step-actions">
-            <button class="btn-setup warning" onclick={() => resetPermissions(['Accessibility', 'ListenEvent'])} disabled={resettingPermissions}>
+          <p class="text-sm text-yellow-600 m-0 mb-3 leading-snug">
+            Permission appears granted but isn't working. This can happen after app updates or
+            reinstalls.
+          </p>
+          <div class="flex gap-2.5 items-center">
+            <Button
+              variant="destructive"
+              onclick={() => resetPermissions(['Accessibility', 'ListenEvent'])}
+              disabled={resettingPermissions}
+            >
               {resettingPermissions ? 'Resetting...' : 'Reset & Re-grant'}
-            </button>
+            </Button>
           </div>
           {#if resetError}
-            <p class="step-error">{resetError}</p>
+            <p class="mt-1.5 text-xs text-destructive">{resetError}</p>
           {/if}
         {:else}
-          <p class="step-description">Lets you start recording from anywhere with a keyboard shortcut.</p>
-          <div class="step-actions">
-            <button class="btn-setup" onclick={() => requestPermission('request_accessibility')}>Allow</button>
+          <p class="text-sm text-muted-foreground m-0 mb-3 leading-snug">
+            Lets you start recording from anywhere with a keyboard shortcut.
+          </p>
+          <div class="flex gap-2.5 items-center">
+            <Button onclick={() => requestPermission('request_accessibility')}>Allow</Button>
           </div>
         {/if}
       </div>
@@ -598,37 +685,50 @@
   </div>
 
   <!-- Optional settings -->
-  <details class="optional-section">
+  <details class="mt-2">
     <summary class="optional-summary">Optional settings</summary>
-    <div class="optional-content">
-      <div class="status-row">
+    <div class="mt-2 p-3.5 bg-secondary border rounded-md flex flex-col gap-0.5">
+      <div class="flex items-center gap-2.5 py-1.5">
         <span
-          class="status-dot"
-          class:ready={inputMonitoringPermission === 'granted'}
-          class:warning={inputMonitoringPermission === 'denied'}
+          class="w-2 h-2 rounded-full flex-shrink-0"
+          class:bg-green-500={inputMonitoringPermission === 'granted'}
+          class:bg-yellow-500={inputMonitoringPermission === 'denied'}
+          class:bg-muted-foreground={inputMonitoringPermission === 'unknown'}
         ></span>
-        <span class="status-label">Input Monitoring</span>
-        <span class="status-value">
+        <span class="text-sm text-muted-foreground w-[110px] flex-shrink-0">Input Monitoring</span>
+        <span class="text-sm text-foreground font-medium">
           {#if inputMonitoringPermission === 'granted'}
             Granted
           {:else}
-            <button class="btn-small" onclick={() => requestPermission('request_input_monitoring')}>Grant Access</button>
+            <Button
+              size="sm"
+              variant="outline"
+              onclick={() => requestPermission('request_input_monitoring')}
+            >
+              Grant Access
+            </Button>
           {/if}
         </span>
       </div>
       {#if inputMonitoringPermission !== 'granted'}
-        <p class="permission-hint">Needed only if you want to customise the recording shortcut</p>
+        <p class="text-xs text-muted-foreground ml-[18px] -mt-0.5 mb-1 leading-snug">
+          Needed only if you want to customise the recording shortcut
+        </p>
       {/if}
-      <div class="status-row">
+      <div class="flex items-center gap-2.5 py-1.5">
         <span
-          class="status-dot"
-          class:ready={ollamaStatus === 'connected'}
-          class:not-configured={ollamaStatus === 'not-configured'}
-          class:warning={ollamaStatus === 'unavailable'}
-          class:checking={ollamaStatus === 'checking'}
+          class={[
+            'w-2 h-2 rounded-full flex-shrink-0',
+            ollamaStatus === 'connected' && 'bg-green-500',
+            ollamaStatus === 'not-configured' && 'bg-muted-foreground',
+            ollamaStatus === 'unavailable' && 'bg-yellow-500',
+            ollamaStatus === 'checking' && 'animate-pulse bg-muted-foreground/50',
+          ]
+            .filter(Boolean)
+            .join(' ')}
         ></span>
-        <span class="status-label">AI Enhancement</span>
-        <span class="status-value">
+        <span class="text-sm text-muted-foreground w-[110px] flex-shrink-0">AI Enhancement</span>
+        <span class="text-sm text-foreground font-medium">
           {#if ollamaStatus === 'checking'}
             Checking...
           {:else if ollamaStatus === 'connected'}
@@ -640,32 +740,22 @@
           {/if}
         </span>
       </div>
-      <div class="autostart-row">
-        <span class="status-label">Launch at Login</span>
-        <label class="toggle-switch">
-          <input
-            type="checkbox"
-            checked={autostartEnabled}
-            disabled={autostartLoading}
-            onchange={handleAutostartToggle}
-          />
-          <span class="toggle-slider"></span>
-        </label>
+      <div class="flex items-center justify-between py-1.5">
+        <span class="text-sm text-muted-foreground">Launch at Login</span>
+        <Switch
+          checked={autostartEnabled}
+          disabled={autostartLoading}
+          onCheckedChange={handleAutostartToggle}
+        />
       </div>
       {#if autostartError}
-        <div class="setting-error">{autostartError}</div>
+        <Alert.Root variant="destructive" class="mt-1">
+          <Alert.Description>{autostartError}</Alert.Description>
+        </Alert.Root>
       {/if}
-      <div class="autostart-row">
-        <span class="status-label">Show in Dock</span>
-        <label class="toggle-switch">
-          <input
-            type="checkbox"
-            checked={showInDock}
-            disabled={dockLoading}
-            onchange={handleDockToggle}
-          />
-          <span class="toggle-slider"></span>
-        </label>
+      <div class="flex items-center justify-between py-1.5">
+        <span class="text-sm text-muted-foreground">Show in Dock</span>
+        <Switch checked={showInDock} disabled={dockLoading} onCheckedChange={handleDockToggle} />
       </div>
     </div>
   </details>
@@ -676,23 +766,47 @@
       <h2 class="section-title">Summary</h2>
     </div>
     <div class="section-content">
-      <div class="cards">
-        <div class="card">
-          <span class="card-value">{stats.totalCount}</span>
-          <span class="card-label">Transcriptions</span>
-        </div>
-        <div class="card">
-          <span class="card-value">{formatTotalDuration(stats.totalAudioDuration)}</span>
-          <span class="card-label">Total audio</span>
-        </div>
-        <div class="card">
-          <span class="card-value">{stats.enhancedCount}</span>
-          <span class="card-label">Enhanced</span>
-        </div>
-        <div class="card">
-          <span class="card-value">{avgRecordingDuration > 0 ? formatDuration(avgRecordingDuration) : '--'}</span>
-          <span class="card-label">Avg recording</span>
-        </div>
+      <div class="grid grid-cols-2 gap-2.5">
+        <Card.Root>
+          <Card.Content class="p-4">
+            <span
+              class="text-[22px] font-semibold text-foreground tabular-nums leading-tight block"
+            >
+              {stats.totalCount}
+            </span>
+            <span class="text-xs text-muted-foreground mt-1 block">Transcriptions</span>
+          </Card.Content>
+        </Card.Root>
+        <Card.Root>
+          <Card.Content class="p-4">
+            <span
+              class="text-[22px] font-semibold text-foreground tabular-nums leading-tight block"
+            >
+              {formatTotalDuration(stats.totalAudioDuration)}
+            </span>
+            <span class="text-xs text-muted-foreground mt-1 block">Total audio</span>
+          </Card.Content>
+        </Card.Root>
+        <Card.Root>
+          <Card.Content class="p-4">
+            <span
+              class="text-[22px] font-semibold text-foreground tabular-nums leading-tight block"
+            >
+              {stats.enhancedCount}
+            </span>
+            <span class="text-xs text-muted-foreground mt-1 block">Enhanced</span>
+          </Card.Content>
+        </Card.Root>
+        <Card.Root>
+          <Card.Content class="p-4">
+            <span
+              class="text-[22px] font-semibold text-foreground tabular-nums leading-tight block"
+            >
+              {avgRecordingDuration > 0 ? formatDuration(avgRecordingDuration) : '--'}
+            </span>
+            <span class="text-xs text-muted-foreground mt-1 block">Avg recording</span>
+          </Card.Content>
+        </Card.Root>
       </div>
     </div>
   </section>
@@ -715,11 +829,11 @@
             {#if updaterState.state === 'checking'}
               Checking...
             {:else if updaterState.state === 'available'}
-              <span class="status-update-available">Update available: {updaterState.updateVersion}</span>
+              <Badge variant="default">Update available: {updaterState.updateVersion}</Badge>
             {:else if updaterState.state === 'up-to-date'}
               Up to date
             {:else if updaterState.state === 'error'}
-              <span class="status-error">{updaterState.error || 'Check failed'}</span>
+              <Badge variant="destructive">{updaterState.error || 'Check failed'}</Badge>
             {:else}
               Not checked
             {/if}
@@ -727,16 +841,12 @@
         </div>
         <div class="autostart-row">
           <span class="status-label">Check on Launch</span>
-          <label class="toggle-switch">
-            <input
-              type="checkbox"
-              bind:checked={configStore.general.checkForUpdates}
-              onchange={async () => {
-                await configStore.save();
-              }}
-            />
-            <span class="toggle-slider"></span>
-          </label>
+          <Switch
+            bind:checked={configStore.general.checkForUpdates}
+            onCheckedChange={async () => {
+              await configStore.save();
+            }}
+          />
         </div>
         <div class="autostart-row">
           <span class="status-label">
@@ -746,13 +856,14 @@
               Check Now
             {/if}
           </span>
-          <button
-            class="btn-small"
+          <Button
+            size="sm"
+            variant="outline"
             onclick={() => checkForUpdate()}
             disabled={updaterState.state === 'checking'}
           >
             {updaterState.state === 'checking' ? 'Checking...' : 'Check for Updates'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -838,7 +949,12 @@
           <span class="status-value truncate">{deviceName}</span>
         </div>
         <div class="status-row">
-          <span class="status-dot" class:ready={allPermissionsGranted} class:warning={!allPermissionsGranted && accessibilityPermission !== 'stale'} class:stale={accessibilityPermission === 'stale'}></span>
+          <span
+            class="status-dot"
+            class:ready={allPermissionsGranted}
+            class:warning={!allPermissionsGranted && accessibilityPermission !== 'stale'}
+            class:stale={accessibilityPermission === 'stale'}
+          ></span>
           <span class="status-label">Permissions</span>
           <span class="status-value">
             {#if allPermissionsGranted}
@@ -850,85 +966,92 @@
                 microphonePermission !== 'granted' ? 'Mic' : '',
                 accessibilityPermission !== 'granted' ? 'Accessibility' : '',
                 inputMonitoringPermission !== 'granted' ? 'Input Monitoring' : '',
-              ].filter(Boolean).join(', ')} needed
+              ]
+                .filter(Boolean)
+                .join(', ')} needed
             {/if}
           </span>
         </div>
         {#if accessibilityPermission === 'stale'}
           <div class="stale-recovery">
             <p class="stale-recovery-desc">
-              Accessibility appears granted in System Settings but isn't working — common after an app update or reinstall. Reset clears the stale entry so macOS will prompt again.
+              Accessibility appears granted in System Settings but isn't working — common after an
+              app update or reinstall. Reset clears the stale entry so macOS will prompt again.
             </p>
             <div class="stale-recovery-actions">
-              <button
-                class="btn-small warning"
+              <Button
+                variant="destructive"
+                size="sm"
                 onclick={handleResetAccessibility}
                 disabled={resettingAccessibility}
               >
                 {resettingAccessibility ? 'Resetting...' : 'Reset Accessibility Permission'}
-              </button>
-              <button class="btn-small" onclick={() => invoke('open_privacy_pane', { pane: 'accessibility' })}>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onclick={() => invoke('open_privacy_pane', { pane: 'accessibility' })}
+              >
                 Open System Settings
-              </button>
+              </Button>
             </div>
             {#if resetAccessibilityMessage}
-              <p class="stale-recovery-ok">{resetAccessibilityMessage} — re-enable Thoth in System Settings → Privacy &amp; Security → Accessibility.</p>
+              <p class="stale-recovery-ok">
+                {resetAccessibilityMessage} — re-enable Thoth in System Settings &rarr; Privacy &amp;
+                Security &rarr; Accessibility.
+              </p>
             {/if}
             {#if resetAccessibilityError}
-              <p class="step-error">{resetAccessibilityError}</p>
+              <p class="mt-1.5 text-xs text-destructive">{resetAccessibilityError}</p>
             {/if}
           </div>
         {/if}
         <div class="autostart-row">
           <span class="status-label">Launch at Login</span>
-          <label class="toggle-switch">
-            <input
-              type="checkbox"
-              checked={autostartEnabled}
-              disabled={autostartLoading}
-              onchange={handleAutostartToggle}
-            />
-            <span class="toggle-slider"></span>
-          </label>
+          <Switch
+            checked={autostartEnabled}
+            disabled={autostartLoading}
+            onCheckedChange={handleAutostartToggle}
+          />
         </div>
         {#if autostartError}
-          <div class="setting-error">{autostartError}</div>
+          <Alert.Root variant="destructive" class="my-1">
+            <Alert.Description>{autostartError}</Alert.Description>
+          </Alert.Root>
         {/if}
         <div class="autostart-row">
           <span class="status-label">Show in Dock</span>
-          <label class="toggle-switch">
-            <input
-              type="checkbox"
-              checked={showInDock}
-              disabled={dockLoading}
-              onchange={handleDockToggle}
-            />
-            <span class="toggle-slider"></span>
-          </label>
+          <Switch checked={showInDock} disabled={dockLoading} onCheckedChange={handleDockToggle} />
         </div>
       </div>
     </div>
   </section>
 
   <!-- Troubleshooting (advanced) -->
-  <details class="optional-section">
+  <details class="mt-2">
     <summary class="optional-summary">Troubleshooting</summary>
-    <div class="optional-content">
-      <p class="troubleshoot-description">
-        After installing a new version of Thoth, macOS may block it or hold onto stale permission entries.
-        Run these steps in order — each one takes about 2 seconds.
+    <div class="mt-2 p-3.5 bg-secondary border rounded-md flex flex-col gap-2">
+      <p class="text-sm text-muted-foreground leading-snug m-0">
+        After installing a new version of Thoth, macOS may block it or hold onto stale permission
+        entries. Run these steps in order — each one takes about 2 seconds.
       </p>
 
       <!-- Step 1: Quarantine -->
-      <div class="fix-step">
-        <div class="fix-step-header">
-          <span class="fix-step-num">1</span>
-          <div class="fix-step-info">
-            <span class="fix-step-title">Remove quarantine flag</span>
-            <span class="fix-step-desc">macOS marks downloaded apps as quarantined. Removes the "are you sure?" block.</span>
+      <div class="bg-card border rounded-md p-2.5 mb-0">
+        <div class="flex items-center gap-2.5">
+          <span
+            class="w-[22px] h-[22px] rounded-full bg-primary text-primary-foreground text-[11px] font-bold flex items-center justify-center flex-shrink-0"
+            >1</span
+          >
+          <div class="flex-1 flex flex-col gap-0.5">
+            <span class="text-sm font-medium text-foreground">Remove quarantine flag</span>
+            <span class="text-xs text-muted-foreground leading-snug">
+              macOS marks downloaded apps as quarantined. Removes the "are you sure?" block.
+            </span>
           </div>
-          <button
-            class="btn-small"
+          <Button
+            size="sm"
+            variant="outline"
             onclick={async () => {
               try {
                 await invoke('remove_quarantine');
@@ -938,85 +1061,150 @@
               }
             }}
           >
-            {permFixStatus.quarantine === 'done' ? '✓ Done' : permFixStatus.quarantine === 'error' ? '✗ Error' : 'Fix'}
-          </button>
+            {permFixStatus.quarantine === 'done'
+              ? '✓ Done'
+              : permFixStatus.quarantine === 'error'
+                ? '✗ Error'
+                : 'Fix'}
+          </Button>
         </div>
       </div>
 
       <!-- Step 2: Reset all TCC -->
-      <div class="fix-step">
-        <div class="fix-step-header">
-          <span class="fix-step-num">2</span>
-          <div class="fix-step-info">
-            <span class="fix-step-title">Reset system permissions</span>
-            <span class="fix-step-desc">Clears stale grants for Input Monitoring, Accessibility, and Microphone. macOS will re-prompt for each one.</span>
+      <AlertDialog.Root>
+        <div class="bg-card border rounded-md p-2.5 mb-0">
+          <div class="flex items-center gap-2.5">
+            <span
+              class="w-[22px] h-[22px] rounded-full bg-primary text-primary-foreground text-[11px] font-bold flex items-center justify-center flex-shrink-0"
+              >2</span
+            >
+            <div class="flex-1 flex flex-col gap-0.5">
+              <span class="text-sm font-medium text-foreground">Reset system permissions</span>
+              <span class="text-xs text-muted-foreground leading-snug">
+                Clears stale grants for Input Monitoring, Accessibility, and Microphone. macOS will
+                re-prompt for each one.
+              </span>
+            </div>
+            <AlertDialog.Trigger>
+              {#snippet child({ props })}
+                <Button size="sm" variant="destructive" {...props}>
+                  {permFixStatus.tcc === 'done'
+                    ? '✓ Done'
+                    : permFixStatus.tcc === 'error'
+                      ? '✗ Error'
+                      : 'Reset'}
+                </Button>
+              {/snippet}
+            </AlertDialog.Trigger>
           </div>
-          <button
-            class="btn-small warning"
-            onclick={async () => {
-              try {
-                await invoke('reset_tcc_permissions', { services: ['ListenEvent', 'Accessibility', 'Microphone'] });
-                permFixStatus.tcc = 'done';
-              } catch (e) {
-                permFixStatus.tcc = 'error';
-              }
-            }}
-          >
-            {permFixStatus.tcc === 'done' ? '✓ Done' : permFixStatus.tcc === 'error' ? '✗ Error' : 'Reset'}
-          </button>
         </div>
-      </div>
+        <AlertDialog.Portal>
+          <AlertDialog.Overlay />
+          <AlertDialog.Content>
+            <AlertDialog.Header>
+              <AlertDialog.Title>Reset System Permissions?</AlertDialog.Title>
+              <AlertDialog.Description>
+                This will clear Input Monitoring, Accessibility, and Microphone grants. macOS will
+                re-prompt for each permission. You will need to re-grant access before Thoth can
+                record again.
+              </AlertDialog.Description>
+            </AlertDialog.Header>
+            <AlertDialog.Footer>
+              <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+              <AlertDialog.Action
+                onclick={async () => {
+                  try {
+                    await invoke('reset_tcc_permissions', {
+                      services: ['ListenEvent', 'Accessibility', 'Microphone'],
+                    });
+                    permFixStatus.tcc = 'done';
+                  } catch (e) {
+                    permFixStatus.tcc = 'error';
+                  }
+                }}
+              >
+                Reset Permissions
+              </AlertDialog.Action>
+            </AlertDialog.Footer>
+          </AlertDialog.Content>
+        </AlertDialog.Portal>
+      </AlertDialog.Root>
 
       <!-- Step 3: Open privacy panes -->
-      <div class="fix-step">
-        <div class="fix-step-header">
-          <span class="fix-step-num">3</span>
-          <div class="fix-step-info">
-            <span class="fix-step-title">Open Privacy &amp; Security</span>
-            <span class="fix-step-desc">Opens the two panels where you'll re-grant permissions after relaunching Thoth.</span>
+      <div class="bg-card border rounded-md p-2.5 mb-0">
+        <div class="flex items-center gap-2.5">
+          <span
+            class="w-[22px] h-[22px] rounded-full bg-primary text-primary-foreground text-[11px] font-bold flex items-center justify-center flex-shrink-0"
+            >3</span
+          >
+          <div class="flex-1 flex flex-col gap-0.5">
+            <span class="text-sm font-medium text-foreground">Open Privacy &amp; Security</span>
+            <span class="text-xs text-muted-foreground leading-snug">
+              Opens the two panels where you'll re-grant permissions after relaunching Thoth.
+            </span>
           </div>
-          <div style="display:flex;gap:4px">
-            <button class="btn-small" onclick={() => invoke('open_privacy_pane', { pane: 'accessibility' })}>
+          <div class="flex gap-1">
+            <Button
+              size="sm"
+              variant="outline"
+              onclick={() => invoke('open_privacy_pane', { pane: 'accessibility' })}
+            >
               Accessibility
-            </button>
-            <button class="btn-small" onclick={() => invoke('open_privacy_pane', { pane: 'input-monitoring' })}>
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onclick={() => invoke('open_privacy_pane', { pane: 'input-monitoring' })}
+            >
               Input Monitoring
-            </button>
+            </Button>
           </div>
         </div>
       </div>
 
       <!-- Step 4: Quit and relaunch -->
-      <div class="fix-step">
-        <div class="fix-step-header">
-          <span class="fix-step-num">4</span>
-          <div class="fix-step-info">
-            <span class="fix-step-title">Quit &amp; relaunch Thoth</span>
-            <span class="fix-step-desc">Restart the app so macOS re-prompts for each permission. Click Allow in each dialog.</span>
+      <div class="bg-card border rounded-md p-2.5 mb-0">
+        <div class="flex items-center gap-2.5">
+          <span
+            class="w-[22px] h-[22px] rounded-full bg-primary text-primary-foreground text-[11px] font-bold flex items-center justify-center flex-shrink-0"
+            >4</span
+          >
+          <div class="flex-1 flex flex-col gap-0.5">
+            <span class="text-sm font-medium text-foreground">Quit &amp; relaunch Thoth</span>
+            <span class="text-xs text-muted-foreground leading-snug">
+              Restart the app so macOS re-prompts for each permission. Click Allow in each dialog.
+            </span>
           </div>
-          <button
-            class="btn-small"
+          <Button
+            size="sm"
+            variant="outline"
             onclick={async () => {
               await invoke('relaunch_app').catch(() => {});
             }}
           >
             Relaunch
-          </button>
+          </Button>
         </div>
       </div>
 
       {#if resetError}
-        <p class="step-error">{resetError}</p>
+        <p class="mt-1.5 text-xs text-destructive">{resetError}</p>
       {/if}
 
-      <details class="manual-fix-details">
-        <summary class="manual-fix-summary">Manual fix (Terminal)</summary>
-        <div class="manual-fix">
-          <code class="manual-fix-code">xattr -dr com.apple.quarantine /Applications/Thoth.app</code>
+      <details class="mt-2">
+        <summary class="text-xs text-muted-foreground cursor-pointer">
+          Manual fix (Terminal)
+        </summary>
+        <div class="mt-2 p-2.5 bg-muted rounded-sm">
+          <code class="manual-fix-code">xattr -dr com.apple.quarantine /Applications/Thoth.app</code
+          >
           <code class="manual-fix-code">tccutil reset ListenEvent com.poodle64.thoth</code>
           <code class="manual-fix-code">tccutil reset Accessibility com.poodle64.thoth</code>
           <code class="manual-fix-code">tccutil reset Microphone com.poodle64.thoth</code>
-          <p class="manual-fix-hint">Then restart Thoth and re-grant permissions in System Settings → Privacy &amp; Security.</p>
+          <p class="mt-1.5 text-xs text-muted-foreground">
+            Then restart Thoth and re-grant permissions in System Settings &rarr; Privacy &amp;
+            Security.
+          </p>
         </div>
       </details>
     </div>
@@ -1024,138 +1212,24 @@
 {/if}
 
 <style>
-  .loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--spacing-xl);
-    color: var(--color-text-tertiary);
-    font-size: var(--text-sm);
-  }
-
-  /* Empty state */
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 32px 24px;
-    text-align: center;
-  }
-
-  .empty-icon {
-    width: 48px;
-    height: 48px;
-    color: var(--color-text-tertiary);
-    margin-bottom: 16px;
-    opacity: 0.5;
-  }
-
-  .empty-icon svg {
-    width: 100%;
-    height: 100%;
-  }
-
-  .empty-title {
-    margin: 0;
-    font-size: var(--text-lg);
-    font-weight: 600;
-    color: var(--color-text-primary);
-  }
-
-  .empty-hint {
-    margin: 6px 0 0;
-    font-size: var(--text-sm);
-    color: var(--color-text-tertiary);
-  }
-
-  /* Setup checklist */
-  .setup-checklist {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .setup-step {
-    display: flex;
-    gap: 14px;
-    padding: 16px;
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-md);
-    transition: border-color var(--transition-normal);
-  }
-
-  .setup-step.completed {
-    border-color: color-mix(in srgb, var(--color-success) 30%, var(--color-border-subtle));
-  }
-
-  .step-indicator {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    font-size: var(--text-sm);
-    font-weight: 600;
-  }
-
-  .step-indicator svg {
-    width: 14px;
-    height: 14px;
-  }
-
-  .step-indicator.pending {
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-secondary);
-  }
-
-  .step-indicator.done {
-    background: color-mix(in srgb, var(--color-success) 15%, var(--color-bg-secondary));
-    color: var(--color-success);
-  }
-
-  .step-body {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .step-title {
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--color-text-primary);
-    margin: 0 0 4px 0;
-  }
-
-  .step-description {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    margin: 0 0 12px 0;
-    line-height: 1.4;
-  }
-
-  .step-description.done {
-    color: var(--color-text-tertiary);
-    margin-bottom: 0;
-  }
-
-  /* Celebration */
-  .empty-state.celebrating .empty-title {
+  /* Celebration animation */
+  .celebrating :global(.empty-title) {
     animation: celebrateText 0.6s ease-out;
   }
 
   @keyframes celebrateText {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.05); color: var(--color-success); }
-    100% { transform: scale(1); }
+    0% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.05);
+    }
+    100% {
+      transform: scale(1);
+    }
   }
 
-  /* Optional settings */
-  .optional-section {
-    margin-top: 8px;
-  }
-
+  /* Optional settings summary toggle */
   .optional-summary {
     font-size: var(--text-xs);
     font-weight: 600;
@@ -1178,16 +1252,7 @@
     transform: rotate(90deg);
   }
 
-  .optional-content {
-    padding: 8px 14px;
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-md);
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
+  /* Progress bar (kept as bespoke — not a shadcn primitive) */
   .progress-bar {
     height: 6px;
     background: var(--color-bg-tertiary);
@@ -1208,84 +1273,15 @@
   }
 
   @keyframes indeterminate {
-    0% { transform: translateX(-100%); }
-    100% { transform: translateX(350%); }
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(350%);
+    }
   }
 
-  .step-actions {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-  }
-
-  .btn-setup {
-    padding: 8px 16px;
-    font-size: var(--text-sm);
-    font-weight: 500;
-    background: var(--color-accent);
-    color: white;
-    border: none;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: background var(--transition-fast);
-  }
-
-  .btn-setup:hover {
-    background: var(--color-accent-hover);
-  }
-
-  .btn-setup-alt {
-    padding: 8px 12px;
-    font-size: var(--text-sm);
-    background: none;
-    border: none;
-    color: var(--color-text-secondary);
-    cursor: pointer;
-    transition: color var(--transition-fast);
-  }
-
-  .btn-setup-alt:hover {
-    color: var(--color-text-primary);
-  }
-
-  /* Summary cards */
-  .cards {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
-  }
-
-  .card {
-    display: flex;
-    flex-direction: column;
-    padding: 14px 16px;
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-md);
-  }
-
-  .card-value {
-    font-size: 22px;
-    font-weight: 600;
-    color: var(--color-text-primary);
-    font-variant-numeric: tabular-nums;
-    line-height: 1.2;
-  }
-
-  .card-label {
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
-    margin-top: 4px;
-  }
-
-  /* Truncation */
-  .truncate {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  /* System status */
+  /* System status list */
   .status-list {
     display: flex;
     flex-direction: column;
@@ -1323,9 +1319,23 @@
     background: var(--color-warning);
   }
 
+  .status-dot.stale {
+    background: var(--color-warning);
+  }
+
   .status-dot.checking {
     background: var(--color-text-tertiary);
     animation: pulse 1s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
   }
 
   .status-label {
@@ -1342,13 +1352,6 @@
     min-width: 0;
   }
 
-  .permission-hint {
-    margin: -2px 0 4px 18px;
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
-    line-height: 1.3;
-  }
-
   .autostart-row {
     display: flex;
     align-items: center;
@@ -1356,14 +1359,11 @@
     padding: 6px 0;
   }
 
-  @keyframes pulse {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.4;
-    }
+  /* Truncation */
+  .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* GPU info display */
@@ -1396,136 +1396,7 @@
     color: var(--color-text-tertiary);
   }
 
-  .step-indicator.warn {
-    background: color-mix(in srgb, var(--color-warning) 15%, var(--color-bg-secondary));
-    color: var(--color-warning);
-    font-weight: 700;
-  }
-
-  .setup-step.stale {
-    border-color: color-mix(in srgb, var(--color-warning) 40%, var(--color-border-subtle));
-  }
-
-  .stale-warning {
-    color: var(--color-warning) !important;
-  }
-
-  .btn-setup.warning,
-  .btn-small.warning {
-    background: var(--color-warning);
-    color: var(--color-bg-primary, #1a1a1a);
-  }
-
-  .btn-setup.warning:hover,
-  .btn-small.warning:hover {
-    background: color-mix(in srgb, var(--color-warning) 85%, black);
-  }
-
-  .step-error {
-    margin: 6px 0 0;
-    font-size: var(--text-xs);
-    color: var(--color-error, #ef4444);
-  }
-
-  /* Manual fix */
-  .manual-fix {
-    margin-top: 8px;
-    padding: 10px 12px;
-    background: var(--color-bg-tertiary);
-    border-radius: var(--radius-sm);
-  }
-
-  .manual-fix-code {
-    display: block;
-    margin-bottom: 4px;
-    padding: 8px 10px;
-    background: var(--color-bg-primary);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-sm);
-    font-family: var(--font-mono, 'SF Mono', 'Fira Code', monospace);
-    font-size: 11px;
-    color: var(--color-text-primary);
-    word-break: break-all;
-    user-select: all;
-    cursor: text;
-  }
-
-  .manual-fix-hint {
-    margin: 6px 0 0;
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
-  }
-
-  .manual-fix-details {
-    margin-top: 8px;
-  }
-
-  .manual-fix-summary {
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
-    cursor: pointer;
-  }
-
-  /* Troubleshooting section */
-  .troubleshoot-description {
-    margin: 0 0 12px;
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    line-height: 1.4;
-  }
-
-  .fix-step {
-    background: var(--color-bg-tertiary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    padding: 10px 12px;
-    margin-bottom: 8px;
-  }
-
-  .fix-step-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .fix-step-num {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: var(--color-accent);
-    color: var(--color-bg);
-    font-size: 11px;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-
-  .fix-step-info {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .fix-step-title {
-    font-size: var(--text-sm);
-    font-weight: 500;
-    color: var(--color-text-primary);
-  }
-
-  .fix-step-desc {
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
-    line-height: 1.3;
-  }
-
-  .status-dot.stale {
-    background: var(--color-warning);
-  }
-
-  /* Stale accessibility recovery block (in System section) */
+  /* Stale accessibility recovery block */
   .stale-recovery {
     padding: 10px 12px;
     margin: 2px 0 4px;
@@ -1554,4 +1425,19 @@
     line-height: 1.4;
   }
 
+  /* Manual fix terminal code */
+  .manual-fix-code {
+    display: block;
+    margin-bottom: 4px;
+    padding: 8px 10px;
+    background: var(--color-bg-primary);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono, 'SF Mono', 'Fira Code', monospace);
+    font-size: 11px;
+    color: var(--color-text-primary);
+    word-break: break-all;
+    user-select: all;
+    cursor: text;
+  }
 </style>

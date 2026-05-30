@@ -28,13 +28,15 @@
   import HistoryPane from '../components/HistoryPane.svelte';
   import ModelManager from '../components/ModelManager.svelte';
   import TranscribePane from '../components/TranscribePane.svelte';
-	import OverviewPane from '../components/OverviewPane.svelte';
-	import AboutDialog from '../components/AboutDialog.svelte';
-	import ShortcutInput from '../components/ShortcutInput.svelte';
-	import { configStore, type IndicatorStyle } from '../stores/config.svelte';
-	import { pipelineStore } from '../stores/pipeline.svelte';
-	import { shortcutsStore, type ShortcutInfo } from '../stores/shortcuts.svelte';
-	import { soundStore } from '../stores/sound.svelte';
+  import OverviewPane from '../components/OverviewPane.svelte';
+  import AboutDialog from '../components/AboutDialog.svelte';
+  import ShortcutInput from '../components/ShortcutInput.svelte';
+  import { configStore, type IndicatorStyle } from '../stores/config.svelte';
+  import { pipelineStore } from '../stores/pipeline.svelte';
+  import { shortcutsStore, type ShortcutInfo } from '../stores/shortcuts.svelte';
+  import { soundStore } from '../stores/sound.svelte';
+  import { Button } from '$components/ui/button';
+  import { Switch } from '$components/ui/switch';
 
   /** Settings pane definition */
   interface SettingsPane {
@@ -260,31 +262,31 @@
       <div class="sidebar-items">
         {#each panes as pane}
           {@const Icon = pane.icon}
-          <button
-            class="sidebar-item"
-            class:active={activePane === pane.id}
+          <Button
+            variant="ghost"
+            class="sidebar-item {activePane === pane.id ? 'active' : ''}"
             onclick={() => (activePane = pane.id)}
           >
             <span class="sidebar-icon">
               <Icon size={16} />
             </span>
             <span class="sidebar-label">{pane.title}</span>
-          </button>
+          </Button>
         {/each}
       </div>
       <div class="sidebar-footer">
-        <button class="sidebar-item" onclick={() => (showAbout = true)}>
+        <Button variant="ghost" class="sidebar-item" onclick={() => (showAbout = true)}>
           <span class="sidebar-icon">
             <Info size={16} />
           </span>
           <span class="sidebar-label">About Thoth</span>
-        </button>
+        </Button>
       </div>
     </nav>
 
-		<!-- Content -->
-		<main class="content">
-			{#if activePane === 'overview'}
+    <!-- Content -->
+    <main class="content">
+      {#if activePane === 'overview'}
         <div class="pane">
           <OverviewPane onNavigate={(paneId) => (activePane = paneId)} />
         </div>
@@ -305,9 +307,7 @@
           <section class="settings-section">
             <div class="section-header">
               <h2 class="section-title">Shortcuts</h2>
-              <p class="section-description">
-                Tap to start recording, tap again to stop.
-              </p>
+              <p class="section-description">Tap to start recording, tap again to stop.</p>
             </div>
             <div class="section-content">
               {#if !shortcutsStore.isLoading}
@@ -353,55 +353,46 @@
                     >Play sounds when recording starts and stops</span
                   >
                 </div>
-                <label class="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={soundStore.isEnabled}
-                    disabled={soundStore.isLoading}
-                    onchange={() => soundStore.toggle()}
-                  />
-                  <span class="toggle-slider"></span>
-                </label>
+                <Switch
+                  checked={soundStore.isEnabled}
+                  disabled={soundStore.isLoading}
+                  onCheckedChange={() => soundStore.toggle()}
+                />
               </div>
               <div class="row-separator"></div>
               <div class="setting-row card">
                 <div class="setting-info">
                   <span class="setting-label">Recording Indicator</span>
-                  <span class="setting-description"
-                    >Show floating indicator during recording</span
-                  >
+                  <span class="setting-description">Show floating indicator during recording</span>
                 </div>
-                <label class="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={configStore.general.showRecordingIndicator}
-                    onchange={async () => {
-                      const newValue = !configStore.general.showRecordingIndicator;
-                      configStore.updateGeneral('showRecordingIndicator', newValue);
-                      await configStore.save();
+                <Switch
+                  checked={configStore.general.showRecordingIndicator}
+                  onCheckedChange={async (checked) => {
+                    configStore.updateGeneral('showRecordingIndicator', checked);
+                    await configStore.save();
 
-                      try {
-                        if (newValue) {
-                          if (pipelineStore.isRecording) {
-                            await invoke('show_recording_indicator');
-                          }
-                        } else {
-                          await invoke('hide_recording_indicator');
+                    try {
+                      if (checked) {
+                        if (pipelineStore.isRecording) {
+                          await invoke('show_recording_indicator');
                         }
-                      } catch (e) {
-                        console.error('Failed to update indicator visibility:', e);
+                      } else {
+                        await invoke('hide_recording_indicator');
                       }
-                    }}
-                  />
-                  <span class="toggle-slider"></span>
-                </label>
+                    } catch (e) {
+                      console.error('Failed to update indicator visibility:', e);
+                    }
+                  }}
+                />
               </div>
               {#if configStore.general.showRecordingIndicator}
                 <div class="row-separator"></div>
                 <div class="setting-row card">
                   <div class="setting-info">
                     <span class="setting-label">Indicator Style</span>
-                    <span class="setting-description">Visual appearance of the recording indicator</span>
+                    <span class="setting-description"
+                      >Visual appearance of the recording indicator</span
+                    >
                   </div>
                 </div>
                 <div class="indicator-style-selector">
@@ -413,15 +404,25 @@
                     <div class="mode-preview">
                       <svg viewBox="0 0 80 52" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <!-- Cursor arrow -->
-                        <path d="M20 8 L20 36 L26 30 L32 40 L36 38 L30 28 L38 28 Z" fill="var(--color-text-secondary)" stroke="var(--color-bg-primary)" stroke-width="1.5"/>
+                        <path
+                          d="M20 8 L20 36 L26 30 L32 40 L36 38 L30 28 L38 28 Z"
+                          fill="var(--color-text-secondary)"
+                          stroke="var(--color-bg-primary)"
+                          stroke-width="1.5"
+                        />
                         <!-- Glowing dot -->
-                        <circle cx="52" cy="22" r="10" fill="var(--color-accent)" opacity="0.2"/>
-                        <circle cx="52" cy="22" r="7" fill="var(--color-accent)" opacity="0.4"/>
-                        <circle cx="52" cy="22" r="4.5" fill="var(--color-accent)"/>
+                        <circle cx="52" cy="22" r="10" fill="var(--color-accent)" opacity="0.2" />
+                        <circle cx="52" cy="22" r="7" fill="var(--color-accent)" opacity="0.4" />
+                        <circle cx="52" cy="22" r="4.5" fill="var(--color-accent)" />
                         <!-- Mic icon inside dot -->
-                        <rect x="50.5" y="18" width="3" height="5" rx="1.5" fill="white"/>
-                        <path d="M49.5 22.5 C49.5 24 50.5 25 52 25 C53.5 25 54.5 24 54.5 22.5" stroke="white" stroke-width="0.8" fill="none"/>
-                        <line x1="52" y1="25" x2="52" y2="26.5" stroke="white" stroke-width="0.8"/>
+                        <rect x="50.5" y="18" width="3" height="5" rx="1.5" fill="white" />
+                        <path
+                          d="M49.5 22.5 C49.5 24 50.5 25 52 25 C53.5 25 54.5 24 54.5 22.5"
+                          stroke="white"
+                          stroke-width="0.8"
+                          fill="none"
+                        />
+                        <line x1="52" y1="25" x2="52" y2="26.5" stroke="white" stroke-width="0.8" />
                       </svg>
                     </div>
                     <span class="mode-title">Cursor Dot</span>
@@ -435,18 +436,55 @@
                     <div class="mode-preview">
                       <svg viewBox="0 0 80 52" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <!-- Screen outline -->
-                        <rect x="10" y="6" width="60" height="36" rx="3" stroke="var(--color-text-tertiary)" stroke-width="1.5" fill="none"/>
+                        <rect
+                          x="10"
+                          y="6"
+                          width="60"
+                          height="36"
+                          rx="3"
+                          stroke="var(--color-text-tertiary)"
+                          stroke-width="1.5"
+                          fill="none"
+                        />
                         <!-- Screen stand -->
-                        <line x1="32" y1="42" x2="48" y2="42" stroke="var(--color-text-tertiary)" stroke-width="1.5" stroke-linecap="round"/>
-                        <line x1="40" y1="42" x2="40" y2="46" stroke="var(--color-text-tertiary)" stroke-width="1.5"/>
-                        <line x1="34" y1="46" x2="46" y2="46" stroke="var(--color-text-tertiary)" stroke-width="1.5" stroke-linecap="round"/>
+                        <line
+                          x1="32"
+                          y1="42"
+                          x2="48"
+                          y2="42"
+                          stroke="var(--color-text-tertiary)"
+                          stroke-width="1.5"
+                          stroke-linecap="round"
+                        />
+                        <line
+                          x1="40"
+                          y1="42"
+                          x2="40"
+                          y2="46"
+                          stroke="var(--color-text-tertiary)"
+                          stroke-width="1.5"
+                        />
+                        <line
+                          x1="34"
+                          y1="46"
+                          x2="46"
+                          y2="46"
+                          stroke="var(--color-text-tertiary)"
+                          stroke-width="1.5"
+                          stroke-linecap="round"
+                        />
                         <!-- Fixed dot in top-right corner of screen -->
-                        <circle cx="59" cy="16" r="6" fill="var(--color-accent)" opacity="0.3"/>
-                        <circle cx="59" cy="16" r="4" fill="var(--color-accent)"/>
+                        <circle cx="59" cy="16" r="6" fill="var(--color-accent)" opacity="0.3" />
+                        <circle cx="59" cy="16" r="4" fill="var(--color-accent)" />
                         <!-- Mic icon inside dot -->
-                        <rect x="58" y="13.5" width="2" height="3.5" rx="1" fill="white"/>
-                        <path d="M57.2 16.5 C57.2 17.5 58 18.2 59 18.2 C60 18.2 60.8 17.5 60.8 16.5" stroke="white" stroke-width="0.6" fill="none"/>
-                        <line x1="59" y1="18.2" x2="59" y2="19" stroke="white" stroke-width="0.6"/>
+                        <rect x="58" y="13.5" width="2" height="3.5" rx="1" fill="white" />
+                        <path
+                          d="M57.2 16.5 C57.2 17.5 58 18.2 59 18.2 C60 18.2 60.8 17.5 60.8 16.5"
+                          stroke="white"
+                          stroke-width="0.6"
+                          fill="none"
+                        />
+                        <line x1="59" y1="18.2" x2="59" y2="19" stroke="white" stroke-width="0.6" />
                       </svg>
                     </div>
                     <span class="mode-title">Fixed Float</span>
@@ -460,20 +498,88 @@
                     <div class="mode-preview">
                       <svg viewBox="0 0 80 52" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <!-- Pill shape -->
-                        <rect x="8" y="16" width="64" height="20" rx="10" fill="var(--color-accent)"/>
+                        <rect
+                          x="8"
+                          y="16"
+                          width="64"
+                          height="20"
+                          rx="10"
+                          fill="var(--color-accent)"
+                        />
                         <!-- Mic icon on left side -->
-                        <rect x="17" y="22" width="4" height="6" rx="2" fill="white"/>
-                        <path d="M15.5 27 C15.5 29 17 30.5 19 30.5 C21 30.5 22.5 29 22.5 27" stroke="white" stroke-width="1" fill="none"/>
-                        <line x1="19" y1="30.5" x2="19" y2="32" stroke="white" stroke-width="1"/>
+                        <rect x="17" y="22" width="4" height="6" rx="2" fill="white" />
+                        <path
+                          d="M15.5 27 C15.5 29 17 30.5 19 30.5 C21 30.5 22.5 29 22.5 27"
+                          stroke="white"
+                          stroke-width="1"
+                          fill="none"
+                        />
+                        <line x1="19" y1="30.5" x2="19" y2="32" stroke="white" stroke-width="1" />
                         <!-- Waveform bars -->
-                        <rect x="28" y="24" width="2.5" height="4" rx="1" fill="white" opacity="0.45"/>
-                        <rect x="33" y="22" width="2.5" height="8" rx="1" fill="white" opacity="0.5"/>
-                        <rect x="38" y="20" width="2.5" height="12" rx="1" fill="white" opacity="0.55"/>
-                        <rect x="43" y="23" width="2.5" height="6" rx="1" fill="white" opacity="0.65"/>
-                        <rect x="48" y="19" width="2.5" height="14" rx="1" fill="white" opacity="0.75"/>
-                        <rect x="53" y="21" width="2.5" height="10" rx="1" fill="white" opacity="0.85"/>
-                        <rect x="58" y="23" width="2.5" height="6" rx="1" fill="white" opacity="0.95"/>
-                        <rect x="63" y="24" width="2.5" height="4" rx="1" fill="white"/>
+                        <rect
+                          x="28"
+                          y="24"
+                          width="2.5"
+                          height="4"
+                          rx="1"
+                          fill="white"
+                          opacity="0.45"
+                        />
+                        <rect
+                          x="33"
+                          y="22"
+                          width="2.5"
+                          height="8"
+                          rx="1"
+                          fill="white"
+                          opacity="0.5"
+                        />
+                        <rect
+                          x="38"
+                          y="20"
+                          width="2.5"
+                          height="12"
+                          rx="1"
+                          fill="white"
+                          opacity="0.55"
+                        />
+                        <rect
+                          x="43"
+                          y="23"
+                          width="2.5"
+                          height="6"
+                          rx="1"
+                          fill="white"
+                          opacity="0.65"
+                        />
+                        <rect
+                          x="48"
+                          y="19"
+                          width="2.5"
+                          height="14"
+                          rx="1"
+                          fill="white"
+                          opacity="0.75"
+                        />
+                        <rect
+                          x="53"
+                          y="21"
+                          width="2.5"
+                          height="10"
+                          rx="1"
+                          fill="white"
+                          opacity="0.85"
+                        />
+                        <rect
+                          x="58"
+                          y="23"
+                          width="2.5"
+                          height="6"
+                          rx="1"
+                          fill="white"
+                          opacity="0.95"
+                        />
+                        <rect x="63" y="24" width="2.5" height="4" rx="1" fill="white" />
                       </svg>
                     </div>
                     <span class="mode-title">Pill Bar</span>
@@ -628,32 +734,31 @@
     padding: 0 12px;
   }
 
-  .sidebar-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 8px 12px;
-    border-radius: 6px;
-    background: transparent;
-    border: none;
-    color: var(--color-text-secondary);
-    font-size: var(--text-sm);
-    font-weight: 400;
-    text-align: left;
-    cursor: pointer;
-    transition: background-color var(--transition-fast), color var(--transition-fast);
+  /* Override Button ghost to match sidebar item appearance */
+  :global(.sidebar-item) {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    width: 100% !important;
+    padding: 8px 12px !important;
+    border-radius: 6px !important;
+    color: var(--color-text-secondary) !important;
+    font-size: var(--text-sm) !important;
+    font-weight: 400 !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+    height: auto !important;
   }
 
-  .sidebar-item:hover {
-    background-color: rgba(255, 255, 255, 0.07);
-    color: var(--color-text-primary);
+  :global(.sidebar-item:hover) {
+    background-color: rgba(255, 255, 255, 0.07) !important;
+    color: var(--color-text-primary) !important;
   }
 
-  .sidebar-item.active {
-    background-color: rgba(255, 255, 255, 0.1);
-    color: var(--color-text-primary);
-    font-weight: 500;
+  :global(.sidebar-item.active) {
+    background-color: rgba(255, 255, 255, 0.1) !important;
+    color: var(--color-text-primary) !important;
+    font-weight: 500 !important;
   }
 
   .sidebar-icon {
@@ -693,9 +798,6 @@
     display: flex;
     gap: 12px;
     margin-bottom: 16px;
-  }
-
-  .indicator-style-selector {
     margin-top: 8px;
   }
 
@@ -710,7 +812,9 @@
     border-radius: var(--radius-md);
     cursor: pointer;
     text-align: left;
-    transition: border-color var(--transition-fast), background var(--transition-fast);
+    transition:
+      border-color var(--transition-fast),
+      background var(--transition-fast);
   }
 
   .indicator-style-selector .mode-option {
@@ -799,6 +903,16 @@
     border-radius: 50%;
     background: var(--color-error);
     animation: pulse 1s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
   }
 
   .processing-indicator {

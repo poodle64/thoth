@@ -16,6 +16,9 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { formatForDisplay, validateShortcut } from '../stores/shortcuts.svelte';
+  import { Button } from '$components/ui/button';
+  import X from '@lucide/svelte/icons/x';
+  import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 
   /** Debug logging — only active in development builds */
   const debug = import.meta.env.DEV
@@ -110,48 +113,50 @@
 
     try {
       // Set up event listeners for capture events
-      const updateUnlisten = await listen<{ keys: string[]; accelerator: string; isValid: boolean }>(
-        'key-capture-update',
-        (event) => {
-          debug('Key update:', event.payload);
-          pendingKeys = event.payload.keys;
+      const updateUnlisten = await listen<{
+        keys: string[];
+        accelerator: string;
+        isValid: boolean;
+      }>('key-capture-update', (event) => {
+        debug('Key update:', event.payload);
+        pendingKeys = event.payload.keys;
 
-          // Show validation error only if we have a non-modifier key and it's invalid
-          if (event.payload.accelerator && !event.payload.isValid) {
-            const hasNonModifier = event.payload.keys.some(
-              (k) => !['Cmd', 'Ctrl', 'Alt', 'Shift', 'Super', 'Meta'].includes(k)
-            );
-            if (hasNonModifier) {
-              validationError = 'Invalid shortcut combination';
-            } else {
-              validationError = null;
-            }
+        // Show validation error only if we have a non-modifier key and it's invalid
+        if (event.payload.accelerator && !event.payload.isValid) {
+          const hasNonModifier = event.payload.keys.some(
+            (k) => !['Cmd', 'Ctrl', 'Alt', 'Shift', 'Super', 'Meta'].includes(k)
+          );
+          if (hasNonModifier) {
+            validationError = 'Invalid shortcut combination';
           } else {
             validationError = null;
           }
+        } else {
+          validationError = null;
         }
-      );
+      });
       unlisteners.push(updateUnlisten);
 
-      const completeUnlisten = await listen<{ accelerator: string; keys: string[]; isValid: boolean }>(
-        'key-capture-complete',
-        async (event) => {
-          debug('Capture complete:', event.payload);
+      const completeUnlisten = await listen<{
+        accelerator: string;
+        keys: string[];
+        isValid: boolean;
+      }>('key-capture-complete', async (event) => {
+        debug('Capture complete:', event.payload);
 
-          if (event.payload.isValid) {
-            const error = validateShortcut(event.payload.accelerator);
-            if (error) {
-              validationError = error;
-            } else {
-              // onchange saves to config; exit_capture_mode re-registers from config
-              await onchange?.(event.payload.accelerator);
-              validationError = null;
-            }
+        if (event.payload.isValid) {
+          const error = validateShortcut(event.payload.accelerator);
+          if (error) {
+            validationError = error;
+          } else {
+            // onchange saves to config; exit_capture_mode re-registers from config
+            await onchange?.(event.payload.accelerator);
+            validationError = null;
           }
-
-          await stopCapture();
         }
-      );
+
+        await stopCapture();
+      });
       unlisteners.push(completeUnlisten);
 
       // Enter capture mode — returns 'native' or 'webview'
@@ -289,22 +294,21 @@
   }
 </script>
 
-<div class="shortcut-input-container">
+<div class="flex flex-wrap items-center gap-2">
+  <!-- Capture trigger button — bespoke keyboard-capture styling retained via class -->
   <button
     bind:this={buttonRef}
     type="button"
-    class="shortcut-input"
+    class="shortcut-capture-btn"
     class:capturing={isCapturing}
-    class:has-value={!!value}
     class:has-error={!!validationError}
-    class:disabled
     onclick={startCapture}
     onkeydown={handleKeyDown}
     onblur={handleBlur}
     {disabled}
   >
     {#if isCapturing}
-      <span class="capture-hint">
+      <span class="text-primary italic">
         {#if pendingKeys.length > 0}
           {pendingDisplay}
         {:else}
@@ -312,167 +316,70 @@
         {/if}
       </span>
     {:else if value}
-      <span class="shortcut-display">{displayValue}</span>
+      <span class="font-mono tracking-wide">{displayValue}</span>
     {:else}
-      <span class="placeholder">{placeholder}</span>
+      <span class="text-muted-foreground">{placeholder}</span>
     {/if}
   </button>
 
-  <div class="actions">
+  <div class="flex gap-1">
     {#if value && !disabled}
-      <button
-        type="button"
-        class="action-btn clear-btn"
-        title="Clear shortcut"
-        onclick={handleClear}
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <line x1="18" y1="6" x2="6" y2="18"></line>
-          <line x1="6" y1="6" x2="18" y2="18"></line>
-        </svg>
-      </button>
+      <Button variant="ghost" size="icon" title="Clear shortcut" onclick={handleClear}>
+        <X />
+      </Button>
     {/if}
     {#if isModified && onreset && !disabled}
-      <button
-        type="button"
-        class="action-btn reset-btn"
-        title="Reset to default"
-        onclick={handleReset}
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-          <path d="M3 3v5h5"></path>
-        </svg>
-      </button>
+      <Button variant="ghost" size="icon" title="Reset to default" onclick={handleReset}>
+        <RotateCcw />
+      </Button>
     {/if}
   </div>
 
   {#if validationError}
-    <span class="error-message">{validationError}</span>
+    <span class="w-full text-xs text-destructive">{validationError}</span>
   {/if}
 </div>
 
 <style>
-  .shortcut-input-container {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .shortcut-input {
+  .shortcut-capture-btn {
     min-width: 180px;
     padding: 8px 12px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: var(--color-bg-secondary);
-    color: var(--color-text-primary);
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius-lg, 8px);
+    background: hsl(var(--input) / 0.3);
+    color: hsl(var(--foreground));
+    font-family: inherit;
+    font-size: 0.875rem;
     text-align: left;
     cursor: pointer;
     transition:
-      border-color var(--transition-fast),
-      background var(--transition-fast);
-  }
-
-  .shortcut-input:hover:not(.disabled) {
-    border-color: var(--color-accent);
-  }
-
-  .shortcut-input:focus {
+      border-color 0.15s ease,
+      background 0.15s ease,
+      box-shadow 0.15s ease;
     outline: none;
-    border-color: var(--color-accent);
   }
 
-  .shortcut-input.capturing {
-    border-color: var(--color-accent);
-    background: var(--color-bg-tertiary);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 20%, transparent);
+  .shortcut-capture-btn:hover:not(:disabled) {
+    border-color: hsl(var(--ring));
   }
 
-  .shortcut-input.has-error {
-    border-color: var(--color-error);
+  .shortcut-capture-btn:focus-visible {
+    border-color: hsl(var(--ring));
+    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5);
   }
 
-  .shortcut-input.disabled {
+  .shortcut-capture-btn.capturing {
+    border-color: hsl(var(--ring));
+    background: hsl(var(--muted));
+    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2);
+  }
+
+  .shortcut-capture-btn.has-error {
+    border-color: hsl(var(--destructive));
+  }
+
+  .shortcut-capture-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-  }
-
-  .capture-hint {
-    color: var(--color-accent);
-    font-style: italic;
-  }
-
-  .shortcut-display {
-    color: var(--color-text-primary);
-    letter-spacing: 0.5px;
-  }
-
-  .placeholder {
-    color: var(--color-text-tertiary);
-  }
-
-  .actions {
-    display: flex;
-    gap: 4px;
-  }
-
-  .action-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--color-text-secondary);
-    cursor: pointer;
-    transition:
-      background var(--transition-fast),
-      color var(--transition-fast);
-  }
-
-  .action-btn:hover {
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-primary);
-  }
-
-  .clear-btn:hover {
-    color: var(--color-error);
-  }
-
-  .reset-btn:hover {
-    color: var(--color-accent);
-  }
-
-  .error-message {
-    width: 100%;
-    margin-top: 4px;
-    font-size: var(--text-xs);
-    color: var(--color-error);
   }
 </style>

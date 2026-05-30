@@ -1,12 +1,9 @@
 <script lang="ts">
-  /**
-   * About dialog - displays app identity, version, credits, and links.
-   *
-   * Rendered as a modal overlay. Uses Tauri API for runtime version.
-   */
   import { onMount } from 'svelte';
   import { getVersion } from '@tauri-apps/api/app';
   import { invoke } from '@tauri-apps/api/core';
+  import * as Dialog from '$components/ui/dialog';
+  import { Button } from '$components/ui/button';
 
   interface Props {
     open: boolean;
@@ -26,237 +23,80 @@
   });
 
   function openExternal(url: string) {
-    invoke('open_url', { url }).catch((err) =>
-      console.error('Failed to open URL:', err)
-    );
-  }
-
-  function handleBackdropClick(e: MouseEvent) {
-    if (e.target === e.currentTarget) {
-      onclose();
-    }
-  }
-
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      onclose();
-    }
+    invoke('open_url', { url }).catch((err) => console.error('Failed to open URL:', err));
   }
 </script>
 
-{#if open}
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="backdrop" onclick={handleBackdropClick} onkeydown={handleKeydown}>
-    <div class="dialog" role="dialog" aria-labelledby="about-title" aria-modal="true">
-      <!-- App identity -->
-      <div class="identity">
-        <span class="ibis-glyph">𓅝</span>
-        <h1 id="about-title" class="app-name">Thoth</h1>
-        <p class="tagline">Scribe to the gods. Typist to you.</p>
-        {#if version}
-          <p class="version">Version {version}</p>
-        {/if}
-      </div>
+<Dialog.Root
+  {open}
+  onOpenChange={(v) => {
+    if (!v) onclose();
+  }}
+>
+  <Dialog.Content class="max-w-sm text-center" showCloseButton={false}>
+    <Dialog.Header class="items-center">
+      <span class="text-7xl leading-none mb-2">𓅝</span>
+      <Dialog.Title class="text-xl font-bold tracking-wide">Thoth</Dialog.Title>
+      <Dialog.Description class="italic">Scribe to the gods. Typist to you.</Dialog.Description>
+      {#if version}
+        <p class="text-xs text-muted-foreground tabular-nums">Version {version}</p>
+      {/if}
+    </Dialog.Header>
 
-      <!-- Credits -->
-      <div class="credits">
-        <p class="credit-line">
-          Created by
-          <button class="link-inline" onclick={() => openExternal('https://github.com/poodle64')}>poodle64</button>
-        </p>
-        <p class="credit-line">
-          Contributions from
-          <button class="link-inline" onclick={() => openExternal('https://github.com/nephalemsec')}>nephalemsec</button>
-        </p>
-      </div>
-
-      <!-- Links -->
-      <div class="links">
-        <button class="link-item" onclick={() => openExternal('https://github.com/poodle64/thoth')}>
-          GitHub
-        </button>
-        <span class="link-separator">·</span>
-        <button class="link-item" onclick={() => openExternal('https://github.com/poodle64/thoth/blob/main/LICENCE')}>
-          MIT Licence
-        </button>
-      </div>
-
-      <!-- Acknowledgements -->
-      <div class="acknowledgements">
-        <p class="ack-title">Built with</p>
-        <p class="ack-list">
-          Tauri · Svelte · whisper.cpp · Sherpa-ONNX · Ollama
-        </p>
-      </div>
-
-      <button class="close-btn" onclick={onclose}>Close</button>
+    <div class="flex flex-col gap-1 text-sm text-muted-foreground">
+      <p>
+        Created by
+        <Button
+          variant="link"
+          class="h-auto p-0 text-sm"
+          onclick={() => openExternal('https://github.com/poodle64')}
+        >
+          poodle64
+        </Button>
+      </p>
+      <p>
+        Contributions from
+        <Button
+          variant="link"
+          class="h-auto p-0 text-sm"
+          onclick={() => openExternal('https://github.com/nephalemsec')}
+        >
+          nephalemsec
+        </Button>
+      </p>
     </div>
-  </div>
-{/if}
 
-<style>
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(4px);
-    animation: fade-in 0.15s ease;
-  }
+    <div class="flex items-center justify-center gap-2 text-xs">
+      <Button
+        variant="link"
+        class="h-auto p-0 text-xs"
+        onclick={() => openExternal('https://github.com/poodle64/thoth')}
+      >
+        GitHub
+      </Button>
+      <span class="text-muted-foreground">·</span>
+      <Button
+        variant="link"
+        class="h-auto p-0 text-xs"
+        onclick={() => openExternal('https://github.com/poodle64/thoth/blob/main/LICENCE')}
+      >
+        MIT Licence
+      </Button>
+    </div>
 
-  .dialog {
-    width: 320px;
-    padding: 32px 28px 24px;
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg);
-    text-align: center;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    animation: scale-in 0.15s ease;
-  }
+    <div class="border-t pt-4 flex flex-col gap-1">
+      <p class="text-xs text-muted-foreground uppercase tracking-wide">Built with</p>
+      <p class="text-xs text-muted-foreground leading-relaxed">
+        Tauri · Svelte · whisper.cpp · Sherpa-ONNX · Ollama
+      </p>
+    </div>
 
-  .identity {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .ibis-glyph {
-    font-size: 72px;
-    line-height: 1;
-    margin-bottom: 8px;
-  }
-
-  .app-name {
-    margin: 0;
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--color-text-primary);
-    letter-spacing: 0.5px;
-  }
-
-  .tagline {
-    margin: 0;
-    font-size: var(--text-sm);
-    color: var(--color-text-tertiary);
-    font-style: italic;
-  }
-
-  .version {
-    margin: 4px 0 0;
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .credits {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .credit-line {
-    margin: 0;
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-  }
-
-  .link-inline {
-    display: inline;
-    padding: 0;
-    margin: 0;
-    background: none;
-    border: none;
-    color: var(--color-accent);
-    font: inherit;
-    cursor: pointer;
-  }
-
-  .link-inline:hover {
-    text-decoration: underline;
-  }
-
-  .links {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-  }
-
-  .link-item {
-    padding: 0;
-    background: none;
-    border: none;
-    font-size: var(--text-xs);
-    color: var(--color-accent);
-    cursor: pointer;
-  }
-
-  .link-item:hover {
-    text-decoration: underline;
-  }
-
-  .link-separator {
-    color: var(--color-text-tertiary);
-    font-size: var(--text-xs);
-  }
-
-  .acknowledgements {
-    padding-top: 12px;
-    border-top: 1px solid var(--color-border);
-  }
-
-  .ack-title {
-    margin: 0 0 4px;
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .ack-list {
-    margin: 0;
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
-    line-height: 1.6;
-  }
-
-  .close-btn {
-    padding: 6px 20px;
-    font-size: var(--text-sm);
-    background: var(--color-bg-tertiary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    color: var(--color-text-primary);
-    cursor: pointer;
-    transition: background var(--transition-fast);
-    align-self: center;
-  }
-
-  .close-btn:hover {
-    background: var(--color-bg-hover);
-  }
-
-  @keyframes fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-
-  @keyframes scale-in {
-    from {
-      opacity: 0;
-      transform: scale(0.95);
-    }
-    to {
-      opacity: 1;
-      transform: scale(1);
-    }
-  }
-</style>
+    <Dialog.Footer class="justify-center sm:justify-center">
+      <Dialog.Close>
+        {#snippet child({ props })}
+          <Button variant="secondary" {...props} onclick={onclose}>Close</Button>
+        {/snippet}
+      </Dialog.Close>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

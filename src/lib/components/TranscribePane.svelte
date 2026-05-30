@@ -3,6 +3,9 @@
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { writeText } from '@tauri-apps/plugin-clipboard-manager';
   import { pipelineStore } from '../stores/pipeline.svelte';
+  import { Button } from '$components/ui/button';
+  import * as Card from '$components/ui/card';
+  import * as Alert from '$components/ui/alert';
   import Upload from '@lucide/svelte/icons/upload';
   import FileAudio from '@lucide/svelte/icons/file-audio';
   import Copy from '@lucide/svelte/icons/copy';
@@ -106,211 +109,77 @@
   });
 </script>
 
+<!-- Custom drag-drop dropzone: bespoke because it uses Tauri's onDragDropEvent API which cannot be replaced by a shadcn primitive -->
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 <div
-  class="transcribe-dropzone"
-  class:drag-over={isDragOver}
-  class:disabled={isProcessing}
+  class="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-12 transition-colors {isDragOver
+    ? 'border-primary bg-primary/10 border-solid'
+    : 'border-border hover:border-primary hover:bg-primary/5'} {isProcessing
+    ? 'cursor-default opacity-80'
+    : ''}"
   onclick={handleFilePicker}
 >
   {#if isProcessing}
-    <span class="dropzone-icon-wrapper">
-      <Loader2 size={36} class="spinner" />
+    <span class="text-muted-foreground mb-3">
+      <Loader2 size={36} class="animate-spin" />
     </span>
-    <p class="dropzone-text">{pipelineStore.message || 'Processing...'}</p>
+    <p class="text-sm">{pipelineStore.message || 'Processing...'}</p>
     {#if importedFileName}
-      <p class="dropzone-hint">{importedFileName}</p>
+      <p class="text-muted-foreground mt-1 text-xs">{importedFileName}</p>
     {/if}
   {:else}
-    <span class="dropzone-icon-wrapper">
+    <span class="text-muted-foreground mb-3">
       <Upload size={36} />
     </span>
-    <p class="dropzone-text">Drop audio files here or click to browse</p>
-    <p class="dropzone-hint">Supports WAV, MP3, M4A, OGG, FLAC</p>
+    <p class="text-sm">Drop audio files here or click to browse</p>
+    <p class="text-muted-foreground mt-1 text-xs">Supports WAV, MP3, M4A, OGG, FLAC</p>
   {/if}
 </div>
 
 {#if isProcessing}
-  <div class="import-actions">
-    <button onclick={handleCancel}>
-      <X size={14} />
+  <div class="mt-2 flex justify-center">
+    <Button variant="outline" size="sm" onclick={handleCancel}>
+      <X class="mr-1.5 h-3.5 w-3.5" />
       Cancel
-    </button>
+    </Button>
   </div>
 {/if}
 
 {#if hasResult}
-  <div class="import-result">
-    <div class="result-header">
-      <span class="result-label">
-        <FileAudio size={14} />
-        {importedFileName ?? 'Transcription'}
-      </span>
-      <div class="result-actions">
-        <button class="primary btn-sm" onclick={handleCopy}>
+  <Card.Root class="mt-4">
+    <Card.Header class="flex flex-row items-center justify-between space-y-0 pb-2">
+      <div class="text-muted-foreground flex min-w-0 items-center gap-1.5 overflow-hidden text-sm">
+        <FileAudio class="h-3.5 w-3.5 flex-shrink-0" />
+        <span class="truncate">{importedFileName ?? 'Transcription'}</span>
+      </div>
+      <div class="flex flex-shrink-0 gap-2">
+        <Button size="sm" onclick={handleCopy}>
           {#if copied}
-            <Check size={14} />
+            <Check class="mr-1.5 h-3.5 w-3.5" />
             Copied
           {:else}
-            <Copy size={14} />
+            <Copy class="mr-1.5 h-3.5 w-3.5" />
             Copy
           {/if}
-        </button>
-        <button class="btn-sm" onclick={handleReset}>
-          New Import
-        </button>
+        </Button>
+        <Button variant="outline" size="sm" onclick={handleReset}>New Import</Button>
       </div>
-    </div>
-    <div class="result-text">{pipelineStore.lastResult?.text}</div>
-  </div>
+    </Card.Header>
+    <Card.Content>
+      <div
+        class="text-foreground max-h-72 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed"
+      >
+        {pipelineStore.lastResult?.text}
+      </div>
+    </Card.Content>
+  </Card.Root>
 {/if}
 
 {#if hasError}
-  <div class="import-error">
-    <p class="error-message">{pipelineStore.error}</p>
-    <button class="btn-small" onclick={handleReset}>
-      Dismiss
-    </button>
-  </div>
+  <Alert.Root variant="destructive" class="mt-4">
+    <Alert.Description class="flex items-center justify-between gap-3">
+      <span>{pipelineStore.error}</span>
+      <Button variant="ghost" size="sm" onclick={handleReset}>Dismiss</Button>
+    </Alert.Description>
+  </Alert.Root>
 {/if}
-
-<style>
-  /* Dropzone */
-  .transcribe-dropzone {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 48px 24px;
-    border: 2px dashed var(--color-border);
-    border-radius: var(--radius-lg);
-    cursor: pointer;
-    transition:
-      border-color var(--transition-fast),
-      background var(--transition-fast);
-  }
-
-  .transcribe-dropzone:hover:not(.disabled) {
-    border-color: var(--color-accent);
-    background: color-mix(in srgb, var(--color-accent) 5%, transparent);
-  }
-
-  .transcribe-dropzone.drag-over {
-    border-color: var(--color-accent);
-    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-    border-style: solid;
-  }
-
-  .transcribe-dropzone.disabled {
-    cursor: default;
-    opacity: 0.8;
-  }
-
-  .dropzone-icon-wrapper {
-    margin-bottom: 12px;
-    color: var(--color-text-secondary);
-  }
-
-  .dropzone-text {
-    margin: 0;
-    font-size: var(--text-base);
-    color: var(--color-text-primary);
-  }
-
-  .dropzone-hint {
-    margin: 4px 0 0;
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
-  }
-
-  /* Spinner animation */
-  :global(.spinner) {
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
-  /* Actions below dropzone */
-  .import-actions {
-    display: flex;
-    justify-content: center;
-    margin-top: var(--spacing-sm);
-  }
-
-  /* Small button variant for result actions */
-  .btn-sm {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-    padding: 4px 8px;
-    font-size: var(--text-xs);
-  }
-
-  /* Result display */
-  .import-result {
-    margin-top: var(--spacing-md);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-  }
-
-  .result-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--spacing-sm) var(--spacing-md);
-    background: var(--color-bg-secondary);
-    border-bottom: 1px solid var(--color-border-subtle);
-  }
-
-  .result-label {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .result-actions {
-    display: flex;
-    gap: var(--spacing-xs);
-    flex-shrink: 0;
-  }
-
-  .result-text {
-    padding: var(--spacing-md);
-    font-size: var(--text-sm);
-    line-height: 1.6;
-    color: var(--color-text-primary);
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 300px;
-    overflow-y: auto;
-  }
-
-  /* Error display - uses global .error-message for text, custom layout for row */
-  .import-error {
-    margin-top: var(--spacing-md);
-    padding: var(--spacing-md);
-    background: color-mix(in srgb, var(--color-error) 10%, transparent);
-    border-radius: var(--radius-md);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--spacing-md);
-  }
-
-  .error-message {
-    margin: 0;
-    padding: 0;
-    background: none;
-  }
-</style>

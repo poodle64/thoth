@@ -7,6 +7,10 @@
    */
 
   import { invoke } from '@tauri-apps/api/core';
+  import { Button } from '$components/ui/button';
+  import { Switch } from '$components/ui/switch';
+  import { Textarea } from '$components/ui/textarea';
+  import { Label } from '$components/ui/label';
 
   /** Filter options matching the Rust FilterOptions struct */
   interface FilterOptions {
@@ -83,8 +87,8 @@
   /**
    * Toggle a filter option
    */
-  function toggleOption(key: keyof FilterOptions) {
-    options = { ...options, [key]: !options[key] };
+  function toggleOption(key: keyof FilterOptions, checked: boolean) {
+    options = { ...options, [key]: checked };
     onchange?.(options);
   }
 
@@ -131,7 +135,8 @@
     {
       key: 'australian_spelling' as const,
       label: 'Australian spelling',
-      description: 'Converts US spellings to Australian/British equivalents (color→colour, organize→organise)',
+      description:
+        'Converts US spellings to Australian/British equivalents (color→colour, organize→organise)',
     },
     {
       key: 'spoken_numbers_to_digits' as const,
@@ -149,67 +154,67 @@
   });
 </script>
 
-<div class="filter-settings">
-  <div class="setting-group">
-    <h3>Output Filters</h3>
+<div class="flex flex-col gap-6">
+  <div class="flex flex-col gap-3">
+    <h3 class="text-sm font-semibold">Output Filters</h3>
 
-    <div class="filter-options">
+    <div class="flex flex-col gap-2">
       {#each filterDefinitions as filter}
-        <div class="setting-row card">
+        <div class="setting-row flex items-center justify-between gap-4">
           <div class="setting-info">
             <span class="setting-label">{filter.label}</span>
             <span class="setting-description">{filter.description}</span>
           </div>
-          <label class="toggle-switch">
-            <input
-              type="checkbox"
-              checked={options[filter.key]}
-              onchange={() => toggleOption(filter.key)}
-            />
-            <span class="toggle-slider"></span>
-          </label>
+          <Switch
+            checked={options[filter.key]}
+            onCheckedChange={(checked) => toggleOption(filter.key, checked)}
+          />
         </div>
       {/each}
     </div>
 
     {#if hasChanges}
-      <button type="button" class="reset-btn" onclick={resetToDefaults}> Reset to defaults </button>
+      <div>
+        <Button variant="outline" size="sm" onclick={resetToDefaults}>Reset to defaults</Button>
+      </div>
     {/if}
   </div>
 
-  <div class="setting-group">
-    <div class="preview-header">
-      <h3>Preview</h3>
-      <button
-        type="button"
-        class="expand-btn"
+  <div class="flex flex-col gap-3">
+    <div class="flex items-center justify-between gap-3">
+      <h3 class="text-sm font-semibold">Preview</h3>
+      <Button
+        variant="ghost"
+        size="sm"
         onclick={() => (isSampleExpanded = !isSampleExpanded)}
         aria-expanded={isSampleExpanded}
       >
         {isSampleExpanded ? 'Hide sample input' : 'Edit sample input'}
-      </button>
+      </Button>
     </div>
 
     {#if isSampleExpanded}
-      <div class="sample-input-container">
-        <label for="sample-text" class="sample-label">Sample text:</label>
-        <textarea
+      <div class="flex flex-col gap-1.5">
+        <Label for="sample-text" class="text-xs text-muted-foreground">Sample text:</Label>
+        <Textarea
           id="sample-text"
-          class="sample-input"
           bind:value={sampleText}
-          rows="3"
+          rows={3}
           placeholder="Enter sample text to test filters..."
-        ></textarea>
+          class="resize-y"
+        />
       </div>
     {/if}
 
-    <div class="preview-container">
-      <div class="preview-box">
-        <span class="preview-label">Before:</span>
-        <p class="preview-text original">{sampleText}</p>
+    <div class="flex items-stretch gap-3 rounded-lg border border-border/50 bg-muted/40 p-3">
+      <div class="flex min-w-0 flex-1 flex-col gap-1.5">
+        <span class="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+          >Before:</span
+        >
+        <p class="m-0 break-words text-sm leading-relaxed text-muted-foreground">{sampleText}</p>
       </div>
 
-      <div class="preview-arrow">
+      <div class="flex shrink-0 items-center justify-center text-muted-foreground">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           width="20"
@@ -226,152 +231,27 @@
         </svg>
       </div>
 
-      <div class="preview-box">
-        <span class="preview-label">After:</span>
+      <div class="flex min-w-0 flex-1 flex-col gap-1.5">
+        <span class="text-xs font-medium uppercase tracking-wide text-muted-foreground">After:</span
+        >
         {#if isLoading}
-          <p class="preview-text loading">Processing...</p>
+          <p class="m-0 text-sm italic leading-relaxed text-muted-foreground">Processing...</p>
         {:else if error}
-          <p class="preview-text error">{error}</p>
+          <p class="m-0 text-xs leading-relaxed text-destructive">{error}</p>
         {:else}
-          <p class="preview-text filtered">{filteredText || '(empty)'}</p>
+          <p class="m-0 break-words text-sm leading-relaxed">{filteredText || '(empty)'}</p>
         {/if}
       </div>
     </div>
   </div>
 
-  <div class="setting-group">
-    <h3>Custom Word Replacements</h3>
-    <p class="hint">
-      Configure custom word replacements in the Dictionary settings.
-    </p>
-    <button type="button" class="btn-outline" onclick={() => onOpenDictionary?.()}>
-      Open Dictionary Settings
-    </button>
+  <div class="flex flex-col gap-3">
+    <h3 class="text-sm font-semibold">Custom Word Replacements</h3>
+    <p class="hint">Configure custom word replacements in the Dictionary settings.</p>
+    <div>
+      <Button variant="outline" onclick={() => onOpenDictionary?.()}>
+        Open Dictionary Settings
+      </Button>
+    </div>
   </div>
 </div>
-
-<style>
-  .filter-settings {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-  }
-
-  .filter-options {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .reset-btn {
-    align-self: flex-start;
-    padding: 6px 12px;
-    font-size: var(--text-sm);
-    background: transparent;
-    border: 1px solid var(--color-border);
-    color: var(--color-text-secondary);
-  }
-
-  .reset-btn:hover {
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-primary);
-  }
-
-  .preview-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .expand-btn {
-    padding: 4px 10px;
-    font-size: var(--text-xs);
-    background: transparent;
-    border: 1px solid var(--color-border);
-    color: var(--color-text-secondary);
-  }
-
-  .expand-btn:hover {
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-primary);
-  }
-
-  .sample-input-container {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .sample-label {
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
-  }
-
-  .sample-input {
-    resize: vertical;
-    min-height: 60px;
-    font-family: var(--font-sans);
-    line-height: 1.5;
-  }
-
-  .preview-container {
-    display: flex;
-    align-items: stretch;
-    gap: 12px;
-    padding: 12px;
-    background: var(--color-bg-secondary);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--color-border-subtle);
-  }
-
-  .preview-box {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 0;
-  }
-
-  .preview-label {
-    font-size: var(--text-xs);
-    font-weight: 500;
-    color: var(--color-text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .preview-text {
-    margin: 0;
-    font-size: var(--text-sm);
-    line-height: 1.5;
-    word-break: break-word;
-  }
-
-  .preview-text.original {
-    color: var(--color-text-secondary);
-  }
-
-  .preview-text.filtered {
-    color: var(--color-text-primary);
-  }
-
-  .preview-text.loading {
-    color: var(--color-text-tertiary);
-    font-style: italic;
-  }
-
-  .preview-text.error {
-    color: var(--color-error);
-    font-size: var(--text-xs);
-  }
-
-  .preview-arrow {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    color: var(--color-text-tertiary);
-  }
-
-</style>

@@ -4,6 +4,11 @@
    * Supports preset ranges and custom date selection.
    */
 
+  import { Button } from '$components/ui/button';
+  import { Input } from '$components/ui/input';
+  import { Label } from '$components/ui/label';
+  import X from '@lucide/svelte/icons/x';
+
   interface Props {
     /** Start date in YYYY-MM-DD format */
     fromDate?: string;
@@ -33,7 +38,6 @@
 
   let selectedPreset = $state<PresetRange>('custom');
 
-  // Preset date ranges
   const presets: { value: PresetRange; label: string }[] = [
     { value: 'today', label: 'Today' },
     { value: 'yesterday', label: 'Yesterday' },
@@ -134,170 +138,58 @@
   });
 </script>
 
-<div class="date-range-picker" class:disabled>
-  <div class="presets">
+<div class="flex flex-col gap-3" class:opacity-60={disabled} class:pointer-events-none={disabled}>
+  <div class="flex flex-wrap gap-1.5">
     {#each presets as preset}
-      <button
-        class="preset-btn"
-        class:active={selectedPreset === preset.value}
+      <Button
+        variant={selectedPreset === preset.value ? 'default' : 'outline'}
+        size="sm"
         onclick={() => handlePresetChange(preset.value)}
         {disabled}
         type="button"
+        class="h-7 rounded-full text-xs"
       >
         {preset.label}
-      </button>
+      </Button>
     {/each}
   </div>
 
-  <div class="date-inputs">
-    <div class="date-field">
-      <label for="from-date">From</label>
-      <input
+  <div class="flex items-end gap-2">
+    <div class="flex flex-1 flex-col gap-1">
+      <Label for="from-date" class="text-xs">From</Label>
+      <Input
         type="date"
         id="from-date"
         bind:value={fromDate}
         onchange={handleDateChange}
         {disabled}
+        class="h-8 text-sm"
       />
     </div>
-    <span class="date-separator">-</span>
-    <div class="date-field">
-      <label for="to-date">To</label>
-      <input type="date" id="to-date" bind:value={toDate} onchange={handleDateChange} {disabled} />
+    <span class="pb-1.5 text-muted-foreground">-</span>
+    <div class="flex flex-1 flex-col gap-1">
+      <Label for="to-date" class="text-xs">To</Label>
+      <Input
+        type="date"
+        id="to-date"
+        bind:value={toDate}
+        onchange={handleDateChange}
+        {disabled}
+        class="h-8 text-sm"
+      />
     </div>
     {#if fromDate || toDate}
-      <button
-        class="clear-btn"
+      <Button
+        variant="ghost"
+        size="icon"
         onclick={handleClear}
         {disabled}
         type="button"
         aria-label="Clear date range"
+        class="h-8 w-8 shrink-0"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-          <path
-            d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"
-          />
-        </svg>
-      </button>
+        <X class="size-3.5" />
+      </Button>
     {/if}
   </div>
 </div>
-
-<style>
-  .date-range-picker {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .date-range-picker.disabled {
-    opacity: 0.6;
-    pointer-events: none;
-  }
-
-  .presets {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .preset-btn {
-    padding: 6px 12px;
-    border: 1px solid var(--color-border);
-    border-radius: 16px;
-    background: var(--color-bg-secondary);
-    color: var(--color-text-secondary);
-    font-size: 12px;
-    cursor: pointer;
-    transition:
-      background 0.15s ease,
-      border-color 0.15s ease,
-      color 0.15s ease;
-  }
-
-  .preset-btn:hover:not(:disabled) {
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-primary);
-  }
-
-  .preset-btn.active {
-    background: var(--color-accent);
-    border-color: var(--color-accent);
-    color: white;
-  }
-
-  .preset-btn:disabled {
-    cursor: not-allowed;
-  }
-
-  .date-inputs {
-    display: flex;
-    align-items: flex-end;
-    gap: 8px;
-  }
-
-  .date-field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    flex: 1;
-  }
-
-  .date-field label {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--color-text-tertiary);
-  }
-
-  .date-field input[type='date'] {
-    padding: 8px 10px;
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
-    background: var(--color-bg-secondary);
-    color: var(--color-text-primary);
-    font-size: 13px;
-    width: 100%;
-  }
-
-  .date-field input:focus {
-    outline: none;
-    border-color: var(--color-accent);
-    box-shadow: 0 0 0 2px rgba(var(--color-accent-rgb), 0.2);
-  }
-
-  .date-field input:disabled {
-    cursor: not-allowed;
-    opacity: 0.6;
-  }
-
-  .date-separator {
-    color: var(--color-text-tertiary);
-    padding-bottom: 8px;
-  }
-
-  .clear-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border: none;
-    border-radius: 6px;
-    background: var(--color-bg-secondary);
-    color: var(--color-text-tertiary);
-    cursor: pointer;
-    transition:
-      background 0.15s ease,
-      color 0.15s ease;
-    margin-bottom: 1px;
-  }
-
-  .clear-btn:hover:not(:disabled) {
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-primary);
-  }
-
-  .clear-btn:disabled {
-    cursor: not-allowed;
-  }
-</style>

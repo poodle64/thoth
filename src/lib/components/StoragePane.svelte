@@ -8,6 +8,9 @@
 
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { Button } from '$components/ui/button';
+  import * as Alert from '$components/ui/alert';
+  import * as AlertDialog from '$components/ui/alert-dialog';
 
   interface StorageUsage {
     modelsBytes: number;
@@ -25,8 +28,8 @@
   let isLoading = $state(true);
   let error = $state<string | null>(null);
 
-  /** Confirmation state for destructive actions */
-  let confirmAction = $state<string | null>(null);
+  /** Which destructive action is pending confirmation */
+  let confirmAction = $state<'recordings' | 'logs' | 'fluidaudio' | 'all' | null>(null);
   let actionInProgress = $state<string | null>(null);
 
   async function loadUsage() {
@@ -55,11 +58,7 @@
     return (bytes / usage.totalBytes) * 100;
   }
 
-  async function handleDeleteRecordings() {
-    if (confirmAction !== 'recordings') {
-      confirmAction = 'recordings';
-      return;
-    }
+  async function executeDeleteRecordings() {
     confirmAction = null;
     actionInProgress = 'recordings';
     try {
@@ -73,11 +72,7 @@
     }
   }
 
-  async function handleDeleteLogs() {
-    if (confirmAction !== 'logs') {
-      confirmAction = 'logs';
-      return;
-    }
+  async function executeDeleteLogs() {
     confirmAction = null;
     actionInProgress = 'logs';
     try {
@@ -91,11 +86,7 @@
     }
   }
 
-  async function handleDeleteFluidaudio() {
-    if (confirmAction !== 'fluidaudio') {
-      confirmAction = 'fluidaudio';
-      return;
-    }
+  async function executeDeleteFluidaudio() {
     confirmAction = null;
     actionInProgress = 'fluidaudio';
     try {
@@ -108,11 +99,7 @@
     }
   }
 
-  async function handleDeleteAll() {
-    if (confirmAction !== 'all') {
-      confirmAction = 'all';
-      return;
-    }
+  async function executeDeleteAll() {
     confirmAction = null;
     actionInProgress = 'all';
     try {
@@ -125,527 +112,306 @@
     }
   }
 
-  function cancelConfirm() {
-    confirmAction = null;
-  }
-
   onMount(() => {
     loadUsage();
   });
 </script>
 
 {#if isLoading}
-  <div class="loading">Calculating storage usage...</div>
-{:else if error}
-  <div class="error-message">
-    <p>{error}</p>
-    <button class="btn-small" onclick={loadUsage}>Retry</button>
+  <div class="text-muted-foreground flex items-center justify-center p-8 text-sm">
+    Calculating storage usage...
   </div>
+{:else if error}
+  <Alert.Root variant="destructive">
+    <Alert.Description class="flex items-center justify-between gap-3">
+      <span>{error}</span>
+      <Button variant="ghost" size="sm" onclick={loadUsage}>Retry</Button>
+    </Alert.Description>
+  </Alert.Root>
 {:else if usage}
   <!-- Storage overview -->
-  <section class="settings-section">
-    <div class="section-header">
-      <h2 class="section-title">Disk Usage</h2>
-      <p class="section-description">
+  <section class="flex flex-col gap-4">
+    <div>
+      <h2 class="text-sm font-semibold">Disk Usage</h2>
+      <p class="text-muted-foreground text-xs">
         Thoth is using {formatBytes(usage.totalBytes)} of disk space
       </p>
     </div>
-    <div class="section-content">
-      <!-- Bar chart -->
-      <div class="storage-bar">
-        {#if usage.modelsBytes + usage.fluidaudioBytes > 0}
-          <div
-            class="bar-segment models"
-            style="width: {Math.max(pct(usage.modelsBytes + usage.fluidaudioBytes), 1)}%"
-            title="Models: {formatBytes(usage.modelsBytes + usage.fluidaudioBytes)}"
-          ></div>
-        {/if}
-        {#if usage.recordingsBytes > 0}
-          <div
-            class="bar-segment recordings"
-            style="width: {Math.max(pct(usage.recordingsBytes), 1)}%"
-            title="Recordings: {formatBytes(usage.recordingsBytes)}"
-          ></div>
-        {/if}
-        {#if usage.databaseBytes > 0}
-          <div
-            class="bar-segment database"
-            style="width: {Math.max(pct(usage.databaseBytes), 1)}%"
-            title="Database: {formatBytes(usage.databaseBytes)}"
-          ></div>
-        {/if}
-        {#if usage.logsBytes > 0}
-          <div
-            class="bar-segment logs"
-            style="width: {Math.max(pct(usage.logsBytes), 1)}%"
-            title="Logs: {formatBytes(usage.logsBytes)}"
-          ></div>
-        {/if}
-        {#if usage.configBytes > 0}
-          <div
-            class="bar-segment config"
-            style="width: {Math.max(pct(usage.configBytes), 1)}%"
-            title="Config: {formatBytes(usage.configBytes)}"
-          ></div>
-        {/if}
-      </div>
 
-      <!-- Legend -->
-      <div class="storage-legend">
-        <div class="legend-item">
-          <span class="legend-dot models"></span>
-          <span class="legend-label">Models</span>
-          <span class="legend-value">{formatBytes(usage.modelsBytes + usage.fluidaudioBytes)}</span>
-        </div>
-        <div class="legend-item">
-          <span class="legend-dot recordings"></span>
-          <span class="legend-label">Recordings</span>
-          <span class="legend-value">
-            {formatBytes(usage.recordingsBytes)}
-            {#if usage.recordingCount > 0}
-              <span class="legend-count">({usage.recordingCount} files)</span>
-            {/if}
-          </span>
-        </div>
-        <div class="legend-item">
-          <span class="legend-dot database"></span>
-          <span class="legend-label">Database</span>
-          <span class="legend-value">{formatBytes(usage.databaseBytes)}</span>
-        </div>
-        <div class="legend-item">
-          <span class="legend-dot logs"></span>
-          <span class="legend-label">Logs</span>
-          <span class="legend-value">
-            {formatBytes(usage.logsBytes)}
-            {#if usage.logCount > 0}
-              <span class="legend-count">({usage.logCount} files)</span>
-            {/if}
-          </span>
-        </div>
-        <div class="legend-item">
-          <span class="legend-dot config"></span>
-          <span class="legend-label">Config</span>
-          <span class="legend-value">{formatBytes(usage.configBytes)}</span>
-        </div>
+    <!-- Storage bar chart (bespoke: custom proportional segments with per-category colours) -->
+    <div
+      class="bg-muted flex h-3 w-full gap-px overflow-hidden rounded-full"
+      role="img"
+      aria-label="Storage breakdown chart"
+    >
+      {#if usage.modelsBytes + usage.fluidaudioBytes > 0}
+        <div
+          class="bg-primary min-w-[3px] transition-[width]"
+          style:width="{Math.max(pct(usage.modelsBytes + usage.fluidaudioBytes), 1)}%"
+          title="Models: {formatBytes(usage.modelsBytes + usage.fluidaudioBytes)}"
+        ></div>
+      {/if}
+      {#if usage.recordingsBytes > 0}
+        <div
+          class="min-w-[3px] bg-emerald-500 transition-[width]"
+          style:width="{Math.max(pct(usage.recordingsBytes), 1)}%"
+          title="Recordings: {formatBytes(usage.recordingsBytes)}"
+        ></div>
+      {/if}
+      {#if usage.databaseBytes > 0}
+        <div
+          class="min-w-[3px] bg-amber-500 transition-[width]"
+          style:width="{Math.max(pct(usage.databaseBytes), 1)}%"
+          title="Database: {formatBytes(usage.databaseBytes)}"
+        ></div>
+      {/if}
+      {#if usage.logsBytes > 0}
+        <div
+          class="min-w-[3px] bg-gray-500 transition-[width]"
+          style:width="{Math.max(pct(usage.logsBytes), 1)}%"
+          title="Logs: {formatBytes(usage.logsBytes)}"
+        ></div>
+      {/if}
+      {#if usage.configBytes > 0}
+        <div
+          class="min-w-[3px] bg-slate-400 transition-[width]"
+          style:width="{Math.max(pct(usage.configBytes), 1)}%"
+          title="Config: {formatBytes(usage.configBytes)}"
+        ></div>
+      {/if}
+    </div>
+
+    <!-- Legend (bespoke: matches bar chart colours) -->
+    <div class="flex flex-col gap-1.5">
+      <div class="flex items-center gap-2.5 text-sm">
+        <span class="bg-primary h-2.5 w-2.5 flex-shrink-0 rounded-sm"></span>
+        <span class="text-muted-foreground flex-1">Models</span>
+        <span class="tabular-nums font-medium">
+          {formatBytes(usage.modelsBytes + usage.fluidaudioBytes)}
+        </span>
+      </div>
+      <div class="flex items-center gap-2.5 text-sm">
+        <span class="h-2.5 w-2.5 flex-shrink-0 rounded-sm bg-emerald-500"></span>
+        <span class="text-muted-foreground flex-1">Recordings</span>
+        <span class="tabular-nums font-medium">
+          {formatBytes(usage.recordingsBytes)}
+          {#if usage.recordingCount > 0}
+            <span class="text-muted-foreground ml-1 text-xs font-normal">
+              ({usage.recordingCount} files)
+            </span>
+          {/if}
+        </span>
+      </div>
+      <div class="flex items-center gap-2.5 text-sm">
+        <span class="h-2.5 w-2.5 flex-shrink-0 rounded-sm bg-amber-500"></span>
+        <span class="text-muted-foreground flex-1">Database</span>
+        <span class="tabular-nums font-medium">{formatBytes(usage.databaseBytes)}</span>
+      </div>
+      <div class="flex items-center gap-2.5 text-sm">
+        <span class="h-2.5 w-2.5 flex-shrink-0 rounded-sm bg-gray-500"></span>
+        <span class="text-muted-foreground flex-1">Logs</span>
+        <span class="tabular-nums font-medium">
+          {formatBytes(usage.logsBytes)}
+          {#if usage.logCount > 0}
+            <span class="text-muted-foreground ml-1 text-xs font-normal">
+              ({usage.logCount} files)
+            </span>
+          {/if}
+        </span>
+      </div>
+      <div class="flex items-center gap-2.5 text-sm">
+        <span class="h-2.5 w-2.5 flex-shrink-0 rounded-sm bg-slate-400"></span>
+        <span class="text-muted-foreground flex-1">Config</span>
+        <span class="tabular-nums font-medium">{formatBytes(usage.configBytes)}</span>
       </div>
     </div>
   </section>
 
   <!-- Selective cleanup -->
-  <section class="settings-section">
-    <div class="section-header">
-      <h2 class="section-title">Cleanup</h2>
-      <p class="section-description">Selectively remove data to free up disk space</p>
+  <section class="mt-6 flex flex-col gap-3">
+    <div>
+      <h2 class="text-sm font-semibold">Cleanup</h2>
+      <p class="text-muted-foreground text-xs">Selectively remove data to free up disk space</p>
     </div>
-    <div class="section-content">
-      <div class="cleanup-list">
-        <!-- Recordings -->
-        <div class="cleanup-row">
-          <div class="cleanup-info">
-            <span class="cleanup-label">Recordings</span>
-            <span class="cleanup-description">
-              {usage.recordingCount} audio files ({formatBytes(usage.recordingsBytes)})
-            </span>
-          </div>
-          {#if confirmAction === 'recordings'}
-            <div class="confirm-group">
-              <span class="confirm-text">Delete all recordings?</span>
-              <button class="btn-danger-sm" onclick={handleDeleteRecordings}>Delete</button>
-              <button class="btn-cancel-sm" onclick={cancelConfirm}>Cancel</button>
-            </div>
-          {:else}
-            <button
-              class="btn-cleanup"
-              disabled={usage.recordingsBytes === 0 || actionInProgress !== null}
-              onclick={handleDeleteRecordings}
-            >
-              {actionInProgress === 'recordings' ? 'Deleting...' : 'Delete'}
-            </button>
-          {/if}
-        </div>
 
-        <!-- Logs -->
-        <div class="cleanup-row">
-          <div class="cleanup-info">
-            <span class="cleanup-label">Logs</span>
-            <span class="cleanup-description">
-              {usage.logCount} log files ({formatBytes(usage.logsBytes)})
-            </span>
-          </div>
-          {#if confirmAction === 'logs'}
-            <div class="confirm-group">
-              <span class="confirm-text">Delete all logs?</span>
-              <button class="btn-danger-sm" onclick={handleDeleteLogs}>Delete</button>
-              <button class="btn-cancel-sm" onclick={cancelConfirm}>Cancel</button>
-            </div>
-          {:else}
-            <button
-              class="btn-cleanup"
-              disabled={usage.logsBytes === 0 || actionInProgress !== null}
-              onclick={handleDeleteLogs}
-            >
-              {actionInProgress === 'logs' ? 'Deleting...' : 'Delete'}
-            </button>
-          {/if}
+    <div class="flex flex-col gap-0.5">
+      <!-- Recordings -->
+      <div class="flex items-center justify-between rounded-md border px-3.5 py-2.5">
+        <div class="flex flex-col gap-0.5">
+          <span class="text-sm font-medium">Recordings</span>
+          <span class="text-muted-foreground text-xs">
+            {usage.recordingCount} audio files ({formatBytes(usage.recordingsBytes)})
+          </span>
         </div>
-
-        <!-- FluidAudio cache -->
-        {#if usage.fluidaudioBytes > 0}
-          <div class="cleanup-row">
-            <div class="cleanup-info">
-              <span class="cleanup-label">Neural Engine cache</span>
-              <span class="cleanup-description">
-                CoreML compiled models ({formatBytes(usage.fluidaudioBytes)})
-              </span>
-            </div>
-            {#if confirmAction === 'fluidaudio'}
-              <div class="confirm-group">
-                <span class="confirm-text">Delete cache? Will recompile on next use.</span>
-                <button class="btn-danger-sm" onclick={handleDeleteFluidaudio}>Delete</button>
-                <button class="btn-cancel-sm" onclick={cancelConfirm}>Cancel</button>
-              </div>
-            {:else}
-              <button
-                class="btn-cleanup"
-                disabled={actionInProgress !== null}
-                onclick={handleDeleteFluidaudio}
-              >
-                {actionInProgress === 'fluidaudio' ? 'Deleting...' : 'Delete'}
-              </button>
-            {/if}
-          </div>
-        {/if}
+        <Button
+          variant="destructive"
+          size="sm"
+          disabled={usage.recordingsBytes === 0 || actionInProgress !== null}
+          onclick={() => (confirmAction = 'recordings')}
+        >
+          {actionInProgress === 'recordings' ? 'Deleting...' : 'Delete'}
+        </Button>
       </div>
+
+      <!-- Logs -->
+      <div class="flex items-center justify-between rounded-md border px-3.5 py-2.5">
+        <div class="flex flex-col gap-0.5">
+          <span class="text-sm font-medium">Logs</span>
+          <span class="text-muted-foreground text-xs">
+            {usage.logCount} log files ({formatBytes(usage.logsBytes)})
+          </span>
+        </div>
+        <Button
+          variant="destructive"
+          size="sm"
+          disabled={usage.logsBytes === 0 || actionInProgress !== null}
+          onclick={() => (confirmAction = 'logs')}
+        >
+          {actionInProgress === 'logs' ? 'Deleting...' : 'Delete'}
+        </Button>
+      </div>
+
+      <!-- FluidAudio cache -->
+      {#if usage.fluidaudioBytes > 0}
+        <div class="flex items-center justify-between rounded-md border px-3.5 py-2.5">
+          <div class="flex flex-col gap-0.5">
+            <span class="text-sm font-medium">Neural Engine cache</span>
+            <span class="text-muted-foreground text-xs">
+              CoreML compiled models ({formatBytes(usage.fluidaudioBytes)})
+            </span>
+          </div>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={actionInProgress !== null}
+            onclick={() => (confirmAction = 'fluidaudio')}
+          >
+            {actionInProgress === 'fluidaudio' ? 'Deleting...' : 'Delete'}
+          </Button>
+        </div>
+      {/if}
     </div>
   </section>
 
   <!-- Full reset -->
-  <section class="settings-section">
-    <div class="section-header">
-      <h2 class="section-title">Reset</h2>
-      <p class="section-description">
+  <section class="mt-6 flex flex-col gap-3">
+    <div>
+      <h2 class="text-sm font-semibold">Reset</h2>
+      <p class="text-muted-foreground text-xs">
         Remove all Thoth data from this machine. This cannot be undone.
       </p>
     </div>
-    <div class="section-content">
-      {#if confirmAction === 'all'}
-        <div class="reset-confirm">
-          <p class="reset-warning">
-            This will permanently delete all Thoth data including models, recordings,
-            transcription history, settings, and the Neural Engine cache.
-          </p>
-          <div class="reset-actions">
-            <button class="btn-danger" onclick={handleDeleteAll}>
-              Delete Everything
-            </button>
-            <button class="btn-cancel" onclick={cancelConfirm}>Cancel</button>
-          </div>
-        </div>
-      {:else}
-        <button
-          class="btn-danger-outline"
-          disabled={actionInProgress !== null}
-          onclick={handleDeleteAll}
-        >
-          {actionInProgress === 'all' ? 'Deleting...' : 'Delete All Thoth Data'}
-        </button>
-      {/if}
+    <div>
+      <Button
+        variant="destructive"
+        disabled={actionInProgress !== null}
+        onclick={() => (confirmAction = 'all')}
+      >
+        {actionInProgress === 'all' ? 'Deleting...' : 'Delete All Thoth Data'}
+      </Button>
     </div>
   </section>
 {/if}
 
-<style>
-  .loading {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--spacing-xl);
-    color: var(--color-text-tertiary);
-    font-size: var(--text-sm);
-  }
+<!-- Confirmation dialogs for destructive cleanup actions -->
+<AlertDialog.Root
+  open={confirmAction === 'recordings'}
+  onOpenChange={(v) => {
+    if (!v) confirmAction = null;
+  }}
+>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>Delete all recordings?</AlertDialog.Title>
+      <AlertDialog.Description>
+        This will permanently delete all audio recording files. This cannot be undone.
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+      <AlertDialog.Action
+        class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+        onclick={executeDeleteRecordings}
+      >
+        Delete
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
 
-  .error-message {
-    padding: var(--spacing-lg);
-    color: var(--color-error);
-    font-size: var(--text-sm);
-    text-align: center;
-  }
+<AlertDialog.Root
+  open={confirmAction === 'logs'}
+  onOpenChange={(v) => {
+    if (!v) confirmAction = null;
+  }}
+>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>Delete all logs?</AlertDialog.Title>
+      <AlertDialog.Description>
+        This will permanently delete all log files. This cannot be undone.
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+      <AlertDialog.Action
+        class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+        onclick={executeDeleteLogs}
+      >
+        Delete
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
 
-  .error-message p {
-    margin: 0 0 12px;
-  }
+<AlertDialog.Root
+  open={confirmAction === 'fluidaudio'}
+  onOpenChange={(v) => {
+    if (!v) confirmAction = null;
+  }}
+>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>Delete Neural Engine cache?</AlertDialog.Title>
+      <AlertDialog.Description>
+        The CoreML cache will be deleted. It will recompile automatically on next use, which may
+        take a minute.
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+      <AlertDialog.Action
+        class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+        onclick={executeDeleteFluidaudio}
+      >
+        Delete
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
 
-  /* Storage bar */
-  .storage-bar {
-    display: flex;
-    height: 12px;
-    border-radius: var(--radius-full);
-    overflow: hidden;
-    background: var(--color-bg-tertiary);
-    gap: 1px;
-  }
-
-  .bar-segment {
-    min-width: 3px;
-    transition: width var(--transition-normal);
-  }
-
-  .bar-segment.models {
-    background: var(--color-accent);
-  }
-
-  .bar-segment.fluidaudio {
-    background: #8b5cf6;
-  }
-
-  .bar-segment.recordings {
-    background: #10b981;
-  }
-
-  .bar-segment.database {
-    background: #f59e0b;
-  }
-
-  .bar-segment.logs {
-    background: #6b7280;
-  }
-
-  .bar-segment.config {
-    background: #94a3b8;
-  }
-
-  /* Legend */
-  .storage-legend {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-top: 16px;
-  }
-
-  .legend-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: var(--text-sm);
-  }
-
-  .legend-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 3px;
-    flex-shrink: 0;
-  }
-
-  .legend-dot.models {
-    background: var(--color-accent);
-  }
-
-  .legend-dot.fluidaudio {
-    background: #8b5cf6;
-  }
-
-  .legend-dot.recordings {
-    background: #10b981;
-  }
-
-  .legend-dot.database {
-    background: #f59e0b;
-  }
-
-  .legend-dot.logs {
-    background: #6b7280;
-  }
-
-  .legend-dot.config {
-    background: #94a3b8;
-  }
-
-  .legend-label {
-    color: var(--color-text-secondary);
-    flex: 1;
-  }
-
-  .legend-value {
-    color: var(--color-text-primary);
-    font-weight: 500;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .legend-count {
-    color: var(--color-text-tertiary);
-    font-weight: 400;
-    font-size: var(--text-xs);
-    margin-left: 4px;
-  }
-
-  /* Cleanup list */
-  .cleanup-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 4px 0;
-  }
-
-  .cleanup-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 14px;
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-md);
-  }
-
-  .cleanup-info {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-  }
-
-  .cleanup-label {
-    font-size: var(--text-sm);
-    font-weight: 500;
-    color: var(--color-text-primary);
-  }
-
-  .cleanup-description {
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
-  }
-
-  .btn-cleanup {
-    padding: 5px 14px;
-    font-size: var(--text-xs);
-    font-weight: 500;
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-
-  .btn-cleanup:hover:not(:disabled) {
-    background: var(--color-bg-secondary);
-    color: var(--color-error);
-    border-color: var(--color-error);
-  }
-
-  .btn-cleanup:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-
-  /* Confirm inline */
-  .confirm-group {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-  }
-
-  .confirm-text {
-    font-size: var(--text-xs);
-    color: var(--color-warning);
-    white-space: nowrap;
-  }
-
-  .btn-danger-sm {
-    padding: 4px 10px;
-    font-size: var(--text-xs);
-    font-weight: 500;
-    background: var(--color-error);
-    color: white;
-    border: none;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-  }
-
-  .btn-danger-sm:hover {
-    filter: brightness(1.1);
-  }
-
-  .btn-cancel-sm {
-    padding: 4px 10px;
-    font-size: var(--text-xs);
-    font-weight: 500;
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-  }
-
-  /* Full reset */
-  .reset-confirm {
-    padding: 16px;
-    background: color-mix(in srgb, var(--color-error) 5%, var(--color-bg-secondary));
-    border: 1px solid color-mix(in srgb, var(--color-error) 30%, var(--color-border));
-    border-radius: var(--radius-md);
-  }
-
-  .reset-warning {
-    margin: 0 0 14px;
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    line-height: 1.5;
-  }
-
-  .reset-actions {
-    display: flex;
-    gap: 10px;
-  }
-
-  .btn-danger {
-    padding: 8px 18px;
-    font-size: var(--text-sm);
-    font-weight: 500;
-    background: var(--color-error);
-    color: white;
-    border: none;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: filter var(--transition-fast);
-  }
-
-  .btn-danger:hover {
-    filter: brightness(1.1);
-  }
-
-  .btn-cancel {
-    padding: 8px 18px;
-    font-size: var(--text-sm);
-    font-weight: 500;
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-  }
-
-  .btn-danger-outline {
-    padding: 8px 18px;
-    font-size: var(--text-sm);
-    font-weight: 500;
-    background: transparent;
-    color: var(--color-error);
-    border: 1px solid var(--color-error);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition:
-      background var(--transition-fast),
-      color var(--transition-fast);
-  }
-
-  .btn-danger-outline:hover:not(:disabled) {
-    background: var(--color-error);
-    color: white;
-  }
-
-  .btn-danger-outline:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-</style>
+<AlertDialog.Root
+  open={confirmAction === 'all'}
+  onOpenChange={(v) => {
+    if (!v) confirmAction = null;
+  }}
+>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>Delete all Thoth data?</AlertDialog.Title>
+      <AlertDialog.Description>
+        This will permanently delete all Thoth data including models, recordings, transcription
+        history, settings, and the Neural Engine cache. This cannot be undone.
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+      <AlertDialog.Action
+        class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+        onclick={executeDeleteAll}
+      >
+        Delete Everything
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

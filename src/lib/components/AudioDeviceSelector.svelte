@@ -1,25 +1,23 @@
 <script lang="ts">
-  /**
-   * Audio Device Selector Component
-   *
-   * Allows users to select an audio input device and preview the audio level.
-   * Shows clear visual feedback about which device is selected and whether
-   * it's available.
-   */
-
   import { onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { settingsStore } from '../stores/settings.svelte';
+  import { Button } from '$components/ui/button';
+  import * as Select from '$components/ui/select';
+  import * as Alert from '$components/ui/alert';
+  import { Select as SelectPrimitive } from 'bits-ui';
+  import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+  import Mic from '@lucide/svelte/icons/mic';
+  import MicOff from '@lucide/svelte/icons/mic-off';
+  import AlertCircle from '@lucide/svelte/icons/alert-circle';
 
   interface AudioLevelEvent {
     rms: number;
     peak: number;
   }
 
-  /** Minimum dB value for the meter (silence floor) */
   const MIN_DB = -60;
-  /** Maximum dB value for the meter (0 dB = full scale) */
   const MAX_DB = 0;
 
   let isPreviewActive = $state(false);
@@ -27,17 +25,14 @@
   let peakLevel = $state(0);
   let unlisten: UnlistenFn | null = null;
 
-  /** Whether the selected device is available */
   let selectedDeviceAvailable = $derived.by(() => {
     const deviceId = settingsStore.selectedDeviceId;
     if (!deviceId) {
-      // System default - check if any default device exists
       return settingsStore.audioDevices.some((d) => d.is_default);
     }
     return settingsStore.audioDevices.some((d) => d.id === deviceId);
   });
 
-  /** Get the display name for the currently selected device */
   let selectedDeviceName = $derived.by(() => {
     const deviceId = settingsStore.selectedDeviceId;
     if (!deviceId) {
@@ -48,66 +43,45 @@
     return device ? device.name : 'Unknown Device';
   });
 
-  /**
-   * Convert linear amplitude to a 0-1 meter position
-   * Maps the dB range (-60 to 0) to 0-1
-   */
   function linearToMeterPosition(linear: number): number {
     if (linear <= 0) return 0;
     const db = 20 * Math.log10(linear);
-    // Map db from MIN_DB..MAX_DB to 0..1
     const normalized = (db - MIN_DB) / (MAX_DB - MIN_DB);
     return Math.max(0, Math.min(1, normalized));
   }
 
-  /** Current level as meter position (0-1) */
   let meterLevel = $derived(linearToMeterPosition(currentLevel));
-
-  /** Peak level as meter position (0-1) */
   let meterPeak = $derived(linearToMeterPosition(peakLevel));
 
+  /** Derive the select value: null device id maps to the empty-string sentinel */
+  let selectValue = $derived(settingsStore.selectedDeviceId ?? '');
+
   onMount(async () => {
-    // Load audio devices on mount
     await settingsStore.loadAudioDevices();
   });
 
   onDestroy(async () => {
-    // Stop preview and clean up listener when component unmounts
     await stopPreview();
   });
 
-  /**
-   * Handle device selection change
-   */
-  async function handleDeviceChange(event: Event): Promise<void> {
-    const select = event.target as HTMLSelectElement;
-    const value = select.value === '' ? null : select.value;
-    await settingsStore.selectAudioDevice(value);
-
-    // Restart preview if active to use new device
+  async function handleDeviceChange(value: string | undefined): Promise<void> {
+    const resolved = value === '' || value === undefined ? null : value;
+    await settingsStore.selectAudioDevice(resolved);
     if (isPreviewActive) {
       await restartPreview();
     }
   }
 
-  /**
-   * Start audio preview for the selected device
-   */
   async function startPreview(): Promise<void> {
     if (isPreviewActive) return;
-
     try {
-      // Set up event listener for audio levels
       unlisten = await listen<AudioLevelEvent>('audio-level', (event) => {
         currentLevel = event.payload.rms;
         peakLevel = event.payload.peak;
       });
-
-      // Start the preview stream
       await invoke('start_audio_preview', {
         deviceId: settingsStore.selectedDeviceId,
       });
-
       isPreviewActive = true;
     } catch (e) {
       console.error('Failed to start audio preview:', e);
@@ -115,29 +89,21 @@
     }
   }
 
-  /**
-   * Stop audio preview
-   */
   async function stopPreview(): Promise<void> {
     if (unlisten) {
       unlisten();
       unlisten = null;
     }
-
     try {
       await invoke('stop_audio_preview');
     } catch (e) {
       console.error('Failed to stop audio preview:', e);
     }
-
     isPreviewActive = false;
     currentLevel = 0;
     peakLevel = 0;
   }
 
-  /**
-   * Toggle audio preview on/off
-   */
   async function togglePreview(): Promise<void> {
     if (isPreviewActive) {
       await stopPreview();
@@ -146,114 +112,116 @@
     }
   }
 
-  /**
-   * Restart preview with potentially new device
-   */
   async function restartPreview(): Promise<void> {
     await stopPreview();
     await startPreview();
   }
 
-  /**
-   * Refresh the device list
-   */
   async function refreshDevices(): Promise<void> {
     await settingsStore.loadAudioDevices();
   }
+
+  /** Build the display label for the system default option */
+  let defaultOptionLabel = $derived.by(() => {
+    const def = settingsStore.audioDevices.find((d) => d.is_default);
+    return def ? `System Default (${def.name})` : 'System Default';
+  });
 </script>
 
-<div class="audio-device-selector">
-  <!-- Active Device Status Banner -->
-  <div class="device-status" class:warning={!selectedDeviceAvailable}>
-    <div class="status-icon">
+<div class="flex flex-col gap-5">
+  <!-- Device status banner -->
+  <div
+    class="flex items-center gap-3 rounded-lg border px-4 py-3 {selectedDeviceAvailable
+      ? 'border-green-500/40 bg-green-500/5'
+      : 'border-yellow-500/40 bg-yellow-500/5'}"
+  >
+    <div class="shrink-0 size-5 {selectedDeviceAvailable ? 'text-green-500' : 'text-yellow-500'}">
       {#if selectedDeviceAvailable}
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        <Mic class="size-5" />
       {:else}
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M1 1l22 22M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23M12 19v4M8 23h8" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        <MicOff class="size-5" />
       {/if}
     </div>
-    <div class="status-content">
-      <span class="status-label">{selectedDeviceAvailable ? 'Active Device' : 'Device Unavailable'}</span>
-      <span class="status-device">{selectedDeviceName}</span>
+    <div class="flex flex-col gap-0.5 flex-1 min-w-0">
+      <span
+        class="text-xs font-semibold uppercase tracking-wide {selectedDeviceAvailable
+          ? 'text-green-500'
+          : 'text-yellow-500'}"
+      >
+        {selectedDeviceAvailable ? 'Active Device' : 'Device Unavailable'}
+      </span>
+      <span class="text-sm font-medium truncate text-foreground">{selectedDeviceName}</span>
     </div>
     {#if !selectedDeviceAvailable}
-      <button class="status-action" onclick={refreshDevices}>
-        Refresh
-      </button>
+      <Button variant="outline" size="sm" onclick={refreshDevices}>Refresh</Button>
     {/if}
   </div>
 
-  <div class="selector-row">
-    <label for="audio-device-select" class="label">Input Device</label>
-    <div class="select-wrapper">
+  <!-- Device selector -->
+  <div class="flex flex-col gap-2">
+    <label class="text-sm font-medium text-muted-foreground" for="audio-device-select">
+      Input Device
+    </label>
+    <div class="flex gap-2 items-center">
       {#key settingsStore.audioDevices.length}
-        <select
-          id="audio-device-select"
-          value={settingsStore.selectedDeviceId ?? ''}
-          onchange={handleDeviceChange}
+        <Select.Root
+          type="single"
+          value={selectValue}
+          onValueChange={handleDeviceChange}
           disabled={settingsStore.isLoadingDevices}
-          class:device-missing={!selectedDeviceAvailable}
         >
-          <option value="">System Default{settingsStore.audioDevices.find(d => d.is_default) ? ` (${settingsStore.audioDevices.find(d => d.is_default)?.name})` : ''}</option>
-          {#each settingsStore.audioDevices as device (device.id)}
-            <option value={device.id}>
-              {device.name}{device.is_default ? ' (Default)' : ''}
-            </option>
-          {/each}
-        </select>
+          <Select.Trigger id="audio-device-select" class="flex-1">
+            <SelectPrimitive.Value placeholder="Select device…" />
+          </Select.Trigger>
+          <Select.Content>
+            <Select.Item value="">{defaultOptionLabel}</Select.Item>
+            {#each settingsStore.audioDevices as device (device.id)}
+              <Select.Item value={device.id}>
+                {device.name}{device.is_default ? ' (Default)' : ''}
+              </Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
       {/key}
-      <button
-        class="icon-btn refresh-btn"
+      <Button
+        variant="ghost"
+        size="icon"
         onclick={refreshDevices}
         disabled={settingsStore.isLoadingDevices}
         title="Refresh device list"
       >
-        <svg
-          class="icon"
-          class:spinning={settingsStore.isLoadingDevices}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-        >
-          <path
-            d="M21 12a9 9 0 11-3-6.7M21 3v5h-5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
+        <RefreshCw class="size-4 {settingsStore.isLoadingDevices ? 'animate-spin' : ''}" />
+      </Button>
     </div>
   </div>
 
-  <div class="preview-section">
-    <div class="preview-header">
-      <span class="label">Audio Preview</span>
-      <button class="preview-btn" class:active={isPreviewActive} onclick={togglePreview}>
+  <!-- Audio preview section -->
+  <div class="flex flex-col gap-3 rounded-lg bg-muted/40 p-4">
+    <div class="flex items-center justify-between">
+      <span class="text-sm font-medium text-muted-foreground">Audio Preview</span>
+      <Button variant={isPreviewActive ? 'default' : 'secondary'} size="sm" onclick={togglePreview}>
         {isPreviewActive ? 'Stop' : 'Test'}
-      </button>
+      </Button>
     </div>
 
-    <div class="level-meter">
-      <div class="meter-track">
+    <!-- Level meter — kept bespoke (custom audio metering logic) -->
+    <div class="level-meter flex flex-col gap-1">
+      <div class="relative h-2 rounded-full bg-muted overflow-hidden">
         <div
-          class="meter-fill"
-          class:active={isPreviewActive}
+          class="absolute inset-y-0 left-0 rounded-full transition-[width] duration-[50ms] {isPreviewActive
+            ? 'meter-fill-active'
+            : 'bg-muted-foreground/20'}"
           style:width="{meterLevel * 100}%"
         ></div>
         <div
-          class="meter-peak"
-          class:visible={isPreviewActive && meterPeak > 0.01}
+          class="absolute top-0 w-0.5 h-full bg-foreground transition-[left,opacity] duration-[50ms] {isPreviewActive &&
+          meterPeak > 0.01
+            ? 'opacity-80'
+            : 'opacity-0'}"
           style:left="{meterPeak * 100}%"
         ></div>
       </div>
-      <div class="meter-labels">
+      <div class="flex justify-between text-xs text-muted-foreground px-0.5">
         <span>-60 dB</span>
         <span>-30 dB</span>
         <span>0 dB</span>
@@ -261,307 +229,29 @@
     </div>
 
     {#if isPreviewActive}
-      <p class="preview-hint">Speak into your microphone to see audio levels</p>
+      <p class="text-xs text-muted-foreground italic text-center">
+        Speak into your microphone to see audio levels
+      </p>
     {/if}
   </div>
 
   {#if settingsStore.error}
-    <p class="error-message">{settingsStore.error}</p>
+    <Alert.Root variant="destructive">
+      <AlertCircle class="size-4" />
+      <Alert.Description>{settingsStore.error}</Alert.Description>
+    </Alert.Root>
   {/if}
 </div>
 
 <style>
-  .audio-device-selector {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-  }
-
-  /* Device Status Banner */
-  .device-status {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-success);
-    border-radius: var(--radius-md);
-  }
-
-  .device-status.warning {
-    border-color: var(--color-warning);
-    background: color-mix(in srgb, var(--color-warning) 8%, transparent);
-  }
-
-  .status-icon {
-    flex-shrink: 0;
-    width: 24px;
-    height: 24px;
-    color: var(--color-success);
-  }
-
-  .device-status.warning .status-icon {
-    color: var(--color-warning);
-  }
-
-  .status-icon svg {
-    width: 100%;
-    height: 100%;
-  }
-
-  .status-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-  }
-
-  .status-label {
-    font-size: var(--text-xs);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--color-success);
-  }
-
-  .device-status.warning .status-label {
-    color: var(--color-warning);
-  }
-
-  .status-device {
-    font-size: var(--text-sm);
-    font-weight: 500;
-    color: var(--color-text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .status-action {
-    flex-shrink: 0;
-    padding: 6px 12px;
-    font-size: var(--text-xs);
-    font-weight: 500;
-    background: var(--color-warning);
-    border: none;
-    border-radius: var(--radius-sm);
-    color: #000;
-    cursor: pointer;
-    transition: opacity 0.15s ease;
-  }
-
-  .status-action:hover {
-    opacity: 0.9;
-  }
-
-  .selector-row {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .label {
-    font-size: var(--text-sm);
-    font-weight: 500;
-    color: var(--color-text-secondary);
-  }
-
-  .select-wrapper {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-
-  select {
-    flex: 1;
-    padding: 8px 12px;
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    color: var(--color-text-primary);
-    font-size: var(--text-base);
-    cursor: pointer;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 12px center;
-    padding-right: 32px;
-  }
-
-  select.device-missing {
-    border-color: var(--color-warning);
-  }
-
-  select:hover {
-    border-color: var(--color-bg-hover);
-  }
-
-  select:focus {
-    outline: none;
-    border-color: var(--color-accent);
-  }
-
-  select:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .icon-btn {
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: background 0.15s ease;
-  }
-
-  .icon-btn:hover {
-    background: var(--color-bg-tertiary);
-  }
-
-  .icon-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .icon {
-    width: 16px;
-    height: 16px;
-    color: var(--color-text-secondary);
-  }
-
-  .icon.spinning {
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
-  .preview-section {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding: 16px;
-    background: var(--color-bg-secondary);
-    border-radius: var(--radius-md);
-  }
-
-  .preview-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .preview-btn {
-    padding: 6px 16px;
-    font-size: var(--text-sm);
-    font-weight: 500;
-    background: var(--color-bg-tertiary);
-    border: none;
-    border-radius: var(--radius-md);
-    color: var(--color-text-primary);
-    cursor: pointer;
-    transition: background 0.15s ease;
-  }
-
-  .preview-btn:hover {
-    background: var(--color-bg-hover);
-  }
-
-  .preview-btn.active {
-    background: var(--color-accent);
-    color: white;
-  }
-
-  .preview-btn.active:hover {
-    background: var(--color-accent-hover);
-  }
-
-  .level-meter {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .meter-track {
-    position: relative;
-    height: 8px;
-    background: var(--color-bg-tertiary);
-    border-radius: var(--radius-full);
-    overflow: hidden;
-  }
-
-  .meter-fill {
-    position: absolute;
-    top: 0;
-    left: 0;
-    height: 100%;
-    background: var(--color-bg-hover);
-    border-radius: var(--radius-full);
-    transition: width 0.05s linear;
-  }
-
-  .meter-fill.active {
+  /* Gradient fill for active meter — cannot express multi-stop gradient via Tailwind utilities */
+  .meter-fill-active {
     background: linear-gradient(
       90deg,
-      var(--color-success) 0%,
-      var(--color-success) 70%,
-      var(--color-warning) 85%,
-      var(--color-error) 100%
+      hsl(var(--chart-2)) 0%,
+      hsl(var(--chart-2)) 70%,
+      hsl(var(--chart-4)) 85%,
+      hsl(var(--destructive)) 100%
     );
-  }
-
-  .meter-peak {
-    position: absolute;
-    top: 0;
-    width: 2px;
-    height: 100%;
-    background: var(--color-text-primary);
-    opacity: 0;
-    transition:
-      left 0.05s linear,
-      opacity 0.3s ease;
-  }
-
-  .meter-peak.visible {
-    opacity: 0.8;
-  }
-
-  .meter-labels {
-    display: flex;
-    justify-content: space-between;
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
-    padding: 0 2px;
-  }
-
-  .preview-hint {
-    margin: 0;
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
-    font-style: italic;
-    text-align: center;
-  }
-
-  .error-message {
-    margin: 0;
-    padding: 8px 12px;
-    background: color-mix(in srgb, var(--color-error) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--color-error) 30%, transparent);
-    border-radius: var(--radius-md);
-    color: var(--color-error);
-    font-size: var(--text-sm);
   }
 </style>

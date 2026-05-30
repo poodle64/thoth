@@ -8,6 +8,17 @@
   import { dictionaryStore, type DictionaryEntry } from '../stores/dictionary.svelte';
   import { open, save } from '@tauri-apps/plugin-dialog';
   import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
+  import { toast } from 'svelte-sonner';
+  import { Button } from '$components/ui/button';
+  import { Input } from '$components/ui/input';
+  import { Label } from '$components/ui/label';
+  import { Checkbox } from '$components/ui/checkbox';
+  import { Badge } from '$components/ui/badge';
+  import * as Alert from '$components/ui/alert';
+  import Download from '@lucide/svelte/icons/download';
+  import Upload from '@lucide/svelte/icons/upload';
+  import Pencil from '@lucide/svelte/icons/pencil';
+  import Trash2 from '@lucide/svelte/icons/trash-2';
 
   // Form state for adding/editing entries
   let editingIndex = $state<number | null>(null);
@@ -15,21 +26,10 @@
   let toValue = $state('');
   let caseSensitive = $state(false);
   let formError = $state<string | null>(null);
-  let successMessage = $state<string | null>(null);
 
   // Load entries on mount
   $effect(() => {
     dictionaryStore.load();
-  });
-
-  // Clear messages after delay
-  $effect(() => {
-    if (successMessage) {
-      const timeout = setTimeout(() => {
-        successMessage = null;
-      }, 3000);
-      return () => clearTimeout(timeout);
-    }
   });
 
   /** Reset form to default state */
@@ -75,10 +75,10 @@
     try {
       if (editingIndex !== null) {
         await dictionaryStore.update(editingIndex, entry);
-        successMessage = 'Entry updated successfully';
+        toast.success('Entry updated successfully');
       } else {
         await dictionaryStore.add(entry);
-        successMessage = 'Entry added successfully';
+        toast.success('Entry added successfully');
       }
       resetForm();
     } catch (e) {
@@ -93,7 +93,7 @@
       if (editingIndex === index) {
         resetForm();
       }
-      successMessage = 'Entry removed successfully';
+      toast.success('Entry removed successfully');
     } catch (e) {
       formError = e instanceof Error ? e.message : String(e);
     }
@@ -111,7 +111,7 @@
       if (selected) {
         const content = await readTextFile(selected);
         const count = await dictionaryStore.importEntries(content, true);
-        successMessage = `Imported ${count} entries`;
+        toast.success(`Imported ${count} entries`);
       }
     } catch (e) {
       formError = e instanceof Error ? e.message : String(e);
@@ -130,7 +130,7 @@
 
       if (path) {
         await writeTextFile(path, content);
-        successMessage = 'Dictionary exported successfully';
+        toast.success('Dictionary exported successfully');
       }
     } catch (e) {
       formError = e instanceof Error ? e.message : String(e);
@@ -138,142 +138,105 @@
   }
 </script>
 
-<div class="dictionary-editor">
-  {#if successMessage}
-    <div class="message success">{successMessage}</div>
-  {/if}
-
+<div class="flex flex-col gap-6">
   {#if formError || dictionaryStore.error}
-    <div class="message error">{formError || dictionaryStore.error}</div>
+    <Alert.Root variant="destructive">
+      <Alert.Description>{formError || dictionaryStore.error}</Alert.Description>
+    </Alert.Root>
   {/if}
 
-  <div class="form-section">
-    <div class="form-row">
-      <div class="form-field">
-        <label for="from-input">Replace</label>
-        <input id="from-input" type="text" bind:value={fromValue} placeholder="Text to find..." />
+  <div class="rounded-lg border p-4">
+    <div class="flex gap-3">
+      <div class="flex flex-1 flex-col gap-1.5">
+        <Label for="from-input">Replace</Label>
+        <Input id="from-input" type="text" bind:value={fromValue} placeholder="Text to find..." />
       </div>
-      <div class="form-field">
-        <label for="to-input">With</label>
-        <input id="to-input" type="text" bind:value={toValue} placeholder="Replacement text..." />
+      <div class="flex flex-1 flex-col gap-1.5">
+        <Label for="to-input">With</Label>
+        <Input id="to-input" type="text" bind:value={toValue} placeholder="Replacement text..." />
       </div>
     </div>
-    <div class="form-row options">
-      <label class="checkbox-label">
-        <input type="checkbox" bind:checked={caseSensitive} />
-        Case sensitive
-      </label>
-      <div class="form-actions">
+    <div class="mt-3 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <Checkbox id="case-sensitive" bind:checked={caseSensitive} />
+        <Label for="case-sensitive" class="cursor-pointer text-sm font-normal">
+          Case sensitive
+        </Label>
+      </div>
+      <div class="flex gap-2">
         {#if editingIndex !== null}
-          <button class="secondary" onclick={resetForm}>Cancel</button>
+          <Button variant="secondary" size="sm" onclick={resetForm}>Cancel</Button>
         {/if}
-        <button class="primary" onclick={saveEntry}>
+        <Button size="sm" onclick={saveEntry}>
           {editingIndex !== null ? 'Update' : 'Add'} Entry
-        </button>
+        </Button>
       </div>
     </div>
   </div>
 
-  <div class="entries-section">
-    <div class="entries-header">
-      <span class="entries-count">
+  <div class="flex flex-col gap-3">
+    <div class="flex items-center justify-between">
+      <span class="text-muted-foreground text-sm">
         {dictionaryStore.entries.length}
         {dictionaryStore.entries.length === 1 ? 'entry' : 'entries'}
       </span>
-      <div class="import-export">
-        <button class="icon-btn" onclick={importFromFile} title="Import dictionary">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="7 10 12 15 17 10"></polyline>
-            <line x1="12" y1="15" x2="12" y2="3"></line>
-          </svg>
+      <div class="flex gap-2">
+        <Button variant="outline" size="sm" onclick={importFromFile}>
+          <Download class="mr-1.5 h-3.5 w-3.5" />
           Import
-        </button>
-        <button class="icon-btn" onclick={exportToFile} title="Export dictionary">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="17 8 12 3 7 8"></polyline>
-            <line x1="12" y1="3" x2="12" y2="15"></line>
-          </svg>
+        </Button>
+        <Button variant="outline" size="sm" onclick={exportToFile}>
+          <Upload class="mr-1.5 h-3.5 w-3.5" />
           Export
-        </button>
+        </Button>
       </div>
     </div>
 
     {#if dictionaryStore.loading}
-      <div class="loading">Loading dictionary...</div>
+      <div class="text-muted-foreground p-6 text-center text-sm">Loading dictionary...</div>
     {:else if dictionaryStore.entries.length === 0}
-      <div class="empty-state">
-        <p>No dictionary entries yet.</p>
-        <p class="hint">Add entries above to automatically replace text in your transcriptions.</p>
+      <div class="rounded-lg border border-dashed p-8 text-center">
+        <p class="text-muted-foreground text-sm">No dictionary entries yet.</p>
+        <p class="text-muted-foreground/70 mt-2 text-xs">
+          Add entries above to automatically replace text in your transcriptions.
+        </p>
       </div>
     {:else}
-      <div class="entries-list">
+      <div class="flex flex-col gap-1">
         {#each dictionaryStore.entries as entry, index}
-          <div class="entry" class:editing={editingIndex === index}>
-            <div class="entry-content">
-              <span class="from">{entry.from}</span>
-              <span class="arrow">&rarr;</span>
-              <span class="to">{entry.to}</span>
+          <div
+            class="group flex items-center justify-between rounded-md border px-3.5 py-2.5 transition-colors {editingIndex ===
+            index
+              ? 'border-primary'
+              : 'hover:border-border'}"
+          >
+            <div class="flex min-w-0 flex-1 items-center gap-2">
+              <span class="text-sm font-medium">{entry.from}</span>
+              <span class="text-muted-foreground">&rarr;</span>
+              <span class="text-primary text-sm">{entry.to}</span>
               {#if entry.caseSensitive}
-                <span class="badge">Case sensitive</span>
+                <Badge variant="secondary" class="text-xs">Case sensitive</Badge>
               {/if}
             </div>
-            <div class="entry-actions">
-              <button class="edit-btn" onclick={() => startEdit(index)} title="Edit entry">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                </svg>
-              </button>
-              <button class="delete-btn" onclick={() => deleteEntry(index)} title="Delete entry">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <polyline points="3 6 5 6 21 6"></polyline>
-                  <path
-                    d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
-                  ></path>
-                </svg>
-              </button>
+            <div class="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-7 w-7"
+                onclick={() => startEdit(index)}
+                title="Edit entry"
+              >
+                <Pencil class="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="text-destructive hover:text-destructive h-7 w-7"
+                onclick={() => deleteEntry(index)}
+                title="Delete entry"
+              >
+                <Trash2 class="h-3.5 w-3.5" />
+              </Button>
             </div>
           </div>
         {/each}
@@ -281,248 +244,3 @@
     {/if}
   </div>
 </div>
-
-<style>
-  .dictionary-editor {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-  }
-
-  .message {
-    padding: 10px 14px;
-    border-radius: var(--radius-md);
-    font-size: var(--text-sm);
-  }
-
-  .message.success {
-    background: color-mix(in srgb, var(--color-success) 10%, transparent);
-    color: var(--color-success);
-  }
-
-  .message.error {
-    background: color-mix(in srgb, var(--color-error) 10%, transparent);
-    color: var(--color-error);
-  }
-
-  .form-section {
-    background: var(--color-bg-secondary);
-    padding: 16px;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--color-border-subtle);
-  }
-
-  .form-row {
-    display: flex;
-    gap: 12px;
-  }
-
-  .form-row.options {
-    margin-top: 12px;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .form-field {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .form-field label {
-    font-size: var(--text-xs);
-    font-weight: 500;
-    color: var(--color-text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .form-field input {
-    width: 100%;
-  }
-
-  .checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-    cursor: pointer;
-  }
-
-  .checkbox-label input[type='checkbox'] {
-    width: 16px;
-    height: 16px;
-    cursor: pointer;
-  }
-
-  .form-actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  .form-actions button {
-    padding: 8px 16px;
-    font-size: var(--text-sm);
-  }
-
-  .entries-section {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .entries-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .entries-count {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
-  }
-
-  .import-export {
-    display: flex;
-    gap: 8px;
-  }
-
-  .icon-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    font-size: var(--text-xs);
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border);
-  }
-
-  .icon-btn:hover {
-    background: var(--color-bg-tertiary);
-  }
-
-  .loading {
-    padding: 24px;
-    text-align: center;
-    color: var(--color-text-secondary);
-    font-size: var(--text-sm);
-  }
-
-  .empty-state {
-    padding: 32px 24px;
-    text-align: center;
-    background: var(--color-bg-secondary);
-    border-radius: var(--radius-md);
-    border: 1px dashed var(--color-border-subtle);
-  }
-
-  .empty-state p {
-    margin: 0;
-    color: var(--color-text-secondary);
-    font-size: var(--text-sm);
-  }
-
-  .empty-state .hint {
-    margin-top: 8px;
-    color: var(--color-text-tertiary);
-  }
-
-  .entries-list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .entry {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 14px;
-    background: var(--color-bg-secondary);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--color-border-subtle);
-    transition: border-color var(--transition-fast);
-  }
-
-  .entry.editing {
-    border-color: var(--color-accent);
-  }
-
-  .entry:hover {
-    border-color: var(--color-bg-hover);
-  }
-
-  .entry-content {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: 1;
-    min-width: 0;
-  }
-
-  .from {
-    font-weight: 500;
-    color: var(--color-text-primary);
-  }
-
-  .arrow {
-    color: var(--color-text-tertiary);
-    flex-shrink: 0;
-  }
-
-  .to {
-    color: var(--color-accent);
-  }
-
-  .badge {
-    font-size: 10px;
-    padding: 2px 6px;
-    background: var(--color-bg-tertiary);
-    border-radius: var(--radius-full);
-    color: var(--color-text-secondary);
-    flex-shrink: 0;
-  }
-
-  .entry-actions {
-    display: flex;
-    gap: 4px;
-    opacity: 0;
-    transition: opacity var(--transition-fast);
-  }
-
-  .entry:hover .entry-actions {
-    opacity: 1;
-  }
-
-  .edit-btn,
-  .delete-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    background: transparent;
-    border-radius: var(--radius-sm);
-  }
-
-  .edit-btn:hover {
-    background: var(--color-bg-tertiary);
-    color: var(--color-accent);
-  }
-
-  .delete-btn:hover {
-    background: color-mix(in srgb, var(--color-error) 20%, transparent);
-    color: var(--color-error);
-  }
-
-  .secondary {
-    background: var(--color-bg-tertiary);
-  }
-
-  .secondary:hover {
-    background: var(--color-bg-hover);
-  }
-</style>
