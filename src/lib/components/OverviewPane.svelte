@@ -20,6 +20,7 @@
   import * as Card from '$components/ui/card';
   import * as AlertDialog from '$components/ui/alert-dialog';
   import * as Alert from '$components/ui/alert';
+  import LoadingState from '$components/common/LoadingState.svelte';
 
   interface ModelStats {
     name: string;
@@ -460,7 +461,7 @@
 </script>
 
 {#if isLoading}
-  <div class="flex items-center justify-center p-8 text-muted-foreground text-sm">Loading...</div>
+  <LoadingState />
 {:else if stats && stats.totalCount === 0}
   <!-- First-run setup: stepped checklist -->
   <div
@@ -1112,6 +1113,7 @@
             <AlertDialog.Footer>
               <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
               <AlertDialog.Action
+                variant="destructive"
                 onclick={async () => {
                   try {
                     await invoke('reset_tcc_permissions', {

@@ -4,6 +4,7 @@
    * Reads audio files from disk via Tauri fs plugin, decodes via Web Audio API.
    */
   import { readFile } from '@tauri-apps/plugin-fs';
+  import { Button } from '$components/ui/button';
 
   interface Props {
     /** Absolute filesystem path to the WAV file */
@@ -210,10 +211,10 @@
   </div>
 {:else}
   <div class="player">
-    <button
-      class="play-btn"
+    <Button
+      size="icon"
+      class="play-btn rounded-full"
       onclick={togglePlayPause}
-      type="button"
       aria-label={isPlaying ? 'Pause' : 'Play'}
     >
       {#if isPlaying}
@@ -226,7 +227,7 @@
           <polygon points="6,4 20,12 6,20"></polygon>
         </svg>
       {/if}
-    </button>
+    </Button>
 
     <span class="time">{formatTime(currentTime)}</span>
 
@@ -281,31 +282,6 @@
   .loading-text {
     font-size: var(--text-xs);
     color: var(--color-text-tertiary);
-  }
-
-  .play-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: none;
-    border-radius: var(--radius-full, 50%);
-    background: var(--color-accent);
-    color: white;
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: background var(--transition-fast);
-  }
-
-  .play-btn:hover {
-    background: var(--color-accent-hover);
-  }
-
-  .play-btn svg {
-    width: 14px;
-    height: 14px;
   }
 
   .time {

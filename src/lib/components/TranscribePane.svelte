@@ -110,14 +110,21 @@
 </script>
 
 <!-- Custom drag-drop dropzone: bespoke because it uses Tauri's onDragDropEvent API which cannot be replaced by a shadcn primitive -->
-<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 <div
+  role="button"
+  tabindex="0"
   class="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-12 transition-colors {isDragOver
     ? 'border-primary bg-primary/10 border-solid'
     : 'border-border hover:border-primary hover:bg-primary/5'} {isProcessing
     ? 'cursor-default opacity-80'
     : ''}"
   onclick={handleFilePicker}
+  onkeydown={(e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleFilePicker();
+    }
+  }}
 >
   {#if isProcessing}
     <span class="text-muted-foreground mb-3">

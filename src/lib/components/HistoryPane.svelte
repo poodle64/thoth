@@ -823,10 +823,7 @@
       {/if}
       <AlertDialog.Footer>
         <AlertDialog.Cancel onclick={cancelDelete}>Cancel</AlertDialog.Cancel>
-        <AlertDialog.Action
-          onclick={confirmDelete}
-          class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-        >
+        <AlertDialog.Action onclick={confirmDelete} variant="destructive">
           Delete
         </AlertDialog.Action>
       </AlertDialog.Footer>
@@ -852,10 +849,7 @@
       </AlertDialog.Header>
       <AlertDialog.Footer>
         <AlertDialog.Cancel onclick={cancelBulkDelete}>Cancel</AlertDialog.Cancel>
-        <AlertDialog.Action
-          onclick={confirmBulkDelete}
-          class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-        >
+        <AlertDialog.Action onclick={confirmBulkDelete} variant="destructive">
           Delete {bulkSelectedIds.size}
         </AlertDialog.Action>
       </AlertDialog.Footer>
@@ -881,10 +875,7 @@
       </AlertDialog.Header>
       <AlertDialog.Footer>
         <AlertDialog.Cancel onclick={() => (clearAllConfirm = false)}>Cancel</AlertDialog.Cancel>
-        <AlertDialog.Action
-          onclick={confirmClearAll}
-          class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-        >
+        <AlertDialog.Action onclick={confirmClearAll} variant="destructive">
           Clear All
         </AlertDialog.Action>
       </AlertDialog.Footer>

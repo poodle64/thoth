@@ -72,79 +72,80 @@
 </script>
 
 <DropdownMenu.Root bind:open={contextMenuOpen}>
-  <DropdownMenu.Trigger
-    class="w-full text-left"
-    oncontextmenu={(e) => {
-      e.preventDefault();
-      contextMenuOpen = true;
-    }}
-  >
-    <button
-      class={[
-        'flex w-full flex-row items-start border-b px-3 py-3 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
-        selected && 'bg-primary text-primary-foreground',
-        bulkSelected && !selected && 'bg-primary/10',
-      ]
-        .filter(Boolean)
-        .join(' ')}
-      onclick={handleClick}
-      onkeydown={handleKeydown}
-      aria-selected={selected}
-      role="option"
-    >
-      <!-- Checkbox area -->
-      <div
-        class="mr-3 flex shrink-0 items-center justify-center transition-opacity"
-        class:opacity-0={!bulkMode && !bulkSelected}
-        class:opacity-100={bulkMode || bulkSelected}
+  <DropdownMenu.Trigger>
+    {#snippet child({ props })}
+      <button
+        {...props}
+        class={[
+          'flex w-full flex-row items-start border-b px-3 py-3 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+          selected && 'bg-primary text-primary-foreground',
+          bulkSelected && !selected && 'bg-primary/10',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        onclick={handleClick}
+        onkeydown={handleKeydown}
+        oncontextmenu={(e) => {
+          e.preventDefault();
+          contextMenuOpen = true;
+        }}
+        aria-selected={selected}
+        role="option"
       >
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <!-- Checkbox area -->
         <div
-          onclick={(e) => {
-            e.stopPropagation();
-            handleCheckboxChange();
-          }}
+          class="mr-3 flex shrink-0 items-center justify-center transition-opacity"
+          class:opacity-0={!bulkMode && !bulkSelected}
+          class:opacity-100={bulkMode || bulkSelected}
         >
-          <Checkbox
-            checked={bulkSelected}
-            class={selected
-              ? 'border-primary-foreground/50 data-checked:bg-primary-foreground data-checked:text-primary'
-              : ''}
-          />
-        </div>
-      </div>
-
-      <!-- Content -->
-      <div class="flex min-w-0 flex-1 flex-col gap-1">
-        <span
-          class="line-clamp-2 break-words text-sm leading-snug"
-          class:text-foreground={!selected}
-          class:text-primary-foreground={selected}>{previewText}</span
-        >
-        <div class="flex flex-wrap items-center gap-2">
-          <span
-            class={[
-              'text-xs',
-              selected ? 'text-primary-foreground/70' : 'text-muted-foreground',
-            ].join(' ')}>{historyStore.formatDate(item.timestamp)}</span
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            onclick={(e) => {
+              e.stopPropagation();
+              handleCheckboxChange();
+            }}
           >
-          {#if item.duration > 0}
+            <Checkbox
+              checked={bulkSelected}
+              class={selected
+                ? 'border-primary-foreground/50 data-checked:bg-primary-foreground data-checked:text-primary'
+                : ''}
+            />
+          </div>
+        </div>
+
+        <!-- Content -->
+        <div class="flex min-w-0 flex-1 flex-col gap-1">
+          <span
+            class="line-clamp-2 break-words text-sm leading-snug"
+            class:text-foreground={!selected}
+            class:text-primary-foreground={selected}>{previewText}</span
+          >
+          <div class="flex flex-wrap items-center gap-2">
             <span
               class={[
                 'text-xs',
                 selected ? 'text-primary-foreground/70' : 'text-muted-foreground',
-              ].join(' ')}>{historyStore.formatDuration(item.duration)}</span
+              ].join(' ')}>{historyStore.formatDate(item.timestamp)}</span
             >
-          {/if}
-          {#if item.enhanced}
-            <Badge variant={selected ? 'secondary' : 'default'} class="h-4 px-1.5 text-[10px]"
-              >Enhanced</Badge
-            >
-          {/if}
+            {#if item.duration > 0}
+              <span
+                class={[
+                  'text-xs',
+                  selected ? 'text-primary-foreground/70' : 'text-muted-foreground',
+                ].join(' ')}>{historyStore.formatDuration(item.duration)}</span
+              >
+            {/if}
+            {#if item.enhanced}
+              <Badge variant={selected ? 'secondary' : 'default'} class="h-4 px-1.5 text-[10px]"
+                >Enhanced</Badge
+              >
+            {/if}
+          </div>
         </div>
-      </div>
-    </button>
+      </button>
+    {/snippet}
   </DropdownMenu.Trigger>
 
   <DropdownMenu.Content align="start">

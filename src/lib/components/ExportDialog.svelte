@@ -7,6 +7,7 @@
   import { Input } from '$components/ui/input';
   import { Label } from '$components/ui/label';
   import * as Alert from '$components/ui/alert';
+  import * as RadioGroup from '$components/ui/radio-group';
   import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
 
   interface Props {
@@ -179,28 +180,26 @@
       </div>
 
       <!-- Format selection -->
-      <fieldset class="space-y-2">
-        <legend class="text-sm font-medium mb-2">Export Format</legend>
-        <div class="flex flex-col gap-2">
-          {#each [{ value: 'json', label: 'JSON', hint: 'Full data, machine-readable' }, { value: 'csv', label: 'CSV', hint: 'Spreadsheet compatible' }, { value: 'txt', label: 'Plain Text', hint: 'Human readable' }] as opt}
+      <div class="space-y-2">
+        <Label class="text-sm font-medium">Export Format</Label>
+        <RadioGroup.Root
+          value={format}
+          onValueChange={(v) => (format = v as ExportFormat)}
+          class="flex flex-col gap-2"
+        >
+          {#each [{ value: 'json', label: 'JSON', hint: 'Full data, machine-readable' }, { value: 'csv', label: 'CSV', hint: 'Spreadsheet compatible' }, { value: 'txt', label: 'Plain Text', hint: 'Human readable' }] as opt (opt.value)}
             <label
-              class="flex items-start gap-3 cursor-pointer rounded-md px-3 py-2 hover:bg-muted transition-colors"
+              class="flex cursor-pointer items-start gap-3 rounded-md px-3 py-2 transition-colors hover:bg-muted"
             >
-              <input
-                type="radio"
-                name="export-format"
-                value={opt.value}
-                bind:group={format}
-                class="mt-0.5"
-              />
+              <RadioGroup.Item value={opt.value} id="format-{opt.value}" class="mt-0.5" />
               <span class="flex flex-col gap-0.5">
                 <span class="text-sm font-medium">{opt.label}</span>
                 <span class="text-xs text-muted-foreground">{opt.hint}</span>
               </span>
             </label>
           {/each}
-        </div>
-      </fieldset>
+        </RadioGroup.Root>
+      </div>
 
       <!-- Filter options (only if no specific selection) -->
       {#if selectedIds.length === 0}

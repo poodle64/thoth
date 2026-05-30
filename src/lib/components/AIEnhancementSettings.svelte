@@ -7,13 +7,18 @@
   import * as Select from '$components/ui/select';
   import * as Dialog from '$components/ui/dialog';
   import * as Alert from '$components/ui/alert';
+  import * as Form from '$components/ui/form';
   import { Select as SelectPrimitive } from 'bits-ui';
   import { Input } from '$components/ui/input';
   import { Textarea } from '$components/ui/textarea';
   import { Switch } from '$components/ui/switch';
   import { Badge } from '$components/ui/badge';
   import { Label } from '$components/ui/label';
+  import LoadingState from '$components/common/LoadingState.svelte';
   import AlertCircle from '@lucide/svelte/icons/alert-circle';
+  import { superForm, defaults } from 'sveltekit-superforms';
+  import { zod4 } from 'sveltekit-superforms/adapters';
+  import { promptSchema } from '$lib/schemas/prompt';
 
   interface PromptTemplate {
     id: string;
@@ -32,9 +37,31 @@
 
   let isEditing = $state(false);
   let editingPrompt = $state<PromptTemplate | null>(null);
-  let newPromptName = $state('');
-  let newPromptTemplate = $state('');
-  let promptError = $state<string | null>(null);
+
+  const promptForm = superForm(defaults(zod4(promptSchema)), {
+    SPA: true,
+    validators: zod4(promptSchema),
+    async onUpdate({ form: f }) {
+      if (!f.valid) return;
+      const prompt: PromptTemplate = {
+        id: editingPrompt?.id || generateId(f.data.name),
+        name: f.data.name.trim(),
+        template: f.data.template.trim(),
+        isBuiltin: false,
+      };
+      try {
+        await invoke('save_custom_prompt_cmd', { prompt });
+        await loadPrompts();
+        isEditing = false;
+        editingPrompt = null;
+        invoke('refresh_tray_menu').catch(() => {});
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to save prompt');
+      }
+    },
+  });
+
+  const { form: formData, enhance, reset } = promptForm;
 
   async function checkOllama(): Promise<void> {
     isCheckingOllama = true;
@@ -118,24 +145,26 @@
   function startNewPrompt(): void {
     isEditing = true;
     editingPrompt = null;
-    newPromptName = '';
-    newPromptTemplate = 'Enhance the following text:\n\n{text}';
-    promptError = null;
+    reset({
+      data: { name: '', template: 'Enhance the following text:\n\n{text}' },
+      keepMessage: false,
+    });
   }
 
   function startEditPrompt(prompt: PromptTemplate): void {
     if (prompt.isBuiltin) return;
     isEditing = true;
     editingPrompt = prompt;
-    newPromptName = prompt.name;
-    newPromptTemplate = prompt.template;
-    promptError = null;
+    reset({
+      data: { name: prompt.name, template: prompt.template },
+      keepMessage: false,
+    });
   }
 
   function cancelEdit(): void {
     isEditing = false;
     editingPrompt = null;
-    promptError = null;
+    reset({ keepMessage: false });
   }
 
   function generateId(name: string): string {
@@ -143,37 +172,6 @@
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
-  }
-
-  async function savePrompt(): Promise<void> {
-    promptError = null;
-    if (!newPromptName.trim()) {
-      promptError = 'Please enter a prompt name';
-      return;
-    }
-    if (!newPromptTemplate.trim()) {
-      promptError = 'Please enter a prompt template';
-      return;
-    }
-    if (!newPromptTemplate.includes('{text}')) {
-      promptError = 'Template must include {text} placeholder';
-      return;
-    }
-    const prompt: PromptTemplate = {
-      id: editingPrompt?.id || generateId(newPromptName),
-      name: newPromptName.trim(),
-      template: newPromptTemplate.trim(),
-      isBuiltin: false,
-    };
-    try {
-      await invoke('save_custom_prompt_cmd', { prompt });
-      await loadPrompts();
-      cancelEdit();
-      isEditing = false;
-      invoke('refresh_tray_menu').catch(() => {});
-    } catch (e) {
-      promptError = e instanceof Error ? e.message : 'Failed to save prompt';
-    }
   }
 
   async function deletePrompt(promptId: string): Promise<void> {
@@ -215,7 +213,7 @@
 
 <div class="flex flex-col gap-6">
   {#if configStore.isLoading}
-    <p class="text-sm text-muted-foreground text-center py-6">Loading settings...</p>
+    <LoadingState message="Loading settings..." />
   {:else}
     <!-- Enable toggle -->
     <div class="flex items-center justify-between gap-4 rounded-lg border bg-card px-4 py-3">
@@ -371,12 +369,9 @@
 
         <p class="text-xs text-muted-foreground">
           Create your own prompt templates for specific use cases.
-          <button
-            class="text-primary underline-offset-2 hover:underline bg-transparent border-none p-0 text-xs font-inherit cursor-pointer"
-            onclick={openPromptGuide}
-          >
+          <Button variant="link" class="h-auto p-0 text-xs" onclick={openPromptGuide}>
             View Prompt Writing Guide
-          </button>
+          </Button>
           for tips on writing effective prompts.
         </p>
 
@@ -397,47 +392,56 @@
               </Dialog.Description>
             </Dialog.Header>
 
-            <div class="flex flex-col gap-4 py-2">
-              <div class="flex flex-col gap-1.5">
-                <Label for="prompt-name">Name</Label>
-                <Input
-                  id="prompt-name"
-                  type="text"
-                  bind:value={newPromptName}
-                  placeholder="My Custom Prompt"
-                />
-              </div>
+            <form method="POST" use:enhance class="flex flex-col gap-4 py-2">
+              <Form.Field form={promptForm} name="name">
+                {#snippet children({ constraints })}
+                  <Form.Control>
+                    {#snippet children({ props })}
+                      <Form.Label>Name</Form.Label>
+                      <Input
+                        {...props}
+                        {...constraints}
+                        type="text"
+                        bind:value={$formData.name}
+                        placeholder="My Custom Prompt"
+                      />
+                    {/snippet}
+                  </Form.Control>
+                  <Form.FieldErrors />
+                {/snippet}
+              </Form.Field>
 
-              <div class="flex flex-col gap-1.5">
-                <Label for="prompt-template">
-                  Template
-                  <span class="text-muted-foreground font-normal ml-1 text-xs">
-                    (use {'{text}'} as placeholder)
-                  </span>
-                </Label>
-                <Textarea
-                  id="prompt-template"
-                  bind:value={newPromptTemplate}
-                  rows={5}
-                  class="font-mono text-sm resize-y"
-                  placeholder="Enhance this text: {'{text}'}"
-                />
-              </div>
+              <Form.Field form={promptForm} name="template">
+                {#snippet children({ constraints })}
+                  <Form.Control>
+                    {#snippet children({ props })}
+                      <Form.Label>
+                        Template
+                        <span class="text-muted-foreground font-normal ml-1 text-xs">
+                          (use {'{text}'} as placeholder)
+                        </span>
+                      </Form.Label>
+                      <Textarea
+                        {...props}
+                        {...constraints}
+                        bind:value={$formData.template}
+                        rows={5}
+                        class="font-mono text-sm resize-y"
+                        placeholder="Enhance this text: {'{text}'}"
+                      />
+                    {/snippet}
+                  </Form.Control>
+                  <Form.FieldErrors />
+                {/snippet}
+              </Form.Field>
 
-              {#if promptError}
-                <Alert.Root variant="destructive">
-                  <AlertCircle class="size-4" />
-                  <Alert.Description>{promptError}</Alert.Description>
-                </Alert.Root>
-              {/if}
-            </div>
-
-            <Dialog.Footer>
-              <Button variant="outline" onclick={cancelEdit}>Cancel</Button>
-              <Button onclick={savePrompt}>
-                {editingPrompt ? 'Update' : 'Create'} Prompt
-              </Button>
-            </Dialog.Footer>
+              <Dialog.Footer>
+                <Button type="button" variant="outline" onclick={cancelEdit}>Cancel</Button>
+                <Button type="submit">
+                  {editingPrompt ? 'Update' : 'Create'} Prompt
+                </Button>
+              </Dialog.Footer>
+            </form>
           </Dialog.Content>
         </Dialog.Root>
 

@@ -4,6 +4,7 @@
   import { onMount } from 'svelte';
   import { Button } from '$components/ui/button';
   import { Badge } from '$components/ui/badge';
+  import { Skeleton } from '$components/ui/skeleton';
   import * as Card from '$components/ui/card';
   import * as AlertDialog from '$components/ui/alert-dialog';
   import * as Alert from '$components/ui/alert';
@@ -307,11 +308,10 @@
   </div>
 
   {#if loading}
-    <div class="text-muted-foreground flex items-center gap-3 p-6">
-      <div
-        class="border-muted-foreground border-t-primary h-5 w-5 animate-spin rounded-full border-2"
-      ></div>
-      <span class="text-sm">Loading models...</span>
+    <div class="flex flex-col gap-3 p-1">
+      <Skeleton class="h-[88px] w-full rounded-lg" />
+      <Skeleton class="h-[88px] w-full rounded-lg" />
+      <Skeleton class="h-[88px] w-full rounded-lg" />
     </div>
   {:else if error}
     <Alert.Root variant="destructive">
@@ -325,11 +325,7 @@
   <div class="flex flex-col gap-3">
     {#each sortedModels(models) as model (model.id)}
       <Card.Root
-        class={model.selected
-          ? 'border-primary'
-          : !model.backend_available
-            ? 'opacity-55'
-            : ''}
+        class={model.selected ? 'border-primary' : !model.backend_available ? 'opacity-55' : ''}
       >
         <Card.Content class="flex flex-col gap-2 p-4">
           <!-- Top row: name + primary badge -->
@@ -485,7 +481,7 @@
     <AlertDialog.Footer>
       <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
       <AlertDialog.Action
-        class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+        variant="destructive"
         onclick={deleteModel}
       >
         Delete

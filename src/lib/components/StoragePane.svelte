@@ -11,6 +11,7 @@
   import { Button } from '$components/ui/button';
   import * as Alert from '$components/ui/alert';
   import * as AlertDialog from '$components/ui/alert-dialog';
+  import LoadingState from '$components/common/LoadingState.svelte';
 
   interface StorageUsage {
     modelsBytes: number;
@@ -118,9 +119,7 @@
 </script>
 
 {#if isLoading}
-  <div class="text-muted-foreground flex items-center justify-center p-8 text-sm">
-    Calculating storage usage...
-  </div>
+  <LoadingState message="Calculating storage usage..." />
 {:else if error}
   <Alert.Root variant="destructive">
     <Alert.Description class="flex items-center justify-between gap-3">
@@ -329,10 +328,7 @@
     </AlertDialog.Header>
     <AlertDialog.Footer>
       <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
-      <AlertDialog.Action
-        class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-        onclick={executeDeleteRecordings}
-      >
+      <AlertDialog.Action variant="destructive" onclick={executeDeleteRecordings}>
         Delete
       </AlertDialog.Action>
     </AlertDialog.Footer>
@@ -354,10 +350,7 @@
     </AlertDialog.Header>
     <AlertDialog.Footer>
       <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
-      <AlertDialog.Action
-        class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-        onclick={executeDeleteLogs}
-      >
+      <AlertDialog.Action variant="destructive" onclick={executeDeleteLogs}>
         Delete
       </AlertDialog.Action>
     </AlertDialog.Footer>
@@ -380,10 +373,7 @@
     </AlertDialog.Header>
     <AlertDialog.Footer>
       <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
-      <AlertDialog.Action
-        class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-        onclick={executeDeleteFluidaudio}
-      >
+      <AlertDialog.Action variant="destructive" onclick={executeDeleteFluidaudio}>
         Delete
       </AlertDialog.Action>
     </AlertDialog.Footer>
@@ -406,10 +396,7 @@
     </AlertDialog.Header>
     <AlertDialog.Footer>
       <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
-      <AlertDialog.Action
-        class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-        onclick={executeDeleteAll}
-      >
+      <AlertDialog.Action variant="destructive" onclick={executeDeleteAll}>
         Delete Everything
       </AlertDialog.Action>
     </AlertDialog.Footer>
