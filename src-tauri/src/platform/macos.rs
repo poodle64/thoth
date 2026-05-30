@@ -16,11 +16,14 @@ pub fn check_input_monitoring_permission() -> bool {
             fn IOHIDCheckAccess(request: u32) -> u32;
         }
 
-        // IOHIDCheckAccess(1) checks Input Monitoring permission
-        // Returns 0 if access is granted
-        let result = IOHIDCheckAccess(1);
-        tracing::debug!("IOHIDCheckAccess(1) returned: {}", result);
-        result == 0
+        // Mirrors Apple's private kIOHIDRequestTypeListenEvent / kIOHIDAccessTypeGranted
+        // (undocumented IOHIDCheckAccess API; values confirmed via IOKit private headers).
+        const IOHID_REQUEST_TYPE_LISTEN_EVENT: u32 = 1;
+        const IOHID_ACCESS_TYPE_GRANTED: u32 = 0;
+
+        let result = IOHIDCheckAccess(IOHID_REQUEST_TYPE_LISTEN_EVENT);
+        tracing::debug!("IOHIDCheckAccess(LISTEN_EVENT) returned: {}", result);
+        result == IOHID_ACCESS_TYPE_GRANTED
     }
 }
 
@@ -664,5 +667,16 @@ mod tests {
         // This test just ensures the function doesn't panic
         // It will return None if run without a focused text field
         let _result = get_caret_position();
+    }
+
+    #[test]
+    fn test_microphone_status_from_i64() {
+        assert_eq!(MicrophoneStatus::from(0), MicrophoneStatus::NotDetermined);
+        assert_eq!(MicrophoneStatus::from(1), MicrophoneStatus::Restricted);
+        assert_eq!(MicrophoneStatus::from(2), MicrophoneStatus::Denied);
+        assert_eq!(MicrophoneStatus::from(3), MicrophoneStatus::Authorized);
+        // Out-of-range values map to Unknown
+        assert_eq!(MicrophoneStatus::from(99), MicrophoneStatus::Unknown);
+        assert_eq!(MicrophoneStatus::from(-1), MicrophoneStatus::Unknown);
     }
 }
