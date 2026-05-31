@@ -46,6 +46,12 @@ export interface PipelineConfig {
   australianSpelling: boolean;
   /** Whether to convert spoken number words to digits */
   spokenNumbersToDigits: boolean;
+  /** Whether to collapse runs of whitespace and trim leading/trailing spaces */
+  normaliseWhitespace: boolean;
+  /** Whether to fix spacing around punctuation marks */
+  cleanupPunctuation: boolean;
+  /** Whether to capitalise the first word of each sentence */
+  sentenceCase: boolean;
   /** Whether AI enhancement is enabled */
   enhancementEnabled: boolean;
   /** Ollama model for enhancement */
@@ -120,6 +126,9 @@ async function getDefaultConfig(): Promise<PipelineConfig> {
     removeFillers: config.transcription.removeFillers,
     australianSpelling: config.transcription.australianSpelling,
     spokenNumbersToDigits: config.transcription.spokenNumbersToDigits,
+    normaliseWhitespace: config.transcription.normaliseWhitespace,
+    cleanupPunctuation: config.transcription.cleanupPunctuation,
+    sentenceCase: config.transcription.sentenceCase,
     enhancementEnabled: config.enhancement.enabled,
     enhancementModel: config.enhancement.model,
     enhancementPrompt,

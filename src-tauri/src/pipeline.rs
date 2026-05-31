@@ -58,6 +58,12 @@ pub struct PipelineConfig {
     pub australian_spelling: bool,
     /// Whether to convert spoken number words to digits
     pub spoken_numbers_to_digits: bool,
+    /// Whether to collapse runs of whitespace and trim leading/trailing spaces
+    pub normalise_whitespace: bool,
+    /// Whether to fix spacing around punctuation marks
+    pub cleanup_punctuation: bool,
+    /// Whether to capitalise the first word of each sentence
+    pub sentence_case: bool,
     /// Whether AI enhancement is enabled
     pub enhancement_enabled: bool,
     /// Ollama model for enhancement
@@ -80,6 +86,9 @@ impl Default for PipelineConfig {
             remove_fillers: true,
             australian_spelling: false,
             spoken_numbers_to_digits: false,
+            normalise_whitespace: true,
+            cleanup_punctuation: true,
+            sentence_case: false,
             enhancement_enabled: false,
             enhancement_model: "llama3.2".to_string(),
             enhancement_prompt: DEFAULT_ENHANCEMENT_PROMPT.to_string(),
@@ -499,6 +508,9 @@ async fn run_transcription_pipeline(
                 remove_fillers: config.remove_fillers,
                 australian_spelling: config.australian_spelling,
                 spoken_numbers_to_digits: config.spoken_numbers_to_digits,
+                normalise_whitespace: config.normalise_whitespace,
+                cleanup_punctuation: config.cleanup_punctuation,
+                sentence_case: config.sentence_case,
                 // The dictionary is applied separately below, gated by
                 // config.apply_dictionary. Disable it inside the filter so it
                 // runs exactly once and honours the user's dictionary setting

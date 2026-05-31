@@ -158,6 +158,15 @@ pub struct TranscriptionConfig {
     /// Whether to convert spoken number words to digits
     #[serde(default)]
     pub spoken_numbers_to_digits: bool,
+    /// Whether to collapse runs of whitespace and trim leading/trailing spaces
+    #[serde(default = "default_true")]
+    pub normalise_whitespace: bool,
+    /// Whether to fix spacing around punctuation marks
+    #[serde(default = "default_true")]
+    pub cleanup_punctuation: bool,
+    /// Whether to capitalise the first word of each sentence
+    #[serde(default)]
+    pub sentence_case: bool,
 }
 
 fn default_true() -> bool {
@@ -175,6 +184,9 @@ impl Default for TranscriptionConfig {
             remove_fillers: true,
             australian_spelling: false,
             spoken_numbers_to_digits: false,
+            normalise_whitespace: true,
+            cleanup_punctuation: true,
+            sentence_case: false,
         }
     }
 }
@@ -900,6 +912,9 @@ mod tests {
                 remove_fillers: false,
                 australian_spelling: false,
                 spoken_numbers_to_digits: false,
+                normalise_whitespace: true,
+                cleanup_punctuation: true,
+                sentence_case: false,
             },
             shortcuts: ShortcutConfig {
                 toggle_recording: "F12".to_string(),

@@ -198,6 +198,9 @@
     configStore.updateTranscription('removeFillers', options.remove_fillers);
     configStore.updateTranscription('australianSpelling', options.australian_spelling);
     configStore.updateTranscription('spokenNumbersToDigits', options.spoken_numbers_to_digits);
+    configStore.updateTranscription('normaliseWhitespace', options.normalise_whitespace);
+    configStore.updateTranscription('cleanupPunctuation', options.cleanup_punctuation);
+    configStore.updateTranscription('sentenceCase', options.sentence_case);
     await configStore.save();
   }
 
@@ -656,9 +659,9 @@
               <FilterSettings
                 initialOptions={{
                   remove_fillers: configStore.transcription.removeFillers,
-                  normalise_whitespace: true,
-                  cleanup_punctuation: true,
-                  sentence_case: false,
+                  normalise_whitespace: configStore.transcription.normaliseWhitespace,
+                  cleanup_punctuation: configStore.transcription.cleanupPunctuation,
+                  sentence_case: configStore.transcription.sentenceCase,
                   australian_spelling: configStore.transcription.australianSpelling,
                   spoken_numbers_to_digits: configStore.transcription.spokenNumbersToDigits,
                 }}

@@ -33,6 +33,12 @@ export interface TranscriptionConfig {
   australianSpelling: boolean;
   /** Whether to convert spoken number words to digits */
   spokenNumbersToDigits: boolean;
+  /** Whether to collapse runs of whitespace and trim leading/trailing spaces */
+  normaliseWhitespace: boolean;
+  /** Whether to fix spacing around punctuation marks */
+  cleanupPunctuation: boolean;
+  /** Whether to capitalise the first word of each sentence */
+  sentenceCase: boolean;
 }
 
 /** Recording mode options */
@@ -159,6 +165,9 @@ interface ConfigRaw {
     remove_fillers: boolean;
     australian_spelling: boolean;
     spoken_numbers_to_digits: boolean;
+    normalise_whitespace: boolean;
+    cleanup_punctuation: boolean;
+    sentence_case: boolean;
   };
   shortcuts: {
     toggle_recording: string;
@@ -215,6 +224,9 @@ function parseConfig(raw: ConfigRaw): Config {
       removeFillers: raw.transcription.remove_fillers,
       australianSpelling: raw.transcription.australian_spelling,
       spokenNumbersToDigits: raw.transcription.spoken_numbers_to_digits,
+      normaliseWhitespace: raw.transcription.normalise_whitespace ?? true,
+      cleanupPunctuation: raw.transcription.cleanup_punctuation ?? true,
+      sentenceCase: raw.transcription.sentence_case ?? false,
     },
     shortcuts: {
       toggleRecording: raw.shortcuts.toggle_recording,
@@ -272,6 +284,9 @@ function serialiseConfig(config: Config): ConfigRaw {
       remove_fillers: config.transcription.removeFillers,
       australian_spelling: config.transcription.australianSpelling,
       spoken_numbers_to_digits: config.transcription.spokenNumbersToDigits,
+      normalise_whitespace: config.transcription.normaliseWhitespace,
+      cleanup_punctuation: config.transcription.cleanupPunctuation,
+      sentence_case: config.transcription.sentenceCase,
     },
     shortcuts: {
       toggle_recording: config.shortcuts.toggleRecording,
@@ -329,6 +344,9 @@ function getDefaultConfig(): Config {
       removeFillers: true,
       australianSpelling: false,
       spokenNumbersToDigits: false,
+      normaliseWhitespace: true,
+      cleanupPunctuation: true,
+      sentenceCase: false,
     },
     shortcuts: {
       toggleRecording: 'F13',
