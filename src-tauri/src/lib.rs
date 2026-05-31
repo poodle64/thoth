@@ -8,6 +8,7 @@ pub mod audio;
 pub mod clipboard;
 pub mod commands;
 pub mod config;
+pub mod control_api;
 pub mod database;
 pub mod dictionary;
 pub mod enhancement;
@@ -238,6 +239,21 @@ pub fn run() {
                 // Register shortcuts from config
                 let app_handle = app.handle().clone();
                 register_shortcuts_from_config(&app_handle, &cfg);
+
+                // Start the Local Control API if enabled in config.
+                if cfg.integrations.api_enabled {
+                    if let Some(token) = cfg.integrations.api_token.clone() {
+                        let port = cfg.integrations.api_port;
+                        tauri::async_runtime::spawn(async move {
+                            control_api::start(port, token).await;
+                        });
+                    } else {
+                        tracing::warn!(
+                            "Control API is enabled but no token is configured; \
+                             skipping server start"
+                        );
+                    }
+                }
             }
 
             // macOS-specific setup
@@ -477,6 +493,13 @@ pub fn run() {
             keyboard_service::request_input_monitoring,
             keyboard_service::try_start_keyboard_service,
             keyboard_service::report_key_event,
+            // Control API
+            control_api::get_integrations_status,
+            control_api::set_api_enabled,
+            control_api::set_mcp_enabled,
+            control_api::get_api_token,
+            control_api::rotate_api_token,
+            control_api::set_api_port,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

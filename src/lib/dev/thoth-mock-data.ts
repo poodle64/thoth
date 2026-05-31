@@ -54,6 +54,12 @@ const MOCK_CONFIG = {
     indicator_style: 'cursor-dot' as const,
   },
   recorder: { position: 'top-right' as const, offset_x: -20, offset_y: 20, auto_hide_delay: 3000 },
+  integrations: {
+    api_enabled: false,
+    api_port: 8765,
+    mcp_enabled: false,
+    api_token: null,
+  },
 };
 
 const MOCK_MODELS = [
@@ -343,4 +349,18 @@ export const thothMockCommands: CommandMap = {
   remove_quarantine: () => undefined,
   start_audio_preview: () => undefined,
   stop_audio_preview: () => undefined,
+
+  // -- Integrations (Local Control API + MCP server) --
+  get_integrations_status: () => ({
+    apiEnabled: false,
+    apiRunning: false,
+    apiPort: 8765,
+    mcpEnabled: false,
+    hasToken: true,
+  }),
+  get_api_token: () => 'thoth-dev-0000-1111-2222-3333-444455556666',
+  set_api_enabled: () => undefined,
+  set_mcp_enabled: () => undefined,
+  set_api_port: () => undefined,
+  rotate_api_token: () => 'thoth-dev-rotated-aaaa-bbbb-cccc-ddddeeeeffff',
 };

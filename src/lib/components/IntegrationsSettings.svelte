@@ -1,0 +1,264 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { invoke } from '@tauri-apps/api/core';
+  import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+  import { toast } from 'svelte-sonner';
+  import { Switch } from '$components/ui/switch';
+  import { Button } from '$components/ui/button';
+  import { Input } from '$components/ui/input';
+  import * as AlertDialog from '$components/ui/alert-dialog';
+  import Eye from '@lucide/svelte/icons/eye';
+  import EyeOff from '@lucide/svelte/icons/eye-off';
+  import Copy from '@lucide/svelte/icons/copy';
+  import Check from '@lucide/svelte/icons/check';
+  import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
+
+  interface IntegrationsStatus {
+    apiEnabled: boolean;
+    apiRunning: boolean;
+    apiPort: number;
+    mcpEnabled: boolean;
+    hasToken: boolean;
+  }
+
+  let status = $state<IntegrationsStatus>({
+    apiEnabled: false,
+    apiRunning: false,
+    apiPort: 8765,
+    mcpEnabled: false,
+    hasToken: false,
+  });
+
+  let token = $state<string | null>(null);
+  let tokenRevealed = $state(false);
+  let copied = $state(false);
+  let showRotateDialog = $state(false);
+
+  async function refreshStatus(): Promise<void> {
+    try {
+      status = await invoke<IntegrationsStatus>('get_integrations_status');
+    } catch (e) {
+      console.error('Failed to refresh integrations status:', e);
+    }
+  }
+
+  async function loadToken(): Promise<void> {
+    try {
+      token = await invoke<string | null>('get_api_token');
+    } catch (e) {
+      console.error('Failed to load API token:', e);
+    }
+  }
+
+  async function handleApiToggle(enabled: boolean): Promise<void> {
+    try {
+      await invoke('set_api_enabled', { enabled });
+      await refreshStatus();
+      if (enabled && !token) {
+        await loadToken();
+      }
+    } catch (e) {
+      toast.error('Failed to update API server', {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  async function handleMcpToggle(enabled: boolean): Promise<void> {
+    try {
+      await invoke('set_mcp_enabled', { enabled });
+      await refreshStatus();
+    } catch (e) {
+      toast.error('Failed to update MCP server', {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  async function handleCopyToken(): Promise<void> {
+    if (!token) return;
+    try {
+      await writeText(token);
+      copied = true;
+      setTimeout(() => {
+        copied = false;
+      }, 2000);
+    } catch (e) {
+      toast.error('Failed to copy token');
+    }
+  }
+
+  async function handleRotateToken(): Promise<void> {
+    showRotateDialog = false;
+    try {
+      token = await invoke<string>('rotate_api_token');
+      tokenRevealed = false;
+      await refreshStatus();
+      toast.success('API token rotated', {
+        description: 'The old token is now invalid. Update any connected clients.',
+      });
+    } catch (e) {
+      toast.error('Failed to rotate API token', {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  const maskedToken = $derived(token ? '••••••••••••••••••••••••••••••••' : null);
+  const displayToken = $derived(tokenRevealed ? token : maskedToken);
+
+  onMount(async () => {
+    await refreshStatus();
+    await loadToken();
+  });
+</script>
+
+<!-- Section 1: Local Control API -->
+<section class="flex flex-col">
+  <div class="mb-3">
+    <h2 class="text-base font-semibold text-foreground m-0">Local Control API</h2>
+    <p class="text-xs text-muted-foreground m-0">
+      Let local automation and AI assistants control Thoth over a loopback HTTP API.
+    </p>
+  </div>
+  <div class="flex flex-col gap-2">
+    <!-- Enable API row -->
+    <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3">
+      <div class="flex flex-1 flex-col gap-1">
+        <span class="text-sm font-medium text-foreground">Enable API server</span>
+        <span class="text-xs text-muted-foreground flex items-center gap-1.5">
+          {#if status.apiRunning}
+            <span
+              class="inline-block h-1.5 w-1.5 rounded-full bg-chart-2 flex-shrink-0"
+              aria-hidden="true"
+            ></span>
+            <span class="text-chart-2 font-medium">Running</span>
+            <span>on http://127.0.0.1:{status.apiPort}</span>
+          {:else}
+            Stopped
+          {/if}
+        </span>
+      </div>
+      <Switch
+        checked={status.apiEnabled}
+        onCheckedChange={handleApiToggle}
+      />
+    </div>
+
+    <!-- Token management — only shown when API is enabled and token exists -->
+    {#if status.apiEnabled && status.hasToken && token}
+      <div class="flex flex-col gap-2 rounded-md border border-border bg-card p-3">
+        <div class="flex flex-col gap-0.5">
+          <span class="text-sm font-medium text-foreground">API token</span>
+          <span class="text-xs text-muted-foreground">
+            Clients authenticate with this bearer token. Keep it secret.
+          </span>
+        </div>
+        <div class="flex items-center gap-2 mt-1">
+          <Input
+            value={displayToken ?? ''}
+            readonly
+            class="font-mono text-xs flex-1 bg-muted"
+            aria-label="API token"
+          />
+          <Button
+            variant="outline"
+            size="icon"
+            onclick={() => (tokenRevealed = !tokenRevealed)}
+            aria-label={tokenRevealed ? 'Hide token' : 'Reveal token'}
+            class="flex-shrink-0"
+          >
+            {#if tokenRevealed}
+              <EyeOff size={14} />
+            {:else}
+              <Eye size={14} />
+            {/if}
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onclick={handleCopyToken}
+            aria-label="Copy token"
+            class="flex-shrink-0"
+          >
+            {#if copied}
+              <Check size={14} class="text-chart-2" />
+            {:else}
+              <Copy size={14} />
+            {/if}
+          </Button>
+        </div>
+        <div class="flex mt-1">
+          <Button
+            variant="outline"
+            size="sm"
+            onclick={() => (showRotateDialog = true)}
+            class="gap-1.5"
+          >
+            <RotateCcw size={13} />
+            Rotate token
+          </Button>
+        </div>
+      </div>
+    {/if}
+  </div>
+</section>
+
+<!-- Section 2: MCP Server -->
+<section class="flex flex-col">
+  <div class="mb-3">
+    <h2 class="text-base font-semibold text-foreground m-0">MCP Server</h2>
+    <p class="text-xs text-muted-foreground m-0">
+      Expose Thoth's tools to MCP-capable assistants (Claude, etc.). Consumes the Local Control API.
+    </p>
+  </div>
+  <div class="flex flex-col gap-2">
+    <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3">
+      <div class="flex flex-1 flex-col gap-1">
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-medium text-foreground">Enable MCP server</span>
+          <span class="text-xs text-muted-foreground border border-border rounded px-1.5 py-0.5 leading-none">
+            Coming soon
+          </span>
+        </div>
+        <span class="text-xs text-muted-foreground">
+          Make Thoth's transcription tools available to Claude and other MCP clients.
+        </span>
+      </div>
+      <Switch
+        checked={status.mcpEnabled}
+        onCheckedChange={handleMcpToggle}
+      />
+    </div>
+
+    {#if !status.apiEnabled}
+      <p class="text-xs text-muted-foreground px-1">
+        Requires the Local Control API to be enabled.
+      </p>
+    {/if}
+  </div>
+</section>
+
+<!-- Rotate token confirmation dialog -->
+<AlertDialog.Root
+  open={showRotateDialog}
+  onOpenChange={(v) => {
+    if (!v) showRotateDialog = false;
+  }}
+>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>Rotate API token</AlertDialog.Title>
+      <AlertDialog.Description>
+        This generates a new token and immediately invalidates the current one. Any client using the
+        old token will stop working until reconfigured.
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+      <AlertDialog.Action variant="destructive" onclick={handleRotateToken}>
+        Rotate token
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

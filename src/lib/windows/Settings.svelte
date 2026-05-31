@@ -19,12 +19,14 @@
   import BookOpen from '@lucide/svelte/icons/book-open';
   import FileText from '@lucide/svelte/icons/file-text';
   import HardDrive from '@lucide/svelte/icons/hard-drive';
+  import Plug from '@lucide/svelte/icons/plug';
   import Info from '@lucide/svelte/icons/info';
   import AIEnhancementSettings from '../components/AIEnhancementSettings.svelte';
   import AudioDeviceSelector from '../components/AudioDeviceSelector.svelte';
   import DictionaryEditor from '../components/DictionaryEditor.svelte';
   import FilterSettings from '../components/FilterSettings.svelte';
   import StoragePane from '../components/StoragePane.svelte';
+  import IntegrationsSettings from '../components/IntegrationsSettings.svelte';
   import HistoryPane from '../components/HistoryPane.svelte';
   import ModelManager from '../components/ModelManager.svelte';
   import TranscribePane from '../components/TranscribePane.svelte';
@@ -65,6 +67,7 @@
     { id: 'dictionary', title: 'Dictionary', icon: BookOpen },
     { id: 'transcribe', title: 'Transcribe', icon: FileText },
     { id: 'storage', title: 'Storage', icon: HardDrive },
+    { id: 'integrations', title: 'Integrations', icon: Plug },
   ];
 
   let activePane = $state('overview');
@@ -293,31 +296,31 @@
       {:else if activePane === 'recording'}
         <div class="pane">
           <!-- Audio Input Section -->
-          <section class="settings-section">
-            <div class="section-header">
-              <h2 class="section-title">Audio Input</h2>
-              <p class="section-description">Choose how Thoth selects your audio input device</p>
+          <section class="flex flex-col">
+            <div class="mb-3">
+              <h2 class="text-base font-semibold text-foreground m-0">Audio Input</h2>
+              <p class="text-xs text-muted-foreground m-0">Choose how Thoth selects your audio input device</p>
             </div>
-            <div class="section-content">
+            <div class="flex flex-col gap-2">
               <AudioDeviceSelector />
             </div>
           </section>
 
           <!-- Shortcuts Section -->
-          <section class="settings-section">
-            <div class="section-header">
-              <h2 class="section-title">Shortcuts</h2>
-              <p class="section-description">Tap to start recording, tap again to stop.</p>
+          <section class="flex flex-col">
+            <div class="mb-3">
+              <h2 class="text-base font-semibold text-foreground m-0">Shortcuts</h2>
+              <p class="text-xs text-muted-foreground m-0">Tap to start recording, tap again to stop.</p>
             </div>
-            <div class="section-content">
+            <div class="flex flex-col gap-2">
               {#if !shortcutsStore.isLoading}
                 <div class="shortcuts-list">
                   {#each allShortcuts as shortcut, i (shortcut.id)}
-                    <div class="setting-row card">
-                      <div class="setting-info">
-                        <span class="setting-label">{shortcut.description}</span>
+                    <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3">
+                      <div class="flex flex-1 flex-col gap-1">
+                        <span class="text-sm font-medium text-foreground">{shortcut.description}</span>
                         <span
-                          class="setting-description shortcut-status"
+                          class="text-xs shortcut-status"
                           class:enabled={shortcut.isEnabled}
                         >
                           {shortcut.isEnabled ? 'Active' : 'Inactive'}
@@ -340,16 +343,16 @@
           </section>
 
           <!-- Recording Behaviour Section -->
-          <section class="settings-section">
-            <div class="section-header">
-              <h2 class="section-title">Recording Behaviour</h2>
-              <p class="section-description">Audio and clipboard handling during transcription</p>
+          <section class="flex flex-col">
+            <div class="mb-3">
+              <h2 class="text-base font-semibold text-foreground m-0">Recording Behaviour</h2>
+              <p class="text-xs text-muted-foreground m-0">Audio and clipboard handling during transcription</p>
             </div>
-            <div class="section-content">
-              <div class="setting-row card">
-                <div class="setting-info">
-                  <span class="setting-label">Sound Feedback</span>
-                  <span class="setting-description"
+            <div class="flex flex-col gap-2">
+              <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3">
+                <div class="flex flex-1 flex-col gap-1">
+                  <span class="text-sm font-medium text-foreground">Sound Feedback</span>
+                  <span class="text-xs text-muted-foreground"
                     >Play sounds when recording starts and stops</span
                   >
                 </div>
@@ -360,10 +363,10 @@
                 />
               </div>
               <div class="row-separator"></div>
-              <div class="setting-row card">
-                <div class="setting-info">
-                  <span class="setting-label">Recording Indicator</span>
-                  <span class="setting-description">Show floating indicator during recording</span>
+              <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3">
+                <div class="flex flex-1 flex-col gap-1">
+                  <span class="text-sm font-medium text-foreground">Recording Indicator</span>
+                  <span class="text-xs text-muted-foreground">Show floating indicator during recording</span>
                 </div>
                 <Switch
                   checked={configStore.general.showRecordingIndicator}
@@ -387,10 +390,10 @@
               </div>
               {#if configStore.general.showRecordingIndicator}
                 <div class="row-separator"></div>
-                <div class="setting-row card">
-                  <div class="setting-info">
-                    <span class="setting-label">Indicator Style</span>
-                    <span class="setting-description"
+                <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3">
+                  <div class="flex flex-1 flex-col gap-1">
+                    <span class="text-sm font-medium text-foreground">Indicator Style</span>
+                    <span class="text-xs text-muted-foreground"
                       >Visual appearance of the recording indicator</span
                     >
                   </div>
@@ -406,14 +409,14 @@
                         <!-- Cursor arrow -->
                         <path
                           d="M20 8 L20 36 L26 30 L32 40 L36 38 L30 28 L38 28 Z"
-                          fill="var(--color-text-secondary)"
-                          stroke="var(--color-bg-primary)"
+                          fill="var(--muted-foreground)"
+                          stroke="var(--background)"
                           stroke-width="1.5"
                         />
                         <!-- Glowing dot -->
-                        <circle cx="52" cy="22" r="10" fill="var(--color-accent)" opacity="0.2" />
-                        <circle cx="52" cy="22" r="7" fill="var(--color-accent)" opacity="0.4" />
-                        <circle cx="52" cy="22" r="4.5" fill="var(--color-accent)" />
+                        <circle cx="52" cy="22" r="10" fill="var(--primary)" opacity="0.2" />
+                        <circle cx="52" cy="22" r="7" fill="var(--primary)" opacity="0.4" />
+                        <circle cx="52" cy="22" r="4.5" fill="var(--primary)" />
                         <!-- Mic icon inside dot -->
                         <rect x="50.5" y="18" width="3" height="5" rx="1.5" fill="white" />
                         <path
@@ -442,7 +445,7 @@
                           width="60"
                           height="36"
                           rx="3"
-                          stroke="var(--color-text-tertiary)"
+                          stroke="var(--muted-foreground)"
                           stroke-width="1.5"
                           fill="none"
                         />
@@ -452,7 +455,7 @@
                           y1="42"
                           x2="48"
                           y2="42"
-                          stroke="var(--color-text-tertiary)"
+                          stroke="var(--muted-foreground)"
                           stroke-width="1.5"
                           stroke-linecap="round"
                         />
@@ -461,7 +464,7 @@
                           y1="42"
                           x2="40"
                           y2="46"
-                          stroke="var(--color-text-tertiary)"
+                          stroke="var(--muted-foreground)"
                           stroke-width="1.5"
                         />
                         <line
@@ -469,13 +472,13 @@
                           y1="46"
                           x2="46"
                           y2="46"
-                          stroke="var(--color-text-tertiary)"
+                          stroke="var(--muted-foreground)"
                           stroke-width="1.5"
                           stroke-linecap="round"
                         />
                         <!-- Fixed dot in top-right corner of screen -->
-                        <circle cx="59" cy="16" r="6" fill="var(--color-accent)" opacity="0.3" />
-                        <circle cx="59" cy="16" r="4" fill="var(--color-accent)" />
+                        <circle cx="59" cy="16" r="6" fill="var(--primary)" opacity="0.3" />
+                        <circle cx="59" cy="16" r="4" fill="var(--primary)" />
                         <!-- Mic icon inside dot -->
                         <rect x="58" y="13.5" width="2" height="3.5" rx="1" fill="white" />
                         <path
@@ -504,7 +507,7 @@
                           width="64"
                           height="20"
                           rx="10"
-                          fill="var(--color-accent)"
+                          fill="var(--primary)"
                         />
                         <!-- Mic icon on left side -->
                         <rect x="17" y="22" width="4" height="6" rx="2" fill="white" />
@@ -592,27 +595,27 @@
         </div>
       {:else if activePane === 'models'}
         <div class="pane">
-          <section class="settings-section">
-            <div class="section-header">
-              <h2 class="section-title">Speech Recognition</h2>
-              <p class="section-description">Local models for transcribing speech to text</p>
+          <section class="flex flex-col">
+            <div class="mb-3">
+              <h2 class="text-base font-semibold text-foreground m-0">Speech Recognition</h2>
+              <p class="text-xs text-muted-foreground m-0">Local models for transcribing speech to text</p>
             </div>
-            <div class="section-content">
+            <div class="flex flex-col gap-2">
               <ModelManager />
             </div>
           </section>
         </div>
       {:else if activePane === 'ai'}
         <div class="pane">
-          <section class="settings-section">
-            <div class="section-header">
-              <h2 class="section-title">AI Enhancement</h2>
-              <p class="section-description">
+          <section class="flex flex-col">
+            <div class="mb-3">
+              <h2 class="text-base font-semibold text-foreground m-0">AI Enhancement</h2>
+              <p class="text-xs text-muted-foreground m-0">
                 Configure AI-powered text enhancement using Ollama for grammar correction,
                 formatting, and more.
               </p>
             </div>
-            <div class="section-content">
+            <div class="flex flex-col gap-2">
               <AIEnhancementSettings />
             </div>
           </section>
@@ -622,36 +625,34 @@
           <HistoryPane />
         </div>
       {:else if activePane === 'dictionary'}
-        <div class="pane">
-          <section class="settings-section">
-            <div class="section-header">
-              <h2 class="section-title">Dictionary</h2>
-              <p class="section-description">
+        <div class="pane dictionary-pane">
+          <section class="flex min-h-0 flex-1 flex-col">
+            <div class="mb-3">
+              <h2 class="text-base font-semibold text-foreground m-0">Dictionary</h2>
+              <p class="text-xs text-muted-foreground m-0">
                 Add words to help recognition and set up automatic replacements
               </p>
             </div>
-            <div class="section-content">
-              <DictionaryEditor />
-            </div>
+            <DictionaryEditor />
           </section>
         </div>
       {:else if activePane === 'transcribe'}
         <div class="pane">
-          <section class="settings-section">
-            <div class="section-header">
-              <h2 class="section-title">Import Audio Files</h2>
-              <p class="section-description">Transcribe existing audio files</p>
+          <section class="flex flex-col">
+            <div class="mb-3">
+              <h2 class="text-base font-semibold text-foreground m-0">Import Audio Files</h2>
+              <p class="text-xs text-muted-foreground m-0">Transcribe existing audio files</p>
             </div>
-            <div class="section-content">
+            <div class="flex flex-col gap-2">
               <TranscribePane />
             </div>
           </section>
-          <section class="settings-section">
-            <div class="section-header">
-              <h2 class="section-title">Output Filtering</h2>
-              <p class="section-description">Configure how transcription output is processed</p>
+          <section class="flex flex-col">
+            <div class="mb-3">
+              <h2 class="text-base font-semibold text-foreground m-0">Output Filtering</h2>
+              <p class="text-xs text-muted-foreground m-0">Configure how transcription output is processed</p>
             </div>
-            <div class="section-content">
+            <div class="flex flex-col gap-2">
               <FilterSettings
                 initialOptions={{
                   remove_fillers: configStore.transcription.removeFillers,
@@ -671,6 +672,10 @@
         <div class="pane">
           <StoragePane />
         </div>
+      {:else if activePane === 'integrations'}
+        <div class="pane">
+          <IntegrationsSettings />
+        </div>
       {/if}
     </main>
   </div>
@@ -685,7 +690,7 @@
     flex-direction: column;
     width: 100%;
     height: 100vh;
-    background: var(--color-bg-primary);
+    background: var(--background);
   }
 
   /* Title bar */
@@ -694,9 +699,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    height: var(--header-height);
-    background-color: var(--color-bg-primary);
-    border-bottom: 1px solid var(--color-border);
+    height: 54px;
+    background-color: var(--background);
+    border-bottom: 1px solid var(--border);
     flex-shrink: 0;
     -webkit-app-region: drag;
     app-region: drag;
@@ -705,9 +710,9 @@
   }
 
   .title-text {
-    font-size: var(--text-sm);
+    font-size: 0.8125rem;
     font-weight: 500;
-    color: var(--color-text-primary);
+    color: var(--foreground);
     user-select: none;
   }
 
@@ -719,12 +724,12 @@
 
   /* Sidebar */
   .sidebar {
-    width: var(--sidebar-width);
+    width: 220px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
     padding-top: 12px;
-    border-right: 1px solid var(--color-border);
+    border-right: 1px solid var(--border);
   }
 
   .sidebar-items {
@@ -742,8 +747,8 @@
     width: 100% !important;
     padding: 8px 12px !important;
     border-radius: 6px !important;
-    color: var(--color-text-secondary) !important;
-    font-size: var(--text-sm) !important;
+    color: var(--muted-foreground) !important;
+    font-size: 0.8125rem !important;
     font-weight: 400 !important;
     text-align: left !important;
     justify-content: flex-start !important;
@@ -752,12 +757,12 @@
 
   :global(.sidebar-item:hover) {
     background-color: rgba(255, 255, 255, 0.07) !important;
-    color: var(--color-text-primary) !important;
+    color: var(--foreground) !important;
   }
 
   :global(.sidebar-item.active) {
     background-color: rgba(255, 255, 255, 0.1) !important;
-    color: var(--color-text-primary) !important;
+    color: var(--foreground) !important;
     font-weight: 500 !important;
   }
 
@@ -777,7 +782,7 @@
   .sidebar-footer {
     margin-top: auto;
     padding: 12px;
-    border-top: 1px solid var(--color-border);
+    border-top: 1px solid var(--border);
   }
 
   /* Content area */
@@ -807,14 +812,14 @@
     flex-direction: column;
     gap: 4px;
     padding: 16px;
-    background: var(--color-bg-secondary);
-    border: 2px solid var(--color-border-subtle);
+    background: var(--card);
+    border: 2px solid var(--border);
     border-radius: var(--radius-md);
     cursor: pointer;
     text-align: left;
     transition:
-      border-color var(--transition-fast),
-      background var(--transition-fast);
+      border-color 150ms ease,
+      background 150ms ease;
   }
 
   .indicator-style-selector .mode-option {
@@ -836,27 +841,27 @@
   }
 
   .mode-option:hover {
-    border-color: var(--color-text-tertiary);
+    border-color: var(--muted-foreground);
   }
 
   .mode-option.active {
-    border-color: var(--color-accent);
-    background: color-mix(in srgb, var(--color-accent) 5%, transparent);
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 5%, transparent);
   }
 
   .mode-title {
-    font-size: var(--text-sm);
+    font-size: 0.8125rem;
     font-weight: 600;
-    color: var(--color-text-primary);
+    color: var(--foreground);
   }
 
   .mode-option.active .mode-title {
-    color: var(--color-accent);
+    color: var(--primary);
   }
 
   .mode-description {
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
     line-height: 1.4;
   }
 
@@ -868,11 +873,11 @@
   }
 
   .shortcut-status {
-    font-size: var(--text-xs);
+    font-size: 0.75rem;
   }
 
   .shortcut-status.enabled {
-    color: var(--color-success);
+    color: var(--chart-2);
   }
 
   /* History pane: remove content padding so the 3-panel layout fills the space */
@@ -885,6 +890,18 @@
     height: 100%;
   }
 
+  /* Dictionary pane fills the content height; the table scrolls internally
+     while the page keeps a consistent 32px gap on the sides and bottom. */
+  .content:has(.dictionary-pane) {
+    overflow: hidden;
+    padding-bottom: 32px;
+  }
+
+  .dictionary-pane {
+    height: 100%;
+    min-height: 0;
+  }
+
   /* Recording indicator */
   .recording-indicator {
     display: flex;
@@ -892,16 +909,16 @@
     gap: 6px;
     position: absolute;
     right: 16px;
-    font-size: var(--text-xs);
+    font-size: 0.75rem;
     font-weight: 500;
-    color: var(--color-error);
+    color: var(--destructive);
   }
 
   .recording-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--color-error);
+    background: var(--destructive);
     animation: pulse 1s ease-in-out infinite;
   }
 
@@ -918,8 +935,8 @@
   .processing-indicator {
     position: absolute;
     right: 16px;
-    font-size: var(--text-xs);
+    font-size: 0.75rem;
     font-weight: 500;
-    color: var(--color-accent);
+    color: var(--primary);
   }
 </style>

@@ -18,6 +18,53 @@ const CURRENT_VERSION: u32 = 1;
 /// Global config instance for caching
 static CONFIG: OnceLock<RwLock<Config>> = OnceLock::new();
 
+/// Integrations configuration (Local Control API, MCP server)
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct IntegrationsConfig {
+    /// Whether the Local Control API HTTP server is enabled
+    #[serde(default)]
+    pub api_enabled: bool,
+    /// Port for the Local Control API (default 8765)
+    #[serde(default = "default_api_port")]
+    pub api_port: u16,
+    /// Whether the MCP server is enabled
+    #[serde(default)]
+    pub mcp_enabled: bool,
+    /// Bearer token for authenticating API requests (None = not yet generated)
+    #[serde(default)]
+    pub api_token: Option<String>,
+}
+
+fn default_api_port() -> u16 {
+    8765
+}
+
+impl std::fmt::Debug for IntegrationsConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IntegrationsConfig")
+            .field("api_enabled", &self.api_enabled)
+            .field("api_port", &self.api_port)
+            .field("mcp_enabled", &self.mcp_enabled)
+            .field(
+                "api_token",
+                &self.api_token.as_ref().map(|_| "***redacted***"),
+            )
+            .finish()
+    }
+}
+
+impl Default for IntegrationsConfig {
+    fn default() -> Self {
+        Self {
+            api_enabled: false,
+            api_port: default_api_port(),
+            mcp_enabled: false,
+            api_token: None,
+        }
+    }
+}
+
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -36,6 +83,8 @@ pub struct Config {
     pub general: GeneralConfig,
     /// Recorder window settings
     pub recorder: RecorderConfig,
+    /// Integrations settings (Local Control API, MCP)
+    pub integrations: IntegrationsConfig,
 }
 
 impl Default for Config {
@@ -48,6 +97,7 @@ impl Default for Config {
             enhancement: EnhancementConfig::default(),
             general: GeneralConfig::default(),
             recorder: RecorderConfig::default(),
+            integrations: IntegrationsConfig::default(),
         }
     }
 }
@@ -550,6 +600,16 @@ pub fn set_config(mut config: Config) -> Result<(), String> {
             );
             config.shortcuts.copy_last = current.shortcuts.copy_last.clone();
         }
+
+        // Preserve api_token if the incoming config has None but the cached config has
+        // a token. The frontend settings panel does not echo the token back (it only
+        // shows a masked representation), so a generic config save must not wipe it.
+        // Use rotate_api_token or set_api_enabled (which generates one) for intentional
+        // token changes.
+        if config.integrations.api_token.is_none() && current.integrations.api_token.is_some() {
+            tracing::debug!("Preserving api_token (incoming config had None)");
+            config.integrations.api_token = current.integrations.api_token.clone();
+        }
     }
 
     // Save to disk first
@@ -871,6 +931,7 @@ mod tests {
                 offset_y: 20,
                 auto_hide_delay: 5000,
             },
+            integrations: IntegrationsConfig::default(),
         };
 
         let json = serde_json::to_string_pretty(&config).unwrap();

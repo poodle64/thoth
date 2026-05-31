@@ -52,6 +52,18 @@ export interface ShortcutConfig {
   recordingMode: RecordingMode;
 }
 
+/** Integrations configuration */
+export interface IntegrationsConfig {
+  /** Whether the loopback HTTP control API is enabled */
+  apiEnabled: boolean;
+  /** Port for the loopback HTTP control API */
+  apiPort: number;
+  /** Whether the MCP server is enabled */
+  mcpEnabled: boolean;
+  /** API bearer token (null until first generated) */
+  apiToken: string | null;
+}
+
 /** AI enhancement configuration */
 export interface EnhancementConfig {
   /** Whether AI enhancement is enabled */
@@ -127,6 +139,8 @@ export interface Config {
   general: GeneralConfig;
   /** Recorder window settings */
   recorder: RecorderConfig;
+  /** Integrations settings */
+  integrations: IntegrationsConfig;
 }
 
 /** Raw config from backend (snake_case fields) */
@@ -175,6 +189,12 @@ interface ConfigRaw {
     offset_x: number;
     offset_y: number;
     auto_hide_delay: number;
+  };
+  integrations?: {
+    api_enabled: boolean;
+    api_port: number;
+    mcp_enabled: boolean;
+    api_token: string | null;
   };
 }
 
@@ -225,6 +245,12 @@ function parseConfig(raw: ConfigRaw): Config {
       offsetX: raw.recorder.offset_x,
       offsetY: raw.recorder.offset_y,
       autoHideDelay: raw.recorder.auto_hide_delay,
+    },
+    integrations: {
+      apiEnabled: raw.integrations?.api_enabled ?? false,
+      apiPort: raw.integrations?.api_port ?? 8765,
+      mcpEnabled: raw.integrations?.mcp_enabled ?? false,
+      apiToken: raw.integrations?.api_token ?? null,
     },
   };
 }
@@ -277,6 +303,12 @@ function serialiseConfig(config: Config): ConfigRaw {
       offset_y: config.recorder.offsetY,
       auto_hide_delay: config.recorder.autoHideDelay,
     },
+    integrations: {
+      api_enabled: config.integrations.apiEnabled,
+      api_port: config.integrations.apiPort,
+      mcp_enabled: config.integrations.mcpEnabled,
+      api_token: config.integrations.apiToken,
+    },
   };
 }
 
@@ -327,6 +359,12 @@ function getDefaultConfig(): Config {
       offsetX: -20,
       offsetY: 20,
       autoHideDelay: 3000,
+    },
+    integrations: {
+      apiEnabled: false,
+      apiPort: 8765,
+      mcpEnabled: false,
+      apiToken: null,
     },
   };
 }
@@ -464,6 +502,16 @@ function createConfigStore() {
   }
 
   /**
+   * Update a specific integrations config field
+   */
+  function updateIntegrations<K extends keyof IntegrationsConfig>(
+    key: K,
+    value: IntegrationsConfig[K]
+  ): void {
+    config.integrations[key] = value;
+  }
+
+  /**
    * Clear error state
    */
   function clearError(): void {
@@ -507,6 +555,9 @@ function createConfigStore() {
     get recorder() {
       return config.recorder;
     },
+    get integrations() {
+      return config.integrations;
+    },
 
     // Actions
     load,
@@ -519,6 +570,7 @@ function createConfigStore() {
     updateEnhancement,
     updateGeneral,
     updateRecorder,
+    updateIntegrations,
     clearError,
   };
 }
