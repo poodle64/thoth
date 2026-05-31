@@ -202,10 +202,24 @@ async fn handle_add_dictionary(
     Ok(StatusCode::CREATED)
 }
 
+/// Reject an out-of-range dictionary index with 404 rather than letting the
+/// underlying error map to a 500.
+fn check_dictionary_index(index: usize) -> Result<(), AppError> {
+    let count = crate::dictionary::get_dictionary_entries()?.len();
+    if index >= count {
+        return Err(AppError::NotFound(format!(
+            "dictionary index {} out of range (have {} entries)",
+            index, count
+        )));
+    }
+    Ok(())
+}
+
 async fn handle_update_dictionary(
     Path(index): Path<usize>,
     Json(payload): Json<AddEntryPayload>,
 ) -> Result<impl IntoResponse, AppError> {
+    check_dictionary_index(index)?;
     let entry = crate::dictionary::DictionaryEntry {
         from: payload.from,
         to: payload.to,
@@ -218,6 +232,7 @@ async fn handle_update_dictionary(
 async fn handle_delete_dictionary(
     Path(index): Path<usize>,
 ) -> Result<impl IntoResponse, AppError> {
+    check_dictionary_index(index)?;
     crate::dictionary::remove_dictionary_entry(index)?;
     Ok(StatusCode::OK)
 }
