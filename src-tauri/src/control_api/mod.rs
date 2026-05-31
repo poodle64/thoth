@@ -22,9 +22,32 @@ use uuid::Uuid;
 // Token generation
 // ---------------------------------------------------------------------------
 
-/// Generate a new random bearer token (two UUID v4s joined, 73 chars total).
+/// Token prefix — `sk-thoth-` marks it as a Thoth secret key (mirrors the
+/// recognisable `sk-`/`sk-ant-` convention; greppable for secret scanners).
+const TOKEN_PREFIX: &str = "sk-thoth-";
+
+/// base62 alphabet (URL-safe, no ambiguous separators).
+const BASE62: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+/// Generate a new bearer token of the canonical secret-key shape:
+/// `sk-thoth-<40 base62 chars>` from the OS CSPRNG.
 pub fn generate_token() -> String {
-    format!("{}-{}", Uuid::new_v4(), Uuid::new_v4())
+    // 40 chars of base62 ≈ 238 bits of entropy. Reject-sample to avoid modulo bias.
+    let mut secret = String::with_capacity(40);
+    let mut buf = [0u8; 64];
+    while secret.len() < 40 {
+        getrandom::getrandom(&mut buf).expect("OS CSPRNG unavailable");
+        for &b in buf.iter() {
+            if (b as usize) < 248 {
+                // 248 = 4 * 62; keeps the distribution uniform across the 62 symbols
+                secret.push(BASE62[(b % 62) as usize] as char);
+                if secret.len() == 40 {
+                    break;
+                }
+            }
+        }
+    }
+    format!("{}{}", TOKEN_PREFIX, secret)
 }
 
 // ---------------------------------------------------------------------------
@@ -616,4 +639,29 @@ pub async fn set_api_port(app: tauri::AppHandle, port: u16) -> Result<(), String
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_has_canonical_shape() {
+        let t = generate_token();
+        assert!(t.starts_with("sk-thoth-"), "prefix: {}", t);
+        assert_eq!(t.len(), TOKEN_PREFIX.len() + 40, "length: {}", t);
+        let secret = &t[TOKEN_PREFIX.len()..];
+        assert!(
+            secret.bytes().all(|b| BASE62.contains(&b)),
+            "secret must be base62: {}",
+            secret
+        );
+    }
+
+    #[test]
+    fn tokens_are_unique() {
+        let a = generate_token();
+        let b = generate_token();
+        assert_ne!(a, b);
+    }
 }
