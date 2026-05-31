@@ -215,25 +215,23 @@
   <div class="flex flex-col gap-2">
     <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3">
       <div class="flex flex-1 flex-col gap-1">
-        <div class="flex items-center gap-2">
-          <span class="text-sm font-medium text-foreground">Enable MCP server</span>
-          <span class="text-xs text-muted-foreground border border-border rounded px-1.5 py-0.5 leading-none">
-            Coming soon
+        <span class="text-sm font-medium text-foreground">Enable MCP server</span>
+        {#if status.mcpEnabled && status.apiRunning}
+          <span class="text-xs text-chart-2">
+            Serving at http://127.0.0.1:{status.apiPort}/mcp
           </span>
-        </div>
-        <span class="text-xs text-muted-foreground">
-          Make Thoth's transcription tools available to Claude and other MCP clients.
-        </span>
+        {:else}
+          <span class="text-xs text-muted-foreground">
+            Make Thoth's tools available to Claude and other MCP clients.
+          </span>
+        {/if}
       </div>
-      <Switch
-        checked={status.mcpEnabled}
-        onCheckedChange={handleMcpToggle}
-      />
+      <Switch checked={status.mcpEnabled} onCheckedChange={handleMcpToggle} />
     </div>
 
-    {#if !status.apiEnabled}
+    {#if status.mcpEnabled && !status.apiEnabled}
       <p class="text-xs text-muted-foreground px-1">
-        Requires the Local Control API to be enabled.
+        Enable the Local Control API above to start serving the MCP endpoint.
       </p>
     {/if}
   </div>

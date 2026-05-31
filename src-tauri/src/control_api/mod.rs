@@ -259,14 +259,13 @@ struct TranscribePayload {
     path: String,
 }
 
-async fn handle_post_transcribe(
-    Json(payload): Json<TranscribePayload>,
-) -> Result<impl IntoResponse, AppError> {
-    if !std::path::Path::new(&payload.path).is_file() {
-        return Err(AppError::BadRequest(format!(
-            "file not found or not readable: {}",
-            payload.path
-        )));
+/// Submit a file for async transcription. Shared by the HTTP API and the MCP server.
+///
+/// Validates the path, registers a job, spawns the transcription off the executor
+/// (and off the live recording pipeline), and returns the job id immediately.
+pub(crate) async fn submit_transcribe_job(path: String) -> Result<String, String> {
+    if !std::path::Path::new(&path).is_file() {
+        return Err(format!("file not found or not readable: {}", path));
     }
 
     let job_id = Uuid::new_v4().to_string();
@@ -285,7 +284,6 @@ async fn handle_post_transcribe(
     }
 
     let job_id_clone = job_id.clone();
-    let path = payload.path.clone();
     tokio::spawn(async move {
         // Mark as processing.
         {
@@ -296,10 +294,8 @@ async fn handle_post_transcribe(
         }
 
         // transcribe_file is synchronous and CPU-bound.
-        let result = tokio::task::spawn_blocking(move || {
-            crate::transcription::transcribe_file(path)
-        })
-        .await;
+        let result =
+            tokio::task::spawn_blocking(move || crate::transcription::transcribe_file(path)).await;
 
         let mut guard = get_jobs().await;
         if let Some(job) = guard.as_mut().unwrap().get_mut(&job_id_clone) {
@@ -320,15 +316,31 @@ async fn handle_post_transcribe(
         }
     });
 
+    Ok(job_id)
+}
+
+/// Look up a transcription job by id, returning its JSON representation. Shared with MCP.
+pub(crate) async fn lookup_transcribe_job(id: &str) -> Option<serde_json::Value> {
+    let guard = get_jobs().await;
+    guard
+        .as_ref()
+        .unwrap()
+        .get(id)
+        .and_then(|job| serde_json::to_value(job).ok())
+}
+
+async fn handle_post_transcribe(
+    Json(payload): Json<TranscribePayload>,
+) -> Result<impl IntoResponse, AppError> {
+    let job_id = submit_transcribe_job(payload.path)
+        .await
+        .map_err(AppError::BadRequest)?;
     Ok(Json(serde_json::json!({ "jobId": job_id, "status": "queued" })))
 }
 
-async fn handle_get_transcribe_job(
-    Path(id): Path<String>,
-) -> Result<impl IntoResponse, AppError> {
-    let guard = get_jobs().await;
-    match guard.as_ref().unwrap().get(&id) {
-        Some(job) => Ok(Json(job.clone()).into_response()),
+async fn handle_get_transcribe_job(Path(id): Path<String>) -> Result<impl IntoResponse, AppError> {
+    match lookup_transcribe_job(&id).await {
+        Some(job) => Ok(Json(job).into_response()),
         None => Err(AppError::NotFound(format!("job {} not found", id))),
     }
 }
@@ -368,13 +380,13 @@ async fn auth_middleware(
 // Router builder
 // ---------------------------------------------------------------------------
 
-fn build_router(token: String, app_version: String) -> Router {
+fn build_router(token: String, app_version: String, mcp_enabled: bool) -> Router {
     let state = Arc::new(ApiState {
         app_version,
         expected_token: token,
     });
 
-    Router::new()
+    let mut router = Router::new()
         .route("/health", get(handle_health))
         .route("/state", get(handle_get_state))
         .route("/system", get(handle_get_system))
@@ -392,7 +404,19 @@ fn build_router(token: String, app_version: String) -> Router {
         .route("/transcribe", post(handle_post_transcribe))
         .route("/transcribe/{id}", get(handle_get_transcribe_job))
         .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
-        .with_state(state)
+        .with_state(state.clone());
+
+    // Mount the bundled MCP server at /mcp when enabled, behind the same bearer auth.
+    if mcp_enabled {
+        let mcp_service = crate::mcp_server::build_service();
+        let mcp_router = Router::new()
+            .nest_service("/mcp", mcp_service)
+            .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
+        router = router.merge(mcp_router);
+        tracing::info!("MCP server mounted at /mcp");
+    }
+
+    router
 }
 
 // ---------------------------------------------------------------------------
@@ -403,12 +427,12 @@ fn build_router(token: String, app_version: String) -> Router {
 ///
 /// If a server is already running it is stopped first.
 /// Binds 127.0.0.1:{port} only.
-pub async fn start(port: u16, token: String) {
+pub async fn start(port: u16, token: String, mcp_enabled: bool) {
     // Stop any existing server before starting a new one.
     stop().await;
 
     let app_version = env!("CARGO_PKG_VERSION").to_string();
-    let router = build_router(token, app_version);
+    let router = build_router(token, app_version, mcp_enabled);
 
     let addr = SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), port);
 
@@ -499,9 +523,10 @@ pub async fn set_api_enabled(
         }
         let token = cfg.integrations.api_token.clone().unwrap();
         let port = cfg.integrations.api_port;
+        let mcp = cfg.integrations.mcp_enabled;
 
         crate::config::set_config(cfg)?;
-        start(port, token).await;
+        start(port, token, mcp).await;
     } else {
         crate::config::set_config(cfg)?;
         stop().await;
@@ -509,13 +534,27 @@ pub async fn set_api_enabled(
     Ok(())
 }
 
-/// Enable or disable the MCP server flag (no server impl yet).
-// TODO(#66): start/stop MCP server when impl lands
+/// Enable or disable the bundled MCP server.
+///
+/// The MCP server mounts at `/mcp` on the same loopback HTTP server as the Control
+/// API, so this restarts the running server to add/remove the `/mcp` route. The MCP
+/// server is only reachable when the Control API itself is enabled and running.
 #[tauri::command]
 pub async fn set_mcp_enabled(enabled: bool) -> Result<(), String> {
     let mut cfg = crate::config::get_config()?;
     cfg.integrations.mcp_enabled = enabled;
-    crate::config::set_config(cfg)
+    let api_running = is_running().await;
+    let port = cfg.integrations.api_port;
+    let token = cfg.integrations.api_token.clone();
+    crate::config::set_config(cfg)?;
+
+    // If the API server is up, restart it so the /mcp route appears/disappears.
+    if api_running {
+        if let Some(t) = token {
+            start(port, t, enabled).await;
+        }
+    }
+    Ok(())
 }
 
 /// Return the current API token for display/copy in the settings panel.
@@ -536,10 +575,11 @@ pub async fn rotate_api_token(app: tauri::AppHandle) -> Result<String, String> {
     cfg.integrations.api_token = Some(new_token.clone());
     let was_running = is_running().await;
     let port = cfg.integrations.api_port;
+    let mcp = cfg.integrations.mcp_enabled;
     crate::config::set_config(cfg)?;
 
     if was_running {
-        start(port, new_token.clone()).await;
+        start(port, new_token.clone(), mcp).await;
     }
     Ok(new_token)
 }
@@ -552,11 +592,12 @@ pub async fn set_api_port(app: tauri::AppHandle, port: u16) -> Result<(), String
     cfg.integrations.api_port = port;
     let was_running = is_running().await;
     let token = cfg.integrations.api_token.clone();
+    let mcp = cfg.integrations.mcp_enabled;
     crate::config::set_config(cfg)?;
 
     if was_running {
         if let Some(t) = token {
-            start(port, t).await;
+            start(port, t, mcp).await;
         }
     }
     Ok(())

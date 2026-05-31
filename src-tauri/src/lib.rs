@@ -10,6 +10,7 @@ pub mod commands;
 pub mod config;
 pub mod control_api;
 pub mod database;
+pub mod mcp_server;
 pub mod dictionary;
 pub mod enhancement;
 pub mod export;
@@ -244,8 +245,9 @@ pub fn run() {
                 if cfg.integrations.api_enabled {
                     if let Some(token) = cfg.integrations.api_token.clone() {
                         let port = cfg.integrations.api_port;
+                        let mcp = cfg.integrations.mcp_enabled;
                         tauri::async_runtime::spawn(async move {
-                            control_api::start(port, token).await;
+                            control_api::start(port, token, mcp).await;
                         });
                     } else {
                         tracing::warn!(
