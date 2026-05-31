@@ -27,6 +27,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **History rows**: left-click selects (shows detail); right-click opens the context menu. Selected-row hover stays legible.
 - **Audio device & enhancement dropdowns**: show friendly device/model names instead of raw identifiers.
 - **Control API**: out-of-range dictionary index returns 404 instead of 500.
+- **Output filter persistence**: "Apply sentence case", "Normalise whitespace", and "Clean up punctuation" now persist and are applied at transcription time (previously reverted on return and were never applied).
+- **Rogue recording indicator**: the floating indicator no longer appears mid-screen at launch or after the displays wake from sleep; it is now genuinely hidden until recording starts.
 
 ## [2026.4.1] - 2026-04-04
 
