@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.0] - 2026-06-01
+
+### Added
+
+- **Local Control API**: an opt-in, loopback-only (`127.0.0.1`) HTTP API that exposes Thoth's existing control surface to local automation. Protected by a bearer token, off by default. Endpoints cover pipeline state, GPU/system info, transcription history and quality stats, the personal dictionary (list/add/update/delete/import/export), settings (read/update), prompt templates, and asynchronous transcription of local audio files (submit + poll). No new capability — every endpoint mirrors what the GUI can already do. (#65)
+- **Bundled MCP server**: a native Model Context Protocol server (rmcp) mounted at `/mcp` on the same loopback server, so MCP-capable assistants (Claude, etc.) can operate Thoth through task-centric tools with no user-written glue. Tools: `dictionary`, `setting`, `transcription` (dispatchers), `transcribe_file` + `transcribe_status`, `get_state`, `get_system`, `list_prompts`. Opt-in; shares the Control API's auth. (#66)
+- **Integrations settings pane**: enable/disable the Control API and MCP server, view live status and the served endpoint, and manage the bearer token — masked display with reveal/copy and rotate-with-confirmation.
+- **Dictionary table**: the personal dictionary is now a sortable table (click column headers) with a sticky header that scrolls independently.
+
+### Changed
+
+- **Frontend rebuilt on stock shadcn-svelte**: the UI now uses the canonical shadcn-svelte component set and token system, replacing a divergent custom theme layer that had been suppressing component styling.
+- **API tokens** use the canonical secret-key shape `sk-thoth-<random>` (CSPRNG, base62), recognisable and greppable for secret scanners.
+
+### Fixed
+
+- **Toggle switches**: render and animate correctly (state styling now matches the installed component library).
+- **Recording stuck on "Processing"**: the pipeline now emits its final state after processing completes, so the UI returns to idle.
+- **Right Shift hotkey**: modifier-only shortcuts (e.g. Right Shift) register correctly via the keyboard service.
+- **About dialogue / dropdowns / history list**: fixed broken modal sizing, raw-value dropdowns, and overlapping history rows introduced by the component migration.
+- **History rows**: left-click selects (shows detail); right-click opens the context menu. Selected-row hover stays legible.
+- **Audio device & enhancement dropdowns**: show friendly device/model names instead of raw identifiers.
+- **Control API**: out-of-range dictionary index returns 404 instead of 500.
+
 ## [2026.4.1] - 2026-04-04
 
 ### Fixed

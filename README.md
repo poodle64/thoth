@@ -145,6 +145,20 @@ The app walks you through three quick steps:
 
 </td>
 </tr>
+<tr>
+<td width="50%">
+
+**Automation & MCP**
+
+- Opt-in loopback HTTP control API (token-auth)
+- Bundled MCP server for LLM assistants
+- Drive the dictionary, settings, and history by agent
+- Transcribe dropped audio files programmatically
+
+</td>
+<td width="50%">
+</td>
+</tr>
 </table>
 
 ---
@@ -212,6 +226,8 @@ If GPU initialisation fails, Thoth automatically falls back to CPU transcription
 | Transcription | whisper-rs | whisper.cpp with GPU acceleration (sherpa-rs fallback) |
 | Database      | SQLite     | Local persistence with migrations                      |
 | AI            | Ollama     | Local LLM enhancement                                  |
+| Control API   | axum       | Loopback HTTP control surface for automation           |
+| MCP           | rmcp       | Bundled MCP server for LLM assistants                  |
 
 ---
 
