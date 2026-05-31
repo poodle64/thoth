@@ -355,13 +355,15 @@ fn position_at_bottom_centre(app: &AppHandle, indicator: &WebviewWindow) -> Resu
     Ok(())
 }
 
-/// Hide the recording indicator window by moving it off-screen.
+/// Hide the recording indicator window.
 ///
-/// We move off-screen instead of using hide() to avoid macOS window
-/// show/hide animation delays - this makes subsequent shows instant.
-///
-/// On Linux/Wayland, we use actual hide() since the window has been mapped
-/// during pre-warm. Positioning doesn't work (compositor controls it).
+/// Uses a real `hide()` on all platforms. A previous macOS optimisation kept
+/// the window permanently visible but parked off-screen to avoid show/hide
+/// animation latency; that left a visible-but-off-screen window that the macOS
+/// window server could remap back on-screen at launch and on display wake,
+/// producing a stray floating indicator. Hiding for real removes that whole
+/// class of bug. The webview stays warm from pre-warm, so re-showing an
+/// already-mapped 58px borderless window is fast.
 #[tauri::command]
 pub fn hide_recording_indicator(app: AppHandle) -> Result<(), String> {
     tracing::info!("hide_recording_indicator called");
@@ -372,24 +374,8 @@ pub fn hide_recording_indicator(app: AppHandle) -> Result<(), String> {
     let window = get_indicator_window(&app)
         .ok_or_else(|| "Recording indicator window not found".to_string())?;
 
-    // On Linux, use actual hide() - this should work now that the window
-    // has been mapped during pre-warm.
-    #[cfg(target_os = "linux")]
-    {
-        window.hide().map_err(|e| e.to_string())?;
-        tracing::info!("Recording indicator hidden (Linux)");
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    {
-        // Move off-screen instead of hiding - this avoids animation delays
-        window
-            .set_position(tauri::Position::Logical(LogicalPosition::new(
-                -10000.0, -10000.0,
-            )))
-            .map_err(|e| e.to_string())?;
-        tracing::info!("Recording indicator moved off-screen (hidden)");
-    }
+    window.hide().map_err(|e| e.to_string())?;
+    tracing::info!("Recording indicator hidden");
 
     Ok(())
 }
@@ -606,29 +592,32 @@ pub fn prewarm_indicator_window(app: &AppHandle) {
                 tracing::info!("Recording indicator window ready (Linux - hidden until needed)");
             }
 
-            // On macOS, move off-screen and keep visible to avoid animation delays
+            // On macOS, briefly show off-screen to map the window and load the
+            // webview, then hide it for real. Keeping it permanently visible
+            // (the old approach) let the window server remap it on-screen at
+            // launch/display-wake, causing a stray floating indicator.
             #[cfg(not(target_os = "linux"))]
             {
-                // Move to off-screen position (far off-screen so it's never visible)
+                // Park off-screen first so the brief pre-warm show is never visible.
                 if let Err(e) = window.set_position(tauri::Position::Logical(LogicalPosition::new(
                     -10000.0, -10000.0,
                 ))) {
                     tracing::warn!("Failed to position indicator off-screen: {}", e);
                 }
 
-                // Show the window to trigger webview content load - we keep it visible
-                // (but off-screen) permanently to avoid show/hide animation delays
                 if let Err(e) = window.show() {
                     tracing::warn!("Failed to show indicator for pre-warming: {}", e);
                 }
 
-                // Wait for the webview to fully load and render
+                // Wait for the webview to fully load and render while off-screen.
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-                // Window stays visible but off-screen - ready for instant positioning
-                tracing::info!(
-                    "Recording indicator window pre-warmed and ready (kept visible off-screen)"
-                );
+                // Hide for real — the webview is now warm; subsequent shows are fast.
+                if let Err(e) = window.hide() {
+                    tracing::warn!("Failed to hide indicator after pre-warming: {}", e);
+                }
+
+                tracing::info!("Recording indicator window pre-warmed and ready (hidden until needed)");
             }
         } else {
             tracing::warn!("Recording indicator window not found for pre-warming");
