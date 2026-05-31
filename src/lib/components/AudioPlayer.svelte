@@ -261,32 +261,32 @@
   .player {
     display: flex;
     align-items: center;
-    gap: var(--spacing-sm);
-    padding: var(--spacing-sm) var(--spacing-md);
-    background: var(--color-bg-primary);
-    border: 1px solid var(--color-border-subtle);
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--background);
+    border: 1px solid var(--border);
     border-radius: var(--radius-md);
   }
 
   .player-error,
   .player-loading {
     justify-content: center;
-    padding: var(--spacing-sm) var(--spacing-md);
+    padding: 0.5rem 1rem;
   }
 
   .error-text {
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
   }
 
   .loading-text {
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
   }
 
   .time {
     font-size: 11px;
-    color: var(--color-text-tertiary);
+    color: var(--muted-foreground);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     flex-shrink: 0;
@@ -307,12 +307,12 @@
   .bar {
     flex: 1;
     min-width: 1px;
-    background: var(--color-border);
+    background: var(--border);
     border-radius: 1px;
     transition: background 0.05s;
   }
 
   .bar.played {
-    background: var(--color-accent);
+    background: var(--primary);
   }
 </style>

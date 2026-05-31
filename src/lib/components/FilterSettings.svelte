@@ -160,10 +160,10 @@
 
     <div class="flex flex-col gap-2">
       {#each filterDefinitions as filter}
-        <div class="setting-row flex items-center justify-between gap-4">
-          <div class="setting-info">
-            <span class="setting-label">{filter.label}</span>
-            <span class="setting-description">{filter.description}</span>
+        <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3 flex items-center justify-between gap-4">
+          <div class="flex flex-1 flex-col gap-1">
+            <span class="text-sm font-medium text-foreground">{filter.label}</span>
+            <span class="text-xs text-muted-foreground">{filter.description}</span>
           </div>
           <Switch
             checked={options[filter.key]}
@@ -247,7 +247,7 @@
 
   <div class="flex flex-col gap-3">
     <h3 class="text-sm font-semibold">Custom Word Replacements</h3>
-    <p class="hint">Configure custom word replacements in the Dictionary settings.</p>
+    <p class="rounded-md bg-card p-2 text-xs text-muted-foreground">Configure custom word replacements in the Dictionary settings.</p>
     <div>
       <Button variant="outline" onclick={() => onOpenDictionary?.()}>
         Open Dictionary Settings

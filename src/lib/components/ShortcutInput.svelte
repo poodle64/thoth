@@ -344,10 +344,10 @@
   .shortcut-capture-btn {
     min-width: 180px;
     padding: 8px 12px;
-    border: 1px solid hsl(var(--border));
+    border: 1px solid var(--border);
     border-radius: var(--radius-lg, 8px);
-    background: hsl(var(--input) / 0.3);
-    color: hsl(var(--foreground));
+    background: color-mix(in srgb, var(--input) 30%, transparent);
+    color: var(--foreground);
     font-family: inherit;
     font-size: 0.875rem;
     text-align: left;
@@ -360,22 +360,22 @@
   }
 
   .shortcut-capture-btn:hover:not(:disabled) {
-    border-color: hsl(var(--ring));
+    border-color: var(--ring);
   }
 
   .shortcut-capture-btn:focus-visible {
-    border-color: hsl(var(--ring));
-    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.5);
+    border-color: var(--ring);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent);
   }
 
   .shortcut-capture-btn.capturing {
-    border-color: hsl(var(--ring));
-    background: hsl(var(--muted));
-    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2);
+    border-color: var(--ring);
+    background: var(--muted);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 20%, transparent);
   }
 
   .shortcut-capture-btn.has-error {
-    border-color: hsl(var(--destructive));
+    border-color: var(--destructive);
   }
 
   .shortcut-capture-btn:disabled {

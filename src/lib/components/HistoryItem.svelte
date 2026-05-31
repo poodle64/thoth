@@ -3,7 +3,7 @@
   import { historyStore } from '../stores/history.svelte';
   import { Checkbox } from '$components/ui/checkbox';
   import { Badge } from '$components/ui/badge';
-  import * as DropdownMenu from '$components/ui/dropdown-menu';
+  import * as ContextMenu from '$components/ui/context-menu';
   import Copy from '@lucide/svelte/icons/copy';
   import Trash2 from '@lucide/svelte/icons/trash-2';
 
@@ -28,8 +28,6 @@
     onCopy,
     onDelete,
   }: Props = $props();
-
-  let contextMenuOpen = $state(false);
 
   const previewText = $derived.by(() => {
     const text = item.text.trim();
@@ -61,34 +59,30 @@
   }
 
   function handleCopy() {
-    contextMenuOpen = false;
     onCopy?.(item);
   }
 
   function handleDelete() {
-    contextMenuOpen = false;
     onDelete?.(item);
   }
 </script>
 
-<DropdownMenu.Root bind:open={contextMenuOpen}>
-  <DropdownMenu.Trigger>
+<ContextMenu.Root>
+  <ContextMenu.Trigger>
     {#snippet child({ props })}
       <button
         {...props}
         class={[
-          'flex w-full flex-row items-start border-b px-3 py-3 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
-          selected && 'bg-primary text-primary-foreground',
+          'flex h-[72px] w-full flex-row items-start overflow-hidden border-b px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+          selected
+            ? 'bg-primary text-primary-foreground hover:bg-primary'
+            : 'hover:bg-accent/50',
           bulkSelected && !selected && 'bg-primary/10',
         ]
           .filter(Boolean)
           .join(' ')}
         onclick={handleClick}
         onkeydown={handleKeydown}
-        oncontextmenu={(e) => {
-          e.preventDefault();
-          contextMenuOpen = true;
-        }}
         aria-selected={selected}
         role="option"
       >
@@ -109,7 +103,7 @@
             <Checkbox
               checked={bulkSelected}
               class={selected
-                ? 'border-primary-foreground/50 data-checked:bg-primary-foreground data-checked:text-primary'
+                ? 'border-primary-foreground/50 data-[state=checked]:bg-primary-foreground data-[state=checked]:text-primary'
                 : ''}
             />
           </div>
@@ -146,16 +140,16 @@
         </div>
       </button>
     {/snippet}
-  </DropdownMenu.Trigger>
+  </ContextMenu.Trigger>
 
-  <DropdownMenu.Content align="start">
-    <DropdownMenu.Item onclick={handleCopy}>
+  <ContextMenu.Content>
+    <ContextMenu.Item onclick={handleCopy}>
       <Copy class="size-4" />
       Copy
-    </DropdownMenu.Item>
-    <DropdownMenu.Item variant="destructive" onclick={handleDelete}>
+    </ContextMenu.Item>
+    <ContextMenu.Item variant="destructive" onclick={handleDelete}>
       <Trash2 class="size-4" />
       Delete
-    </DropdownMenu.Item>
-  </DropdownMenu.Content>
-</DropdownMenu.Root>
+    </ContextMenu.Item>
+  </ContextMenu.Content>
+</ContextMenu.Root>

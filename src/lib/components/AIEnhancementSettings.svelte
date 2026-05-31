@@ -329,13 +329,17 @@
           type="single"
           value={backendSelectValue}
           onValueChange={handleBackendChange}
+          items={[
+            { value: 'ollama', label: 'Ollama' },
+            { value: 'openai_compat', label: 'OpenAI-compatible (LM Studio, llama.cpp, vLLM…)' },
+          ]}
         >
           <Select.Trigger class="w-64">
             <SelectPrimitive.Value placeholder="Select backend…" />
           </Select.Trigger>
           <Select.Content>
-            <Select.Item value="ollama">Ollama</Select.Item>
-            <Select.Item value="openai_compat"
+            <Select.Item value="ollama" label="Ollama">Ollama</Select.Item>
+            <Select.Item value="openai_compat" label="OpenAI-compatible (LM Studio, llama.cpp, vLLM…)"
               >OpenAI-compatible (LM Studio, llama.cpp, vLLM…)</Select.Item
             >
           </Select.Content>
@@ -528,6 +532,14 @@
             value={modelSelectValue}
             onValueChange={handleModelChange}
             disabled={!ollamaAvailable || isLoadingModels}
+            items={ollamaModels.length === 0
+              ? [
+                  {
+                    value: configStore.config.enhancement.model,
+                    label: `${configStore.config.enhancement.model} (not available)`,
+                  },
+                ]
+              : ollamaModels.map((m) => ({ value: m, label: m }))}
           >
             <Select.Trigger class="w-48">
               <SelectPrimitive.Value
@@ -540,12 +552,15 @@
             </Select.Trigger>
             <Select.Content>
               {#if !isLoadingModels && ollamaModels.length === 0}
-                <Select.Item value={configStore.config.enhancement.model}>
+                <Select.Item
+                  value={configStore.config.enhancement.model}
+                  label="{configStore.config.enhancement.model} (not available)"
+                >
                   {configStore.config.enhancement.model} (not available)
                 </Select.Item>
               {:else}
                 {#each ollamaModels as model}
-                  <Select.Item value={model}>{model}</Select.Item>
+                  <Select.Item value={model} label={model}>{model}</Select.Item>
                 {/each}
               {/if}
             </Select.Content>
@@ -582,6 +597,10 @@
             value={promptSelectValue}
             onValueChange={handlePromptChange}
             disabled={isLoadingPrompts}
+            items={prompts.map((p) => ({
+              value: p.id,
+              label: `${p.name}${p.isBuiltin ? '' : ' (Custom)'}`,
+            }))}
           >
             <Select.Trigger class="w-48">
               <SelectPrimitive.Value
@@ -590,7 +609,10 @@
             </Select.Trigger>
             <Select.Content>
               {#each prompts as prompt}
-                <Select.Item value={prompt.id}>
+                <Select.Item
+                  value={prompt.id}
+                  label="{prompt.name}{prompt.isBuiltin ? '' : ' (Custom)'}"
+                >
                   {prompt.name}{prompt.isBuiltin ? '' : ' (Custom)'}
                 </Select.Item>
               {/each}

@@ -145,41 +145,37 @@ pub fn get_default_shortcuts() -> Vec<ShortcutInfo> {
 /// * `Err(String)` if any shortcuts failed to register (includes details)
 #[tauri::command]
 pub fn register_default_shortcuts(app: AppHandle) -> Result<(), String> {
-    // Platform-specific registration
-    #[cfg(target_os = "linux")]
-    {
-        // On Linux, register each default shortcut through our platform-aware layer
-        let defaults = manager::get_defaults();
-        let mut errors = Vec::new();
+    // Register each default through `register_shortcut`, which routes modifier-only
+    // accelerators (e.g. "ShiftRight") to the keyboard service and everything else to
+    // the platform layer. Calling the platform layer directly here would hand a bare
+    // modifier to tauri-plugin-global-shortcut, which cannot bind one, so it would
+    // silently fail to register.
+    let defaults = manager::get_defaults();
+    let mut errors = Vec::new();
 
-        for shortcut in defaults {
-            if let Err(e) = register_shortcut(
-                app.clone(),
-                shortcut.id.clone(),
-                shortcut.accelerator.clone(),
-                shortcut.description.clone(),
-            ) {
-                tracing::warn!(
-                    "Failed to register default shortcut '{}': {}",
-                    shortcut.id,
-                    e
-                );
-                errors.push(format!("{}: {}", shortcut.id, e));
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(format!(
-                "Some default shortcuts failed to register: {}",
-                errors.join("; ")
-            ))
+    for shortcut in defaults {
+        if let Err(e) = register_shortcut(
+            app.clone(),
+            shortcut.id.clone(),
+            shortcut.accelerator.clone(),
+            shortcut.description.clone(),
+        ) {
+            tracing::warn!(
+                "Failed to register default shortcut '{}': {}",
+                shortcut.id,
+                e
+            );
+            errors.push(format!("{}: {}", shortcut.id, e));
         }
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        manager::register_defaults(&app)
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Some default shortcuts failed to register: {}",
+            errors.join("; ")
+        ))
     }
 }
 

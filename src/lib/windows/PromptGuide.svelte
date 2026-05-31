@@ -245,28 +245,28 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
-    background: var(--color-bg-primary);
-    color: var(--color-text-primary);
+    background: var(--background);
+    color: var(--foreground);
     overflow: hidden;
   }
 
   .guide-header {
     padding: 24px 32px;
-    background: var(--color-bg-secondary);
-    border-bottom: 1px solid var(--color-border);
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
   }
 
   .guide-header h1 {
     margin: 0 0 8px 0;
     font-size: 24px;
     font-weight: 600;
-    color: var(--color-text-primary);
+    color: var(--foreground);
   }
 
   .subtitle {
     margin: 0;
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
+    font-size: 0.8125rem;
+    color: var(--muted-foreground);
   }
 
   .guide-content {
@@ -290,8 +290,8 @@
     margin: 0 0 16px 0;
     font-size: 20px;
     font-weight: 600;
-    color: var(--color-text-primary);
-    border-bottom: 2px solid var(--color-accent);
+    color: var(--foreground);
+    border-bottom: 2px solid var(--primary);
     padding-bottom: 8px;
   }
 
@@ -299,38 +299,38 @@
     margin: 24px 0 12px 0;
     font-size: 16px;
     font-weight: 600;
-    color: var(--color-text-primary);
+    color: var(--foreground);
   }
 
   h4 {
     margin: 0 0 8px 0;
-    font-size: var(--text-sm);
+    font-size: 0.8125rem;
     font-weight: 600;
-    color: var(--color-accent);
+    color: var(--primary);
   }
 
   p {
     margin: 0 0 16px 0;
     line-height: 1.6;
-    color: var(--color-text-secondary);
+    color: var(--muted-foreground);
   }
 
   code {
     padding: 2px 6px;
-    background: var(--color-bg-tertiary);
+    background: var(--muted);
     border-radius: var(--radius-sm);
-    font-family: var(--font-mono);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.9em;
-    color: var(--color-accent);
+    color: var(--primary);
   }
 
   pre {
     margin: 0;
     padding: 12px;
-    background: var(--color-bg-tertiary);
+    background: var(--muted);
     border-radius: var(--radius-md);
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.75rem;
     line-height: 1.5;
     overflow-x: auto;
     white-space: pre-wrap;
@@ -340,15 +340,15 @@
   .example-box {
     margin: 16px 0;
     padding: 16px;
-    background: var(--color-bg-secondary);
+    background: var(--card);
     border-radius: var(--radius-md);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--border);
   }
 
   .example-label {
-    font-size: var(--text-xs);
+    font-size: 0.75rem;
     font-weight: 500;
-    color: var(--color-text-tertiary);
+    color: var(--muted-foreground);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 8px;
@@ -357,9 +357,9 @@
   .examples {
     margin-top: 12px;
     padding-top: 12px;
-    border-top: 1px solid var(--color-border-subtle);
-    font-size: var(--text-sm);
-    color: var(--color-text-tertiary);
+    border-top: 1px solid var(--border);
+    font-size: 0.8125rem;
+    color: var(--muted-foreground);
   }
 
   .comparison {
@@ -383,46 +383,46 @@
   }
 
   .bad-example {
-    background: color-mix(in srgb, var(--color-error) 5%, transparent);
-    border-color: color-mix(in srgb, var(--color-error) 30%, transparent);
+    background: color-mix(in srgb, var(--destructive) 5%, transparent);
+    border-color: color-mix(in srgb, var(--destructive) 30%, transparent);
   }
 
   .good-example {
-    background: color-mix(in srgb, var(--color-success) 5%, transparent);
-    border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
+    background: color-mix(in srgb, var(--chart-2) 5%, transparent);
+    border-color: color-mix(in srgb, var(--chart-2) 30%, transparent);
   }
 
   .badge {
     display: inline-block;
     padding: 4px 8px;
     border-radius: var(--radius-sm);
-    font-size: var(--text-xs);
+    font-size: 0.75rem;
     font-weight: 600;
     margin-bottom: 8px;
   }
 
   .badge.bad {
-    background: var(--color-error);
+    background: var(--destructive);
     color: white;
   }
 
   .badge.good {
-    background: var(--color-success);
+    background: var(--chart-2);
     color: white;
   }
 
   .problem {
     margin-top: 8px;
-    font-size: var(--text-xs);
-    color: var(--color-error);
+    font-size: 0.75rem;
+    color: var(--destructive);
     font-style: italic;
   }
 
   .info-box {
     margin: 16px 0;
     padding: 16px;
-    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-    border-left: 4px solid var(--color-accent);
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
+    border-left: 4px solid var(--primary);
     border-radius: var(--radius-md);
   }
 
@@ -433,23 +433,23 @@
 
   .info-box li {
     margin: 6px 0;
-    color: var(--color-text-secondary);
+    color: var(--muted-foreground);
   }
 
   .tip-box {
     margin: 16px 0;
     padding: 16px;
-    background: color-mix(in srgb, var(--color-accent) 5%, transparent);
+    background: color-mix(in srgb, var(--primary) 5%, transparent);
     border-radius: var(--radius-md);
-    border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
   }
 
   .example-prompt {
     margin: 16px 0;
     padding: 16px;
-    background: var(--color-bg-secondary);
+    background: var(--card);
     border-radius: var(--radius-md);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--border);
   }
 
   .model-info {
@@ -467,9 +467,9 @@
 
   .model-category {
     padding: 16px;
-    background: var(--color-bg-secondary);
+    background: var(--card);
     border-radius: var(--radius-md);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--border);
   }
 
   .model-category h4 {
@@ -483,7 +483,7 @@
 
   .model-category li {
     margin: 6px 0;
-    color: var(--color-text-secondary);
+    color: var(--muted-foreground);
   }
 
   .troubleshooting-table {
@@ -496,25 +496,25 @@
   .troubleshooting-table td {
     padding: 12px;
     text-align: left;
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--border);
   }
 
   .troubleshooting-table th {
-    background: var(--color-bg-secondary);
+    background: var(--card);
     font-weight: 600;
-    color: var(--color-text-primary);
+    color: var(--foreground);
   }
 
   .troubleshooting-table td {
-    background: var(--color-bg-primary);
-    color: var(--color-text-secondary);
+    background: var(--background);
+    color: var(--muted-foreground);
   }
 
   .checklist {
     padding: 16px;
-    background: var(--color-bg-secondary);
+    background: var(--card);
     border-radius: var(--radius-md);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--border);
   }
 
   .checklist p {
@@ -530,12 +530,12 @@
 
   .checklist li {
     margin: 8px 0;
-    color: var(--color-text-secondary);
+    color: var(--muted-foreground);
   }
 
   .checklist li::before {
     content: '✓ ';
-    color: var(--color-success);
+    color: var(--chart-2);
     font-weight: bold;
     margin-right: 8px;
   }

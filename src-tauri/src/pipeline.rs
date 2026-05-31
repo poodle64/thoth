@@ -329,27 +329,30 @@ pub async fn pipeline_stop_and_process(
     // run in a separate task. PROCESSING_COUNT tracks in-flight tasks so
     // get_pipeline_state can report Transcribing when appropriate.
     tokio::spawn(async move {
-        let _processing_guard = ProcessingGuard::new();
-        let result = process_audio(&app, &audio_path, &config).await;
+        // Run processing under the guard in an inner scope so PROCESSING_COUNT
+        // is decremented BEFORE we emit the final authoritative state. Otherwise
+        // get_pipeline_state() would still see the guard alive and report
+        // Transcribing, leaving the UI stuck on "Processing" forever.
+        let result = {
+            let _processing_guard = ProcessingGuard::new();
+            process_audio(&app, &audio_path, &config).await
+        };
         match result {
             Ok(r) => {
                 tracing::info!("Pipeline: Emitting pipeline-complete event");
                 if let Err(e) = app.emit("pipeline-complete", &r) {
                     tracing::error!("Pipeline: Failed to emit pipeline-complete: {}", e);
                 }
-                // Emit authoritative state after completion. get_pipeline_state()
-                // returns Recording if a new clip started while this task ran,
-                // so this can never clobber an active recording with Idle.
-                emit_recording_state(&app);
             }
             Err(e) => {
                 tracing::error!("Pipeline: Processing failed: {}", e);
                 emit_progress(&app, PipelineState::Failed, &e);
-                // Emit authoritative state; if a new recording is active this
-                // will correctly report Recording rather than Failed.
-                emit_recording_state(&app);
             }
         }
+        // Emit authoritative state after the guard has dropped. get_pipeline_state()
+        // returns Recording if a new clip started while this task ran, so this can
+        // never clobber an active recording with Idle.
+        emit_recording_state(&app);
     });
 
     Ok(())

@@ -40,7 +40,7 @@
     flex-direction: column;
     width: 100%;
     height: 100vh;
-    background: var(--color-bg-primary);
+    background: var(--background);
     position: relative;
   }
 
@@ -50,9 +50,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    height: var(--header-height);
-    background-color: var(--color-bg-primary);
-    border-bottom: 1px solid var(--color-border);
+    height: 54px;
+    background-color: var(--background);
+    border-bottom: 1px solid var(--border);
     flex-shrink: 0;
     /* Enable window dragging */
     -webkit-app-region: drag;
@@ -65,7 +65,7 @@
   .title-text {
     font-size: 13px;
     font-weight: 500;
-    color: var(--color-text-primary);
+    color: var(--foreground);
     user-select: none;
   }
 

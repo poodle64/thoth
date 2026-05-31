@@ -137,14 +137,14 @@
     align-items: center;
     justify-content: center;
     min-height: 100vh;
-    background: var(--color-bg-primary);
+    background: var(--background);
   }
 
   .spinner {
     width: 40px;
     height: 40px;
-    border: 3px solid var(--color-bg-tertiary);
-    border-top-color: var(--color-accent);
+    border: 3px solid var(--muted);
+    border-top-color: var(--primary);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
   }
@@ -157,7 +157,7 @@
 
   .loading-text {
     margin-top: 16px;
-    color: var(--color-text-secondary);
+    color: var(--muted-foreground);
   }
 
   .error-container {
@@ -167,8 +167,8 @@
     justify-content: center;
     min-height: 100vh;
     padding: 24px;
-    background: var(--color-bg-primary);
-    color: var(--color-error);
+    background: var(--background);
+    color: var(--destructive);
     text-align: center;
   }
 
@@ -177,6 +177,6 @@
   }
 
   .error-container p {
-    color: var(--color-text-secondary);
+    color: var(--muted-foreground);
   }
 </style>

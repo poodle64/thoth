@@ -291,37 +291,6 @@ pub fn list_registered() -> Vec<ShortcutInfo> {
     manager.shortcuts.values().cloned().collect()
 }
 
-/// Register all default shortcuts
-pub fn register_defaults<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
-    let defaults = get_defaults();
-    let mut errors = Vec::new();
-
-    for shortcut in defaults {
-        if let Err(e) = register(
-            app,
-            shortcut.id.clone(),
-            shortcut.accelerator.clone(),
-            shortcut.description.clone(),
-        ) {
-            tracing::warn!(
-                "Failed to register default shortcut '{}': {}",
-                shortcut.id,
-                e
-            );
-            errors.push(format!("{}: {}", shortcut.id, e));
-        }
-    }
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "Some default shortcuts failed to register: {}",
-            errors.join("; ")
-        ))
-    }
-}
-
 /// Unregister all shortcuts
 pub fn unregister_all<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let global_shortcut = app.global_shortcut();

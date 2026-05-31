@@ -762,11 +762,11 @@
   </details>
 {:else if stats}
   <!-- Summary Cards -->
-  <section class="settings-section">
-    <div class="section-header">
-      <h2 class="section-title">Summary</h2>
+  <section class="flex flex-col">
+    <div class="mb-3">
+      <h2 class="text-base font-semibold text-foreground m-0">Summary</h2>
     </div>
-    <div class="section-content">
+    <div class="flex flex-col gap-2">
       <div class="grid grid-cols-2 gap-2.5">
         <Card.Root>
           <Card.Content class="p-4">
@@ -813,12 +813,12 @@
   </section>
 
   <!-- Updates -->
-  <section class="settings-section">
-    <div class="section-header">
-      <h2 class="section-title">Updates</h2>
-      <p class="section-description">Application version and update preferences</p>
+  <section class="flex flex-col">
+    <div class="mb-3">
+      <h2 class="text-base font-semibold text-foreground m-0">Updates</h2>
+      <p class="text-xs text-muted-foreground m-0">Application version and update preferences</p>
     </div>
-    <div class="section-content">
+    <div class="flex flex-col gap-2">
       <div class="status-list">
         <div class="status-row">
           <span class="status-label">Current Version</span>
@@ -871,12 +871,12 @@
   </section>
 
   <!-- System Status -->
-  <section class="settings-section">
-    <div class="section-header">
-      <h2 class="section-title">System</h2>
-      <p class="section-description">Services, permissions, and application preferences</p>
+  <section class="flex flex-col">
+    <div class="mb-3">
+      <h2 class="text-base font-semibold text-foreground m-0">System</h2>
+      <p class="text-xs text-muted-foreground m-0">Services, permissions, and application preferences</p>
     </div>
-    <div class="section-content">
+    <div class="flex flex-col gap-2">
       <div class="status-list">
         <div class="status-row">
           <span
@@ -1233,9 +1233,9 @@
 
   /* Optional settings summary toggle */
   .optional-summary {
-    font-size: var(--text-xs);
+    font-size: 0.75rem;
     font-weight: 600;
-    color: var(--color-text-tertiary);
+    color: var(--muted-foreground);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     cursor: pointer;
@@ -1247,7 +1247,7 @@
     content: '>';
     display: inline-block;
     margin-right: 6px;
-    transition: transform var(--transition-fast);
+    transition: transform 150ms ease;
   }
 
   details[open] > .optional-summary::before {
@@ -1257,15 +1257,15 @@
   /* Progress bar (kept as bespoke — not a shadcn primitive) */
   .progress-bar {
     height: 6px;
-    background: var(--color-bg-tertiary);
-    border-radius: var(--radius-full);
+    background: var(--muted);
+    border-radius: 9999px;
     overflow: hidden;
   }
 
   .progress-fill {
     height: 100%;
-    background: var(--color-accent);
-    border-radius: var(--radius-full);
+    background: var(--primary);
+    border-radius: 9999px;
     transition: width 0.3s ease;
   }
 
@@ -1289,8 +1289,8 @@
     flex-direction: column;
     gap: 2px;
     padding: 8px 14px;
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border-subtle);
+    background: var(--card);
+    border: 1px solid var(--border);
     border-radius: var(--radius-md);
   }
 
@@ -1306,27 +1306,27 @@
     height: 8px;
     border-radius: 50%;
     flex-shrink: 0;
-    background: var(--color-text-tertiary);
+    background: var(--muted-foreground);
   }
 
   .status-dot.ready {
-    background: var(--color-success);
+    background: var(--chart-2);
   }
 
   .status-dot.not-configured {
-    background: var(--color-text-tertiary);
+    background: var(--muted-foreground);
   }
 
   .status-dot.warning {
-    background: var(--color-warning);
+    background: var(--chart-3);
   }
 
   .status-dot.stale {
-    background: var(--color-warning);
+    background: var(--chart-3);
   }
 
   .status-dot.checking {
-    background: var(--color-text-tertiary);
+    background: var(--muted-foreground);
     animation: pulse 1s ease-in-out infinite;
   }
 
@@ -1341,15 +1341,15 @@
   }
 
   .status-label {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
+    font-size: 0.8125rem;
+    color: var(--muted-foreground);
     width: 110px;
     flex-shrink: 0;
   }
 
   .status-value {
-    font-size: var(--text-sm);
-    color: var(--color-text-primary);
+    font-size: 0.8125rem;
+    color: var(--foreground);
     font-weight: 500;
     min-width: 0;
   }
@@ -1377,12 +1377,12 @@
 
   .gpu-backend {
     font-weight: 600;
-    color: var(--color-success);
+    color: var(--chart-2);
   }
 
   .gpu-name {
-    font-size: var(--text-xs);
-    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
     max-width: 180px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1390,27 +1390,27 @@
   }
 
   .gpu-vram {
-    font-size: var(--text-xs);
-    color: var(--color-text-tertiary);
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
   }
 
   .gpu-cpu {
-    color: var(--color-text-tertiary);
+    color: var(--muted-foreground);
   }
 
   /* Stale accessibility recovery block */
   .stale-recovery {
     padding: 10px 12px;
     margin: 2px 0 4px;
-    background: color-mix(in srgb, var(--color-warning) 8%, var(--color-bg-secondary));
-    border: 1px solid color-mix(in srgb, var(--color-warning) 30%, var(--color-border-subtle));
+    background: color-mix(in srgb, var(--chart-3) 8%, var(--card));
+    border: 1px solid color-mix(in srgb, var(--chart-3) 30%, var(--border));
     border-radius: var(--radius-md);
   }
 
   .stale-recovery-desc {
     margin: 0 0 10px;
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
+    font-size: 0.8125rem;
+    color: var(--muted-foreground);
     line-height: 1.4;
   }
 
@@ -1422,8 +1422,8 @@
 
   .stale-recovery-ok {
     margin: 8px 0 0;
-    font-size: var(--text-xs);
-    color: var(--color-success);
+    font-size: 0.75rem;
+    color: var(--chart-2);
     line-height: 1.4;
   }
 
@@ -1432,12 +1432,12 @@
     display: block;
     margin-bottom: 4px;
     padding: 8px 10px;
-    background: var(--color-bg-primary);
-    border: 1px solid var(--color-border-subtle);
+    background: var(--background);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    font-family: var(--font-mono, 'SF Mono', 'Fira Code', monospace);
+    font-family: ui-monospace, 'SF Mono', 'Fira Code', monospace;
     font-size: 11px;
-    color: var(--color-text-primary);
+    color: var(--foreground);
     word-break: break-all;
     user-select: all;
     cursor: text;

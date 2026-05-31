@@ -169,14 +169,24 @@
           value={selectValue}
           onValueChange={handleDeviceChange}
           disabled={settingsStore.isLoadingDevices}
+          items={[
+            { value: '', label: defaultOptionLabel },
+            ...settingsStore.audioDevices.map((d) => ({
+              value: d.id,
+              label: `${d.name}${d.is_default ? ' (Default)' : ''}`,
+            })),
+          ]}
         >
           <Select.Trigger id="audio-device-select" class="flex-1">
             <SelectPrimitive.Value placeholder="Select device…" />
           </Select.Trigger>
           <Select.Content>
-            <Select.Item value="">{defaultOptionLabel}</Select.Item>
+            <Select.Item value="" label={defaultOptionLabel}>{defaultOptionLabel}</Select.Item>
             {#each settingsStore.audioDevices as device (device.id)}
-              <Select.Item value={device.id}>
+              <Select.Item
+                value={device.id}
+                label="{device.name}{device.is_default ? ' (Default)' : ''}"
+              >
                 {device.name}{device.is_default ? ' (Default)' : ''}
               </Select.Item>
             {/each}
@@ -248,10 +258,10 @@
   .meter-fill-active {
     background: linear-gradient(
       90deg,
-      hsl(var(--chart-2)) 0%,
-      hsl(var(--chart-2)) 70%,
-      hsl(var(--chart-4)) 85%,
-      hsl(var(--destructive)) 100%
+      var(--chart-2) 0%,
+      var(--chart-2) 70%,
+      var(--chart-4) 85%,
+      var(--destructive) 100%
     );
   }
 </style>

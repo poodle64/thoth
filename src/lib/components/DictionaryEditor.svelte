@@ -12,6 +12,7 @@
   import { Checkbox } from '$components/ui/checkbox';
   import { Label } from '$components/ui/label';
   import { Badge } from '$components/ui/badge';
+  import * as Table from '$components/ui/table';
   import * as Form from '$components/ui/form';
   import * as Alert from '$components/ui/alert';
   import * as AlertDialog from '$components/ui/alert-dialog';
@@ -19,12 +20,43 @@
   import Upload from '@lucide/svelte/icons/upload';
   import Pencil from '@lucide/svelte/icons/pencil';
   import Trash2 from '@lucide/svelte/icons/trash-2';
+  import ChevronUp from '@lucide/svelte/icons/chevron-up';
+  import ChevronDown from '@lucide/svelte/icons/chevron-down';
+  import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
 
   // Index of the entry currently being edited (null = add mode)
   let editingIndex = $state<number | null>(null);
 
   // Entry captured at delete-click time, held until the AlertDialog confirms
   let pendingDelete = $state<{ index: number; entry: DictionaryEntry } | null>(null);
+
+  // Column sorting (display-only; original store index is preserved for edit/delete)
+  type SortKey = 'from' | 'to' | 'caseSensitive';
+  let sortKey = $state<SortKey | null>(null);
+  let sortDir = $state<'asc' | 'desc'>('asc');
+
+  function toggleSort(key: SortKey): void {
+    if (sortKey === key) {
+      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      sortKey = key;
+      sortDir = 'asc';
+    }
+  }
+
+  // Entries paired with their original store index, sorted for display.
+  let sortedEntries = $derived.by(() => {
+    const rows = dictionaryStore.entries.map((entry, index) => ({ entry, index }));
+    const key = sortKey;
+    if (key === null) return rows;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return rows.sort((a, b) => {
+      if (key === 'caseSensitive') {
+        return (Number(a.entry.caseSensitive) - Number(b.entry.caseSensitive)) * dir;
+      }
+      return a.entry[key].localeCompare(b.entry[key]) * dir;
+    });
+  });
 
   // Load entries on mount
   $effect(() => {
@@ -128,14 +160,24 @@
   }
 </script>
 
-<div class="flex flex-col gap-6">
+{#snippet sortIcon(key: SortKey)}
+  {#if sortKey !== key}
+    <ChevronsUpDown class="size-3.5 opacity-50" />
+  {:else if sortDir === 'asc'}
+    <ChevronUp class="size-3.5" />
+  {:else}
+    <ChevronDown class="size-3.5" />
+  {/if}
+{/snippet}
+
+<div class="flex min-h-0 flex-1 flex-col gap-6">
   {#if dictionaryStore.error}
     <Alert.Root variant="destructive">
       <Alert.Description>{dictionaryStore.error}</Alert.Description>
     </Alert.Root>
   {/if}
 
-  <form use:enhance class="rounded-lg border p-4">
+  <form use:enhance class="shrink-0 rounded-lg border p-4">
     <div class="flex gap-3">
       <Form.Field {form} name="from" class="flex-1">
         {#snippet children({ constraints })}
@@ -202,8 +244,8 @@
     </div>
   </form>
 
-  <div class="flex flex-col gap-3">
-    <div class="flex items-center justify-between">
+  <div class="flex min-h-0 flex-1 flex-col gap-3">
+    <div class="flex shrink-0 items-center justify-between">
       <span class="text-muted-foreground text-sm">
         {dictionaryStore.entries.length}
         {dictionaryStore.entries.length === 1 ? 'entry' : 'entries'}
@@ -230,44 +272,80 @@
         </p>
       </div>
     {:else}
-      <div class="flex flex-col gap-1">
-        {#each dictionaryStore.entries as entry, index}
-          <div
-            class="group flex items-center justify-between rounded-md border px-3.5 py-2.5 transition-colors {editingIndex ===
-            index
-              ? 'border-primary'
-              : 'hover:border-border'}"
-          >
-            <div class="flex min-w-0 flex-1 items-center gap-2">
-              <span class="text-sm font-medium">{entry.from}</span>
-              <span class="text-muted-foreground">&rarr;</span>
-              <span class="text-primary text-sm">{entry.to}</span>
-              {#if entry.caseSensitive}
-                <Badge variant="secondary" class="text-xs">Case sensitive</Badge>
-              {/if}
-            </div>
-            <div class="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-7 w-7"
-                onclick={() => startEdit(index)}
-                title="Edit entry"
-              >
-                <Pencil class="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="text-destructive hover:text-destructive h-7 w-7"
-                onclick={() => requestDelete(index)}
-                title="Delete entry"
-              >
-                <Trash2 class="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          </div>
-        {/each}
+      <div
+        class="min-h-0 flex-1 overflow-hidden rounded-lg border [&>[data-slot=table-container]]:h-full"
+      >
+        <Table.Root>
+          <Table.Header class="bg-card sticky top-0 z-10">
+            <Table.Row>
+              <Table.Head>
+                <button
+                  type="button"
+                  class="flex items-center gap-1 hover:text-foreground"
+                  onclick={() => toggleSort('from')}
+                >
+                  Replace {@render sortIcon('from')}
+                </button>
+              </Table.Head>
+              <Table.Head>
+                <button
+                  type="button"
+                  class="flex items-center gap-1 hover:text-foreground"
+                  onclick={() => toggleSort('to')}
+                >
+                  With {@render sortIcon('to')}
+                </button>
+              </Table.Head>
+              <Table.Head>
+                <button
+                  type="button"
+                  class="flex items-center gap-1 hover:text-foreground"
+                  onclick={() => toggleSort('caseSensitive')}
+                >
+                  Case {@render sortIcon('caseSensitive')}
+                </button>
+              </Table.Head>
+              <Table.Head class="w-[1%] text-right">Actions</Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {#each sortedEntries as { entry, index } (index)}
+              <Table.Row data-state={editingIndex === index ? 'selected' : undefined}>
+                <Table.Cell class="font-medium">{entry.from}</Table.Cell>
+                <Table.Cell class="text-primary">{entry.to}</Table.Cell>
+                <Table.Cell>
+                  {#if entry.caseSensitive}
+                    <Badge variant="secondary" class="text-xs">Sensitive</Badge>
+                  {:else}
+                    <span class="text-muted-foreground text-xs">—</span>
+                  {/if}
+                </Table.Cell>
+                <Table.Cell class="text-right">
+                  <div class="flex justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="size-7"
+                      onclick={() => startEdit(index)}
+                      title="Edit entry"
+                    >
+                      <Pencil class="size-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="text-destructive hover:text-destructive size-7"
+                      onclick={() => requestDelete(index)}
+                      title="Delete entry"
+                    >
+                      <Trash2 class="size-3.5" />
+                    </Button>
+                  </div>
+                </Table.Cell>
+              </Table.Row>
+            {/each}
+          </Table.Body>
+        </Table.Root>
       </div>
     {/if}
   </div>

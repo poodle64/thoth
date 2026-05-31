@@ -240,9 +240,9 @@
   }
 
   .time {
-    font-family: var(--font-mono);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 14px;
-    color: var(--color-text-secondary);
+    color: var(--muted-foreground);
     min-width: 40px;
     text-align: right;
   }
@@ -252,7 +252,7 @@
     height: 48px;
     border-radius: 50%;
     border: none;
-    background: var(--color-accent);
+    background: var(--primary);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -271,11 +271,11 @@
   }
 
   .record-btn.recording {
-    background: var(--color-error);
+    background: var(--destructive);
   }
 
   .record-btn.processing {
-    background: var(--color-accent);
+    background: var(--primary);
     opacity: 0.7;
     cursor: wait;
   }
@@ -360,13 +360,13 @@
 
   .status-message {
     font-size: 11px;
-    color: var(--color-text-secondary);
+    color: var(--muted-foreground);
     margin-top: 4px;
   }
 
   .error-message {
     font-size: 11px;
-    color: var(--color-error);
+    color: var(--destructive);
     margin-top: 4px;
     max-width: 200px;
     text-align: center;
@@ -388,7 +388,7 @@
 
   .result-text {
     font-size: 13px;
-    color: var(--color-text-primary);
+    color: var(--foreground);
     max-height: 60px;
     overflow-y: auto;
     text-align: center;
@@ -400,7 +400,7 @@
     height: 32px;
     border-radius: 50%;
     border: none;
-    background: var(--color-success);
+    background: var(--chart-2);
     cursor: pointer;
     display: flex;
     align-items: center;

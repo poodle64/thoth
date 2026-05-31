@@ -1,15 +1,15 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import 'shadcn-svelte/tailwind.css';
 
 @custom-variant dark (&:is(.dark *));
 
-/* shadcn token bridge — Scribe's Amber palette mapped to shadcn vocabulary.
-   Thoth is dark-only; identical values in :root and .dark so the tokens work
-   whether or not the .dark class is present on the document root. */
+/* Scribe's Amber palette mapped to the standard shadcn token slots.
+   Thoth is dark-only; :root and .dark hold identical values so tokens
+   resolve whether or not the .dark class is present. */
 :root {
   --radius: 0.5rem;
 
-  /* Core surfaces */
   --background: #1c1b1a;
   --foreground: #ede8e0;
 
@@ -19,32 +19,31 @@
   --popover: #272523;
   --popover-foreground: #ede8e0;
 
-  /* Brand */
   --primary: #d08b3e;
   --primary-foreground: #1c1b1a;
 
-  /* Secondary surface (slightly raised) */
   --secondary: #272523;
   --secondary-foreground: #ede8e0;
 
-  /* Muted / subtle */
   --muted: #363330;
   --muted-foreground: #9c9488;
 
-  /* Accent — shadcn convention: subtle hover surface, NOT the amber brand */
   --accent: #363330;
   --accent-foreground: #ede8e0;
 
-  /* Destructive */
   --destructive: #e05545;
   --destructive-foreground: #ffffff;
 
-  /* Structural */
   --border: #363330;
   --input: #363330;
   --ring: #d08b3e;
 
-  /* Sidebar */
+  --chart-1: #d08b3e;
+  --chart-2: #4aba6a;
+  --chart-3: #e8c547;
+  --chart-4: #e05545;
+  --chart-5: #6b645a;
+
   --sidebar: #1c1b1a;
   --sidebar-foreground: #ede8e0;
   --sidebar-primary: #d08b3e;
@@ -53,18 +52,9 @@
   --sidebar-accent-foreground: #ede8e0;
   --sidebar-border: #363330;
   --sidebar-ring: #d08b3e;
-
-  /* Charts */
-  --chart-1: #d08b3e;
-  --chart-2: #4aba6a;
-  --chart-3: #e8c547;
-  --chart-4: #e05545;
-  --chart-5: #6b645a;
 }
 
 .dark {
-  --radius: 0.5rem;
-
   --background: #1c1b1a;
   --foreground: #ede8e0;
 
@@ -93,6 +83,12 @@
   --input: #363330;
   --ring: #d08b3e;
 
+  --chart-1: #d08b3e;
+  --chart-2: #4aba6a;
+  --chart-3: #e8c547;
+  --chart-4: #e05545;
+  --chart-5: #6b645a;
+
   --sidebar: #1c1b1a;
   --sidebar-foreground: #ede8e0;
   --sidebar-primary: #d08b3e;
@@ -101,100 +97,14 @@
   --sidebar-accent-foreground: #ede8e0;
   --sidebar-border: #363330;
   --sidebar-ring: #d08b3e;
-
-  --chart-1: #d08b3e;
-  --chart-2: #4aba6a;
-  --chart-3: #e8c547;
-  --chart-4: #e05545;
-  --chart-5: #6b645a;
 }
 
-/* Thoth design tokens — Scribe's Amber theme.
-   Existing components consume these via var(--color-*) references.
-   Do NOT remove; the shadcn bridge above adds new names alongside. */
-@theme {
-  /* Colours - Scribe's Amber palette */
-  --color-bg-primary: #1c1b1a;
-  --color-bg-secondary: #272523;
-  --color-bg-tertiary: #363330;
-  --color-bg-hover: #403d3a;
-  --color-bg-active: #4d4a46;
-
-  --color-text-primary: #ede8e0;
-  --color-text-secondary: #9c9488;
-  --color-text-tertiary: #6b645a;
-
-  --color-accent: #d08b3e;
-  --color-accent-hover: #de9e56;
-  --color-accent-active: #b57530;
-
-  --color-success: #4aba6a;
-  --color-warning: #e8c547;
-  --color-error: #e05545;
-
-  --color-border: #363330;
-  --color-border-subtle: #272523;
-
-  /* Spacing */
-  --spacing-xs: 0.25rem;
-  --spacing-sm: 0.5rem;
-  --spacing-md: 1rem;
-  --spacing-lg: 1.5rem;
-  --spacing-xl: 2rem;
-
-  /* Typography */
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-mono: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', monospace;
-
-  --text-xs: 0.75rem;
-  --text-sm: 0.8125rem;
-  --text-base: 0.875rem;
-  --text-lg: 1rem;
-  --text-xl: 1.125rem;
-
-  /* Layout */
-  --header-height: 54px;
-  --sidebar-width: 220px;
-
-  /* Border radius */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-full: 9999px;
-
-  /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3);
-
-  /* Transitions */
-  --transition-fast: 150ms ease;
-  --transition-normal: 200ms ease;
-  --transition-slow: 300ms ease;
-
-  /* Chart tokens (governance required) */
-  --color-chart-1: #d08b3e;
-  --color-chart-2: #4aba6a;
-  --color-chart-3: #e8c547;
-  --color-chart-4: #e05545;
-  --color-chart-5: #6b645a;
-
-  /* Sidebar tokens (governance required) */
-  --color-sidebar: #1c1b1a;
-  --color-sidebar-foreground: #ede8e0;
-  --color-sidebar-primary: #d08b3e;
-  --color-sidebar-primary-foreground: #1c1b1a;
-  --color-sidebar-accent: #363330;
-  --color-sidebar-accent-foreground: #ede8e0;
-  --color-sidebar-border: #363330;
-  --color-sidebar-ring: #d08b3e;
-}
-
-/* shadcn Tailwind utility bridge — maps CSS custom properties to Tailwind v4
-   utility classes (bg-background, text-foreground, border-border, etc.).
-   Uses 'inline' to avoid generating a separate CSS layer. */
 @theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -214,6 +124,11 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -222,218 +137,13 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-
-  /* Radius utilities derived from the shadcn --radius base */
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-}
-
-/* Base styles */
-html {
-  font-family: var(--font-sans);
-  font-size: var(--text-base);
-  line-height: 1.5;
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-primary);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-body {
-  margin: 0;
-  padding: 0;
-  min-height: 100vh;
-}
-
-/* Scrollbar styling */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-full);
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-bg-hover);
-}
-
-/* Selection */
-::selection {
-  background: var(--primary);
-  color: white;
-}
-
-/* Focus styles */
-:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
-
-/* Button base */
-button {
-  font-family: inherit;
-  font-size: inherit;
-  cursor: pointer;
-  border: none;
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-radius: var(--radius-md);
-  transition: background var(--transition-fast);
-}
-
-button:hover {
-  background: var(--color-bg-hover);
-}
-
-button:active {
-  background: var(--color-bg-active);
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Input base */
-input,
-textarea,
-select {
-  font-family: inherit;
-  font-size: inherit;
-  background: var(--color-bg-secondary);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border);
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-radius: var(--radius-md);
-  transition: border-color var(--transition-fast);
-}
-
-input:focus,
-textarea:focus,
-select:focus {
-  border-color: var(--color-accent);
-  outline: none;
-}
-
-input::placeholder,
-textarea::placeholder {
-  color: var(--color-text-tertiary);
-}
-
-/* =============================================================================
-   Shared Component Styles
-   ============================================================================= */
-
-/* Setting Row - card layout for settings items */
-.setting-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 16px;
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border-subtle);
-}
-
-.setting-row.vertical {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 12px;
-}
-
-.setting-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-}
-
-.setting-label {
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--color-text-primary);
-}
-
-.setting-description {
-  font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
-}
-
-/* Section styling */
-.settings-section {
-  display: flex;
-  flex-direction: column;
-}
-
-.section-header {
-  margin-bottom: 12px;
-}
-
-.section-content {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.section-title {
-  margin: 0 0 2px 0;
-  font-size: var(--text-lg);
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.section-description {
-  margin: 0;
-  font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
-}
-
-/* Error and status messages */
-.error-message {
-  padding: 8px 12px;
-  background: color-mix(in srgb, var(--color-error) 10%, transparent);
-  border-radius: var(--radius-md);
-  color: var(--color-error);
-  font-size: var(--text-sm);
-}
-
-/* Hint text */
-.hint {
-  margin: 0;
-  padding: 8px 12px;
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-  font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
-  line-height: 1.5;
-}
-
-.hint code {
-  background: var(--color-bg-tertiary);
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-size: 11px;
+  body {
+    @apply bg-background text-foreground;
+  }
 }
