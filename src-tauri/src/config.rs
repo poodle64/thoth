@@ -156,10 +156,14 @@ pub struct TranscriptionConfig {
     /// Whether to remove hesitation sounds (um, uh, er, ah) from transcription
     #[serde(default = "default_true")]
     pub remove_fillers: bool,
-    /// Whether to convert US spellings to Australian/British equivalents
-    #[serde(default)]
+    /// Whether to convert US spellings to Australian/British equivalents.
+    /// Defaults on — the operator dictates Australian English.
+    #[serde(default = "default_true")]
     pub australian_spelling: bool,
-    /// Whether to convert spoken number words to digits
+    /// Whether to convert spoken number words to digits.
+    /// Defaults OFF: rule-based ITN is inherently ambiguous (lone "one" as a
+    /// pronoun, counting sequences vs sums), so it stays opt-in for when the
+    /// user is dictating numeric content rather than prose.
     #[serde(default)]
     pub spoken_numbers_to_digits: bool,
     /// Whether to collapse runs of whitespace and trim leading/trailing spaces
@@ -186,7 +190,7 @@ impl Default for TranscriptionConfig {
             auto_paste: true,
             add_leading_space: false,
             remove_fillers: true,
-            australian_spelling: false,
+            australian_spelling: true,
             spoken_numbers_to_digits: false,
             normalise_whitespace: true,
             cleanup_punctuation: true,

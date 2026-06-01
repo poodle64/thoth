@@ -529,13 +529,21 @@ fn position_pill_generic<R: Runtime>(indicator: &tauri::WebviewWindow<R>) -> Res
     Ok(())
 }
 
-/// Show the indicator and play the start bing, but only when a new recording
-/// is actually starting: not already capturing and the model is ready.
+/// Show the indicator and play the start tone when a new recording is starting.
 ///
-/// Extracted from the three identical guard blocks in manager.rs,
+/// Gated ONLY on "not already recording" — the same authority the stop tone
+/// uses. It is deliberately NOT gated on `is_transcription_ready()`: pressing
+/// record starts a recording whether or not the model is already in memory (the
+/// pipeline warms it in the background), so the audio cue must fire regardless.
+/// Gating the bing on model-readiness was why it went silent after the ~45s
+/// idle warm-stream teardown — the model check could lag a cold start, dropping
+/// the tone even though recording began. The stop tone never had this gate,
+/// which is why it was always reliable.
+///
+/// Extracted from the identical guard blocks in shortcuts/manager.rs,
 /// keyboard_service.rs, and tray.rs so the logic lives in one place.
 pub(crate) fn maybe_play_start_indicator<R: Runtime>(app: &AppHandle<R>) {
-    if !crate::audio::is_recording() && crate::transcription::is_transcription_ready() {
+    if !crate::audio::is_recording() {
         if let Err(e) = show_indicator_instant(app) {
             tracing::warn!("Failed to show recording indicator: {}", e);
         }
