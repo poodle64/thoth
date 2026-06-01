@@ -240,6 +240,25 @@ pub fn verify_accessibility_functional() -> bool {
     }
 }
 
+/// Reset the permissions that an update is likely to have invalidated, then
+/// point the user at System Settings to re-grant them.
+///
+/// macOS keys TCC grants to the app's code-signing identity; a self-built or
+/// non-notarised Thoth gets a fresh identity on each build, so after an update
+/// the old grants silently stop working ("appears granted but is stale"). Rather
+/// than have the user diagnose that, we reset the three permissions Thoth uses
+/// the moment we detect a version change, so they re-grant once from a clean
+/// slate. Best-effort: a failure (e.g. the user cancels the admin prompt) is
+/// logged and returned, not fatal.
+pub fn reset_permissions_after_update() -> Result<String, String> {
+    let services = vec![
+        "Accessibility".to_string(),
+        "ListenEvent".to_string(),
+        "Microphone".to_string(),
+    ];
+    reset_tcc_permissions(&services)
+}
+
 /// Reset TCC (Transparency, Consent, and Control) permission entries for Thoth.
 ///
 /// Uses `tccutil reset` via `osascript` to prompt for administrator privileges,

@@ -465,7 +465,7 @@ fn build_router(token: String, app_version: String, mcp_enabled: bool) -> Router
 ///
 /// If a server is already running it is stopped first.
 /// Binds 127.0.0.1:{port} only.
-pub async fn start(port: u16, token: String, mcp_enabled: bool) {
+pub async fn start(port: u16, token: String, mcp_enabled: bool) -> Result<(), String> {
     // Stop any existing server before starting a new one.
     stop().await;
 
@@ -478,7 +478,10 @@ pub async fn start(port: u16, token: String, mcp_enabled: bool) {
         Ok(l) => l,
         Err(e) => {
             tracing::error!("Control API: failed to bind {}:{}: {}", addr.ip(), port, e);
-            return;
+            return Err(format!(
+                "Could not start the server on port {port}: {e}. \
+                 The port may already be in use — try a different port."
+            ));
         }
     };
 
@@ -495,6 +498,7 @@ pub async fn start(port: u16, token: String, mcp_enabled: bool) {
     *guard = Some(ServerHandle {
         abort: join_handle.abort_handle(),
     });
+    Ok(())
 }
 
 /// Stop the running control API server, if any.
@@ -564,7 +568,7 @@ pub async fn set_api_enabled(
         let mcp = cfg.integrations.mcp_enabled;
 
         crate::config::set_config(cfg)?;
-        start(port, token, mcp).await;
+        start(port, token, mcp).await?;
     } else {
         crate::config::set_config(cfg)?;
         stop().await;
@@ -574,22 +578,36 @@ pub async fn set_api_enabled(
 
 /// Enable or disable the bundled MCP server.
 ///
-/// The MCP server mounts at `/mcp` on the same loopback HTTP server as the Control
-/// API, so this restarts the running server to add/remove the `/mcp` route. The MCP
-/// server is only reachable when the Control API itself is enabled and running.
+/// The MCP server mounts at `/mcp` on the same loopback HTTP server as the
+/// Control API. Enabling MCP also enables and starts the Control API if it
+/// isn't already running (the MCP route can't exist without the host server) —
+/// previously toggling MCP on while the API was off silently did nothing, which
+/// is why it appeared to need several restarts. The route change takes effect
+/// immediately; no app restart is required.
 #[tauri::command]
 pub async fn set_mcp_enabled(enabled: bool) -> Result<(), String> {
     let mut cfg = crate::config::get_config()?;
     cfg.integrations.mcp_enabled = enabled;
-    let api_running = is_running().await;
+
+    // Enabling MCP implies the Control API must be on to host the /mcp route.
+    if enabled {
+        cfg.integrations.api_enabled = true;
+        if cfg.integrations.api_token.is_none() {
+            cfg.integrations.api_token = Some(generate_token());
+        }
+    }
+
     let port = cfg.integrations.api_port;
     let token = cfg.integrations.api_token.clone();
+    let api_enabled = cfg.integrations.api_enabled;
     crate::config::set_config(cfg)?;
 
-    // If the API server is up, restart it so the /mcp route appears/disappears.
-    if api_running {
+    // Restart (or start) the server so the /mcp route appears/disappears live.
+    // Awaiting start() means the bind has completed before we return, so the
+    // status the UI reads immediately afterwards is accurate.
+    if api_enabled {
         if let Some(t) = token {
-            start(port, t, enabled).await;
+            start(port, t, enabled).await?;
         }
     }
     Ok(())
@@ -617,7 +635,7 @@ pub async fn rotate_api_token(app: tauri::AppHandle) -> Result<String, String> {
     crate::config::set_config(cfg)?;
 
     if was_running {
-        start(port, new_token.clone(), mcp).await;
+        start(port, new_token.clone(), mcp).await?;
     }
     Ok(new_token)
 }
@@ -635,7 +653,7 @@ pub async fn set_api_port(app: tauri::AppHandle, port: u16) -> Result<(), String
 
     if was_running {
         if let Some(t) = token {
-            start(port, t, mcp).await;
+            start(port, t, mcp).await?;
         }
     }
     Ok(())

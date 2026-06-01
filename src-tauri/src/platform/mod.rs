@@ -240,6 +240,22 @@ pub fn verify_accessibility_functional() -> bool {
     }
 }
 
+/// Reset the permissions an app update is likely to have invalidated.
+///
+/// macOS keys TCC grants to the code-signing identity, which changes on each
+/// build, so after an update the old grants silently go stale. Called once when
+/// a version change is detected at startup. No-op on non-macOS platforms.
+pub fn reset_permissions_after_update() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::reset_permissions_after_update()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok("No permission reset needed on this platform.".to_string())
+    }
+}
+
 /// Reset TCC permission entries for Thoth.
 ///
 /// Prompts for administrator privileges via macOS dialog, then runs

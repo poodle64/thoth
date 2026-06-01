@@ -57,9 +57,13 @@ impl std::fmt::Debug for IntegrationsConfig {
 impl Default for IntegrationsConfig {
     fn default() -> Self {
         Self {
-            api_enabled: false,
+            // Control API and MCP server default ON. They bind 127.0.0.1 only and
+            // require the bearer token, so they are not network-exposed; defaulting
+            // on means MCP-capable assistants work out of the box. The token is
+            // auto-generated on first run when missing (see lib.rs startup).
+            api_enabled: true,
             api_port: default_api_port(),
-            mcp_enabled: false,
+            mcp_enabled: true,
             api_token: None,
         }
     }
@@ -316,6 +320,15 @@ pub struct GeneralConfig {
     pub show_recording_indicator: bool,
     /// Visual style for the recording indicator
     pub indicator_style: IndicatorStyle,
+    /// App version recorded on the most recent run.
+    ///
+    /// Used to detect that an update has been applied: when this differs from
+    /// the running binary's version, macOS TCC permission grants are likely
+    /// stale (TCC keys grants to the code-signing identity, which changes on
+    /// each build), so the app resets them once and prompts a re-grant.
+    /// `None` on a genuinely fresh install — no reset is triggered then.
+    #[serde(default)]
+    pub last_run_version: Option<String>,
 }
 
 impl Default for GeneralConfig {
@@ -327,6 +340,7 @@ impl Default for GeneralConfig {
             check_for_updates: true,
             show_recording_indicator: true,
             indicator_style: IndicatorStyle::default(),
+            last_run_version: None,
         }
     }
 }
@@ -939,6 +953,7 @@ mod tests {
                 check_for_updates: true,
                 show_recording_indicator: true,
                 indicator_style: IndicatorStyle::CursorDot,
+                last_run_version: None,
             },
             recorder: RecorderConfig {
                 position: RecorderPosition::Centre,

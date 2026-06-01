@@ -241,26 +241,81 @@ pub fn run() {
                 let app_handle = app.handle().clone();
                 register_shortcuts_from_config(&app_handle, &cfg);
 
-                // Start the Local Control API if enabled in config.
+                // Start the Local Control API if enabled in config. The API and
+                // MCP server default on, so a fresh config arrives here enabled
+                // but with no token — generate and persist one so it just works
+                // rather than warning and skipping (the cause of the "had to
+                // toggle it off and on" startup friction).
                 if cfg.integrations.api_enabled {
-                    if let Some(token) = cfg.integrations.api_token.clone() {
-                        let port = cfg.integrations.api_port;
-                        let mcp = cfg.integrations.mcp_enabled;
-                        tauri::async_runtime::spawn(async move {
-                            control_api::start(port, token, mcp).await;
-                        });
-                    } else {
-                        tracing::warn!(
-                            "Control API is enabled but no token is configured; \
-                             skipping server start"
-                        );
-                    }
+                    let token = match cfg.integrations.api_token.clone() {
+                        Some(t) => t,
+                        None => {
+                            let t = control_api::generate_token();
+                            let mut updated = cfg.clone();
+                            updated.integrations.api_token = Some(t.clone());
+                            if let Err(e) = config::set_config(updated) {
+                                tracing::error!("Failed to persist generated API token: {}", e);
+                            }
+                            t
+                        }
+                    };
+                    let port = cfg.integrations.api_port;
+                    let mcp = cfg.integrations.mcp_enabled;
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = control_api::start(port, token, mcp).await {
+                            tracing::error!("Control API failed to start on launch: {}", e);
+                        }
+                    });
                 }
             }
 
             // macOS-specific setup
             #[cfg(target_os = "macos")]
             {
+                // Detect an applied update and reset stale macOS permissions.
+                //
+                // macOS keys TCC grants to the code-signing identity, which
+                // changes on each build, so after an update the previously
+                // granted microphone / accessibility / input-monitoring
+                // permissions silently stop working. When the recorded
+                // last-run version differs from this binary's version we reset
+                // those three permissions once so the user re-grants from a
+                // clean slate. A genuinely fresh install (no recorded version)
+                // does NOT trigger a reset — there is nothing stale yet.
+                if let Ok(cfg) = config::get_config() {
+                    let current = env!("CARGO_PKG_VERSION").to_string();
+                    let changed = cfg
+                        .general
+                        .last_run_version
+                        .as_deref()
+                        .is_some_and(|prev| prev != current);
+
+                    // Record the current version regardless, so the reset fires
+                    // at most once per update.
+                    let mut updated = cfg.clone();
+                    updated.general.last_run_version = Some(current.clone());
+                    if let Err(e) = config::set_config(updated) {
+                        tracing::error!("Failed to record last-run version: {}", e);
+                    }
+
+                    if changed {
+                        tracing::info!(
+                            "Update detected ({} → {}); resetting macOS permissions",
+                            cfg.general.last_run_version.as_deref().unwrap_or("?"),
+                            current
+                        );
+                        // Spawn so the admin-prompt does not block window setup.
+                        tauri::async_runtime::spawn_blocking(|| {
+                            match platform::reset_permissions_after_update() {
+                                Ok(msg) => tracing::info!("Post-update permission reset: {}", msg),
+                                Err(e) => {
+                                    tracing::warn!("Post-update permission reset skipped: {}", e)
+                                }
+                            }
+                        });
+                    }
+                }
+
                 // Set dock visibility based on user config
                 let show_dock = config::get_config()
                     .map(|c| c.general.show_in_dock)

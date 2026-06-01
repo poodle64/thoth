@@ -371,6 +371,15 @@ fn word_to_single_digit(word: &str) -> Option<u8> {
     }
 }
 
+/// Determiners that, immediately before a lone "one", mark it as the pronoun
+/// ("no one", "any one", "every one", "each one") rather than the numeral 1.
+fn is_oneness_determiner(word: &str) -> bool {
+    matches!(
+        word.to_ascii_lowercase().as_str(),
+        "no" | "any" | "every" | "each" | "some"
+    )
+}
+
 /// Read a run of number-word cores as a digit-by-digit sequence, if it is one.
 ///
 /// A run qualifies only when it is **two or more** bare single-digit words and
@@ -676,12 +685,26 @@ pub fn spoken_numbers_to_digits(text: &str) -> String {
                 .map(|k| alpha_core(tokens[k].1))
                 .collect();
 
+            // Guard: a lone "one" is the pronoun, not the numeral, after a
+            // determiner like "no"/"any"/"every"/"each" ("no one", "any one").
+            // Converting it to "1" ("no 1") is wrong. Only suppress the lone
+            // single-word "one"; "one hundred", "one two three", or "one" after
+            // a non-determiner ("I need one") still convert.
+            let is_lone_pronoun_one = run_cores.len() == 1
+                && run_cores[0].eq_ignore_ascii_case("one")
+                && run_start > 0
+                && is_oneness_determiner(alpha_core(tokens[run_start - 1].1));
+
             // A pure run of two or more single digits is read digit-by-digit
             // ("one two three" → "123"); everything else is a cardinal number
             // ("twenty three" → 23, "two hundred" → 200). digit_sequence returns
             // None for the cardinal case, falling through to tokens_to_number.
-            let parsed: Option<String> = digit_sequence(&run_cores)
-                .or_else(|| tokens_to_number(&run_cores).map(|n| n.to_string()));
+            let parsed: Option<String> = if is_lone_pronoun_one {
+                None
+            } else {
+                digit_sequence(&run_cores)
+                    .or_else(|| tokens_to_number(&run_cores).map(|n| n.to_string()))
+            };
 
             if let Some(number) = parsed {
                 // Emit: preceding whitespace of the first run token, then any
@@ -1362,6 +1385,34 @@ mod tests {
         assert_eq!(
             spoken_numbers_to_digits("eight hundred and ninety six"),
             "896"
+        );
+    }
+
+    #[test]
+    fn test_itn_lone_one_after_determiner_is_pronoun() {
+        // "one" as a pronoun after a determiner must NOT become "1".
+        assert_eq!(spoken_numbers_to_digits("no one"), "no one");
+        assert_eq!(spoken_numbers_to_digits("no one came"), "no one came");
+        assert_eq!(
+            spoken_numbers_to_digits("any one of them"),
+            "any one of them"
+        );
+        assert_eq!(spoken_numbers_to_digits("every one"), "every one");
+        assert_eq!(spoken_numbers_to_digits("each one"), "each one");
+    }
+
+    #[test]
+    fn test_itn_one_still_converts_when_numeral() {
+        // A real numeral "one" still converts: not after a oneness-determiner,
+        // or part of a larger number.
+        assert_eq!(spoken_numbers_to_digits("I need one"), "I need 1");
+        assert_eq!(spoken_numbers_to_digits("one hundred"), "100");
+        assert_eq!(spoken_numbers_to_digits("one two three"), "123");
+        // "the one" — "the" is not in the oneness set, so it still converts;
+        // this is acceptable (rare, and ambiguous either way).
+        assert_eq!(
+            spoken_numbers_to_digits("give me one please"),
+            "give me 1 please"
         );
     }
 

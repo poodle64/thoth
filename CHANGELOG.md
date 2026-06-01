@@ -4,22 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [2026.6.2] - 2026-05-31
+## [2026.6.1] - 2026-06-01
 
-### Fixed
+### Added
 
-- Spoken-number conversion now reads digit sequences correctly. Saying "one two three" produces "123" (it previously summed the words to "6"); a run of two or more single digits — including "oh" and "zero", as in "four oh four" → "404" — is read digit-by-digit, while phrases containing a teen, ten, or magnitude word stay cardinal ("twenty three" → "23", "two hundred" → "200", "fifteen hundred and three" → "1503").
+- The Local Control API and bundled MCP server now default to **on**. They bind `127.0.0.1` only and require the bearer token (auto-generated on first run), so they are not network-exposed; MCP-capable assistants work out of the box. Enabling MCP also starts the Control API automatically — previously toggling MCP on while the API was off silently did nothing, which is why it took several restarts to come up. Toggles now take effect live without an app restart, and a failure to bind the port (e.g. already in use) surfaces an error instead of failing silently.
 
 ### Changed
 
+- After an update, Thoth now resets its macOS permissions (microphone, accessibility, input monitoring) once so they can be re-granted from a clean slate. macOS ties permission grants to the app's code signature, which changes on each build, so an update silently invalidated the previous grants and left recording/shortcuts broken until manually reset. The reset fires only when the version actually changes, never on a fresh install or a normal relaunch.
 - Australian-spelling conversion is rebuilt on the canonical VARCON / English Speller Database word map (the same data behind the en_AU dictionary in browsers and office suites), replacing a hand-maintained word list. The whole `-ise` family now converts (realise, institutionalise, modernise, hospitalise — not just the words someone happened to list), alongside `-our`, `-re`, `-ence`, `-ogue` and irregular forms, while false friends (size, capsize, seize, prize) and homograph hazards (tire, curb, story, practice) are left untouched. ~3000 verified pairs.
-
-## [2026.6.1] - 2026-05-31
 
 ### Fixed
 
 - Transcription no longer drops the final words of long recordings (#46). On recordings over ~20 seconds the silence trimmer used voice-activity detection to cut both the leading and trailing silence; on quiet input (e.g. a lapel mic) it regularly misjudged the trailing-off end of a sentence as silence and sliced real words away before either transcription engine saw them. This was why both backends truncated at the identical word. The trimmer now removes leading silence only and always keeps the audio through to the very end.
 - The recording start tone ("bing") now plays reliably (#58). It was loaded by-reference, so NSSound deferred reading the audio until play time; fired at the busiest moment of a start (keypress, indicator show, window positioning and IPC at once), that lazy load frequently lost the race and the tone silently failed. The stop tone ("bong") plays at a quiet moment and was always reliable. The audio is now loaded eagerly so playback starts immediately.
+- Spoken-number conversion now reads digit sequences correctly. Saying "one two three" produces "123" (it previously summed the words to "6"); a run of two or more single digits — including "oh" and "zero", as in "four oh four" → "404" — is read digit-by-digit, while phrases containing a teen, ten, or magnitude word stay cardinal ("twenty three" → "23", "two hundred" → "200", "fifteen hundred and three" → "1503"). A lone "one" used as a pronoun ("no one", "any one") is left alone instead of becoming "1".
 - The "update available" notification can now be dismissed (#67, #52). The toast was shown with infinite duration but only an "Update Now" action, so it could not be cleared without installing the update. It now has a "Later" button that dismisses it, plus a description line. (The old full-width banner with overlapping buttons was already replaced by this corner toast in 2026.6.0; this completes the dismiss-ability the toast was missing.)
 
 ## [2026.6.0] - 2026-06-01
