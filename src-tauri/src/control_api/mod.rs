@@ -589,10 +589,8 @@ pub async fn set_api_enabled(
 ///
 /// The MCP server mounts at `/mcp` on the same loopback HTTP server as the
 /// Control API. Enabling MCP also enables and starts the Control API if it
-/// isn't already running (the MCP route can't exist without the host server) —
-/// previously toggling MCP on while the API was off silently did nothing, which
-/// is why it appeared to need several restarts. The route change takes effect
-/// immediately; no app restart is required.
+/// isn't already running (the MCP route can't exist without the host server).
+/// The route change takes effect immediately; no app restart is required.
 #[tauri::command]
 pub async fn set_mcp_enabled(enabled: bool) -> Result<(), String> {
     let mut cfg = crate::config::get_config()?;

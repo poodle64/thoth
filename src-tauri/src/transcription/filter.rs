@@ -1195,8 +1195,7 @@ mod tests {
 
     #[test]
     fn test_au_spelling_ize_rule_covers_unlisted_words() {
-        // The whole -ize family converts by rule, including words that were never
-        // enumerated in the old hand-maintained list (the bug this fix targets).
+        // The whole -ize family converts by rule, including words not in any explicit list.
         assert_eq!(apply_australian_spelling("realize"), "realise");
         assert_eq!(apply_australian_spelling("realized"), "realised");
         assert_eq!(apply_australian_spelling("realizing"), "realising");
@@ -1326,9 +1325,7 @@ mod tests {
     }
 
     // ── Digit-sequence ITN tests ──────────────────────────────────────────
-    // A run of two or more bare single-digit words is read digit-by-digit
-    // (PIN / code / phone style), NOT summed. This is the "one two three" → 123
-    // case that previously summed to 6.
+    // A run of bare single-digit words is read digit-by-digit (PIN/code/phone), not summed.
 
     #[test]
     fn test_itn_digit_sequence_basic() {

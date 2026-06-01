@@ -601,9 +601,9 @@ pub fn prewarm_indicator_window(app: &AppHandle) {
             }
 
             // On macOS, briefly show off-screen to map the window and load the
-            // webview, then hide it for real. Keeping it permanently visible
-            // (the old approach) let the window server remap it on-screen at
-            // launch/display-wake, causing a stray floating indicator.
+            // webview, then hide it. A permanently-visible window would be
+            // remapped on-screen by the window server at launch/display-wake,
+            // causing a stray floating indicator.
             #[cfg(not(target_os = "linux"))]
             {
                 // Park off-screen first so the brief pre-warm show is never visible.

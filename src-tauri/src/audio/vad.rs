@@ -60,14 +60,11 @@ const TRIM_MARGIN_SECS: f32 = 0.5;
 /// before it. **The trailing edge is never trimmed** — `end` is always
 /// `samples.len()`.
 ///
-/// Trailing trimming used to clip real words off the end of long dictations:
-/// WebRTC VAD in aggressive mode regularly tags the trailing-off end of a
-/// sentence (especially on a quiet lapel mic) as non-speech, so the detected
-/// "last speech frame" landed before the true end and the final words were
-/// sliced away before the decoder ever saw them. This was the shared root cause
-/// behind both backends truncating at the identical word (#46). Leading silence
-/// is where the latency saving actually lives; keeping the whole tail costs a
-/// little decode time on a long clip and never loses a word.
+/// The trailing edge is never trimmed: WebRTC VAD in aggressive mode tags the
+/// quiet tail of a sentence (especially on a lapel mic) as non-speech, so
+/// trimming there risks slicing off the final words. Leading silence is where
+/// the latency saving lives; keeping the whole tail costs only a little decode
+/// time and never loses a word.
 ///
 /// # Arguments
 /// * `samples` — mono f32 audio samples normalised to [-1.0, 1.0]

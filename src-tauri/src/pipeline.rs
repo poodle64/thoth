@@ -226,7 +226,7 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
     // Emit recording state early so the UI updates before the device opens.
     // Device name will be filled from audio::last_device_name() after start_recording
     // returns; we emit a second progress event with the name then.
-    // This avoids the ~90ms CoreAudio device resolution call that used to happen here.
+    // Emitting the device name later avoids blocking on the ~90ms CoreAudio device-resolution call before the UI updates.
     emit_progress(&app, PipelineState::Recording, "Recording audio...");
 
     tracing::info!("Pipeline: Calling audio::start_recording");
