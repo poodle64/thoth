@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "quartermaster": {
+      "command": "${HOME}/micromamba/envs/mcp-servers/bin/python",
+      "args": [
+        "-m",
+        "quartermaster_mcp.server",
+        "--transport",
+        "stdio"
+      ]
+    },
+    "shadcn-ui": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@jpisnice/shadcn-ui-mcp-server",
+        "--framework",
+        "svelte"
+      ]
+    }
+  }
+}

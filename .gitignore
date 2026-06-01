@@ -37,7 +37,6 @@ desktop.ini
 !.env.example
 .envrc.local
 .direnv/
-.mcp.json
 
 # ============================================================================
 # Python
