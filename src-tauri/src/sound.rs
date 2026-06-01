@@ -4,14 +4,18 @@
 //! Uses macOS dictation-style tones (dt-begin, dt-confirm) for recording
 //! start/stop, and standard system sounds for other events.
 //!
-//! Playback uses the macOS System Sound server (`AudioServicesPlaySystemSound`),
-//! not NSSound. The system-sound server runs in a SEPARATE process with its own
-//! output path, so a cue is never clipped or swallowed when the app
-//! simultaneously opens a CoreAudio input device to record — the failure mode
-//! NSSound had (the start tone went silent or "cut in half" on the first record
-//! after the warm audio stream had torn down). This is the same mechanism macOS
-//! dictation itself uses for its on/off cues, so playback is decoupled from when
-//! or how recently the user pressed record.
+//! Playback uses `AVAudioPlayer` on macOS. This is the path that satisfies both
+//! constraints a recording cue has:
+//!   - It plays as an ordinary mixable CoreAudio client, so it does NOT duck or
+//!     pause the user's music (the System Sound server does — it routes through
+//!     the single-slot system-alert path with no mix control on macOS, and
+//!     NSSound on the shared output got clipped when the mic opened).
+//!   - Each cue is an independent output stream, so opening the microphone to
+//!     record does not clip or swallow it (the failure NSSound had: the start
+//!     tone went silent or "cut in half" on the first record after the warm
+//!     audio stream had torn down).
+//! A fresh player is created per cue and leaked for its short lifetime; the OS
+//! reclaims it when playback ends.
 
 use crate::config;
 
@@ -77,72 +81,47 @@ pub fn play_sound(event: SoundEvent) {
     }
 }
 
-/// Cache of registered System Sound IDs, keyed by file path.
+/// Play a short UI sound via `AVAudioPlayer`.
 ///
-/// Each sound file is registered with the system-sound server exactly once
-/// (`AudioServicesCreateSystemSoundID` does real work) and the ID reused for
-/// every subsequent play. IDs are never disposed — Thoth has a small fixed set
-/// of cues and the OS reclaims them at exit; disposing would also race the
-/// asynchronous playback.
-#[cfg(target_os = "macos")]
-static SOUND_CACHE: std::sync::OnceLock<
-    std::sync::Mutex<std::collections::HashMap<&'static str, u32>>,
-> = std::sync::OnceLock::new();
-
-/// Play a short UI sound via the macOS System Sound server (fire-and-forget).
-///
-/// Playback runs in a separate process, so it is NOT clipped when cpal holds a
-/// CoreAudio *input* device open — the reason NSSound's start tone failed on a
-/// cold record.
+/// `AVAudioPlayer` plays as an ordinary mixable CoreAudio client: it does not
+/// duck or pause other apps' audio (so the cue no longer interferes with music),
+/// and it is an independent output stream so opening the microphone to record
+/// does not clip it. A fresh player is created per cue, prepared, played, and
+/// leaked for its short lifetime; the OS reclaims it once playback ends.
 #[cfg(target_os = "macos")]
 fn play_macos_sound(path: &'static str) {
-    use objc2_audio_toolbox::{AudioServicesCreateSystemSoundID, AudioServicesPlaySystemSound};
-    use objc2_core_foundation::{CFString, CFURLPathStyle, CFURL};
+    use objc2::AnyThread;
+    use objc2_avf_audio::AVAudioPlayer;
+    use objc2_foundation::{NSString, NSURL};
 
-    let cache = SOUND_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-    let mut map = match cache.lock() {
-        Ok(m) => m,
-        Err(e) => {
-            tracing::warn!("Sound cache lock poisoned: {}", e);
-            return;
-        }
-    };
+    let ns_path = NSString::from_str(path);
+    let url = NSURL::fileURLWithPath(&ns_path);
 
-    let id = match map.get(path).copied() {
-        Some(id) => id,
-        None => {
-            let cf_path = CFString::from_str(path);
-            let Some(url) = CFURL::with_file_system_path(
-                None,
-                Some(&cf_path),
-                CFURLPathStyle::CFURLPOSIXPathStyle,
-                false,
-            ) else {
-                tracing::warn!("Failed to build CFURL for sound: {}", path);
-                return;
-            };
-
-            let mut sound_id: u32 = 0;
-            // SAFETY: `&mut sound_id` is a valid non-null out-param pointer.
-            let status = unsafe {
-                AudioServicesCreateSystemSoundID(&url, std::ptr::NonNull::from(&mut sound_id))
-            };
-            if status != 0 {
-                tracing::warn!(
-                    "AudioServicesCreateSystemSoundID failed ({}) for {}",
-                    status,
-                    path
-                );
+    // SAFETY: `url` is a valid file URL; init returns None (Err) if the file
+    // can't be opened as audio, which we handle.
+    let player =
+        match unsafe { AVAudioPlayer::initWithContentsOfURL_error(AVAudioPlayer::alloc(), &url) } {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("Failed to load sound {} into AVAudioPlayer: {:?}", path, e);
                 return;
             }
-            map.insert(path, sound_id);
-            sound_id
-        }
-    };
+        };
 
-    // SAFETY: `id` is a live SystemSoundID created above; play is async/fire-and-forget.
-    unsafe { AudioServicesPlaySystemSound(id) };
-    tracing::debug!("Playing system sound: {}", path);
+    // SAFETY: standard AVAudioPlayer calls; safe to call from any thread.
+    unsafe {
+        player.prepareToPlay();
+        if !player.play() {
+            tracing::warn!("AVAudioPlayer failed to start playing {}", path);
+            return;
+        }
+    }
+
+    // Keep the player alive until playback finishes. AVAudioPlayer stops if it
+    // is deallocated mid-play, so we leak this short-lived instance (a few KB,
+    // reclaimed by the OS when the ~0.5s cue ends), matching the prior cue model.
+    std::mem::forget(player);
+    tracing::debug!("Playing sound via AVAudioPlayer: {}", path);
 }
 
 /// Play a sound for recording start

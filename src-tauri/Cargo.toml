@@ -97,15 +97,14 @@ tauri-plugin-updater = "2.10"
 whisper-rs = { version = "0.15", features = ["metal"] }
 cocoa = "0.26"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSNotification", "NSOperation", "NSString", "NSObject"] }
+objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSNotification", "NSOperation", "NSString", "NSObject", "NSURL"] }
 objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "NSButton", "NSResponder", "NSControl", "NSWorkspace"] }
 block2 = "0.6"
 core-foundation = "0.10"
 core-graphics = "0.24"
-# System-sound playback for recording cues. AudioServicesPlaySystemSound runs in
-# a separate process, so the cue is never clipped when cpal opens the mic.
-objc2-audio-toolbox = "0.3"
-objc2-core-foundation = "0.3"
+# Recording-cue playback via AVAudioPlayer: a mixable CoreAudio client, so the
+# cue doesn't duck the user's music and isn't clipped when cpal opens the mic.
+objc2-avf-audio = { version = "0.3", features = ["AVAudioPlayer"] }
 
 [features]
 default = ["parakeet", "fluidaudio"]
