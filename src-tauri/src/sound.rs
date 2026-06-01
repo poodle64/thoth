@@ -3,7 +3,15 @@
 //! Provides audio feedback sounds for recording events.
 //! Uses macOS dictation-style tones (dt-begin, dt-confirm) for recording
 //! start/stop, and standard system sounds for other events.
-//! Playback uses NSSound on macOS for instant, zero-latency feedback.
+//!
+//! Playback uses the macOS System Sound server (`AudioServicesPlaySystemSound`),
+//! not NSSound. The system-sound server runs in a SEPARATE process with its own
+//! output path, so a cue is never clipped or swallowed when the app
+//! simultaneously opens a CoreAudio input device to record — the failure mode
+//! NSSound had (the start tone went silent or "cut in half" on the first record
+//! after the warm audio stream had torn down). This is the same mechanism macOS
+//! dictation itself uses for its on/off cues, so playback is decoupled from when
+//! or how recently the user pressed record.
 
 use crate::config;
 
@@ -69,29 +77,72 @@ pub fn play_sound(event: SoundEvent) {
     }
 }
 
-/// Play a macOS sound file using NSSound (instant, no subprocess overhead).
+/// Cache of registered System Sound IDs, keyed by file path.
+///
+/// Each sound file is registered with the system-sound server exactly once
+/// (`AudioServicesCreateSystemSoundID` does real work) and the ID reused for
+/// every subsequent play. IDs are never disposed — Thoth has a small fixed set
+/// of cues and the OS reclaims them at exit; disposing would also race the
+/// asynchronous playback.
 #[cfg(target_os = "macos")]
-fn play_macos_sound(path: &str) {
-    use objc2::AnyThread;
-    use objc2_app_kit::NSSound;
-    use objc2_foundation::NSString;
+static SOUND_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<&'static str, u32>>,
+> = std::sync::OnceLock::new();
 
-    let ns_path = NSString::from_str(path);
-    let sound = NSSound::initWithContentsOfFile_byReference(NSSound::alloc(), &ns_path, true);
-    match sound {
-        Some(s) => {
-            s.play();
-            // NSSound plays asynchronously. We intentionally leak the reference
-            // so the sound finishes playing. The OS reclaims it when playback ends.
-            // At ~0.5s per sound and ~4 events max per recording cycle, this is
-            // negligible memory (a few KB held briefly).
-            std::mem::forget(s);
-            tracing::debug!("Playing sound: {}", path);
+/// Play a short UI sound via the macOS System Sound server (fire-and-forget).
+///
+/// Playback runs in a separate process, so it is NOT clipped when cpal holds a
+/// CoreAudio *input* device open — the reason NSSound's start tone failed on a
+/// cold record.
+#[cfg(target_os = "macos")]
+fn play_macos_sound(path: &'static str) {
+    use objc2_audio_toolbox::{AudioServicesCreateSystemSoundID, AudioServicesPlaySystemSound};
+    use objc2_core_foundation::{CFString, CFURLPathStyle, CFURL};
+
+    let cache = SOUND_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let mut map = match cache.lock() {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!("Sound cache lock poisoned: {}", e);
+            return;
         }
+    };
+
+    let id = match map.get(path).copied() {
+        Some(id) => id,
         None => {
-            tracing::warn!("Failed to load sound: {}", path);
+            let cf_path = CFString::from_str(path);
+            let Some(url) = CFURL::with_file_system_path(
+                None,
+                Some(&cf_path),
+                CFURLPathStyle::CFURLPOSIXPathStyle,
+                false,
+            ) else {
+                tracing::warn!("Failed to build CFURL for sound: {}", path);
+                return;
+            };
+
+            let mut sound_id: u32 = 0;
+            // SAFETY: `&mut sound_id` is a valid non-null out-param pointer.
+            let status = unsafe {
+                AudioServicesCreateSystemSoundID(&url, std::ptr::NonNull::from(&mut sound_id))
+            };
+            if status != 0 {
+                tracing::warn!(
+                    "AudioServicesCreateSystemSoundID failed ({}) for {}",
+                    status,
+                    path
+                );
+                return;
+            }
+            map.insert(path, sound_id);
+            sound_id
         }
-    }
+    };
+
+    // SAFETY: `id` is a live SystemSoundID created above; play is async/fire-and-forget.
+    unsafe { AudioServicesPlaySystemSound(id) };
+    tracing::debug!("Playing system sound: {}", path);
 }
 
 /// Play a sound for recording start
