@@ -155,6 +155,57 @@ fn get_macos_gpu_name() -> Option<String> {
     None
 }
 
+/// Return `true` if the default macOS input device is Bluetooth (classic or LE).
+///
+/// Used to decide whether to redirect recording to the built-in microphone to
+/// avoid forcing AirPods (or other Bluetooth headsets) out of A2DP into HFP
+/// "call" mode, which degrades audio quality for the user.
+///
+/// Always returns `false` on non-macOS platforms.
+pub fn default_input_transport_is_bluetooth() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos::default_input_transport_is_bluetooth()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+/// Return the display name of the first built-in audio input device on macOS,
+/// as reported by CoreAudio. This name matches what cpal returns for the device,
+/// allowing callers to look it up in cpal's device list by name.
+///
+/// Returns `None` on non-macOS or if no built-in input device is found.
+pub fn builtin_input_device_name() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::builtin_input_device_name()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
+/// Return `true` if the audio input device named `name` has a Bluetooth
+/// transport type on macOS. Used to decide whether the device we actually
+/// recorded from must be released immediately (Bluetooth) rather than held warm.
+///
+/// Always returns `false` on non-macOS platforms.
+pub fn device_name_is_bluetooth(name: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos::device_name_is_bluetooth(name)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = name;
+        false
+    }
+}
+
 /// Check if the screen is locked or the screensaver is active.
 ///
 /// Used to suppress global shortcuts when the user is on the lock screen,

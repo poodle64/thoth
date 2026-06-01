@@ -665,6 +665,477 @@ pub fn register_wake_observer() {
     tracing::info!("Registered NSWorkspace wake observers (DidWake + ScreensDidWake)");
 }
 
+// ---------------------------------------------------------------------------
+// Bluetooth transport-type detection
+// ---------------------------------------------------------------------------
+
+/// CoreAudio transport-type constants (verified in objc2-core-audio 0.3.2
+/// AudioHardware.rs — all values confirmed by grepping the generated source).
+mod transport {
+    pub const BUILT_IN: u32 = 0x626c746e; // kAudioDeviceTransportTypeBuiltIn
+    pub const BLUETOOTH: u32 = 0x626c7565; // kAudioDeviceTransportTypeBluetooth
+    pub const BLUETOOTH_LE: u32 = 0x626c6561; // kAudioDeviceTransportTypeBluetoothLE
+}
+
+/// Read a single `u32` CoreAudio property from a device object.
+///
+/// Returns `None` on any FFI error so callers degrade gracefully.
+///
+/// # Safety
+/// Only safe to call after verifying `property_size` matches the u32 layout via
+/// `AudioObjectGetPropertyDataSize`. This wrapper handles both size-check and read.
+fn read_audio_property_u32(device_id: u32, selector: u32, scope: u32) -> Option<u32> {
+    use core::ffi::c_void;
+    use core::ptr::NonNull;
+    use objc2_core_audio::{
+        kAudioHardwareNoError, kAudioObjectPropertyElementMain, AudioObjectGetPropertyData,
+        AudioObjectGetPropertyDataSize, AudioObjectPropertyAddress,
+    };
+
+    let address = AudioObjectPropertyAddress {
+        mSelector: selector,
+        mScope: scope,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+
+    let mut address = address;
+
+    // SAFETY: address is a valid stack allocation; qualifier args are null/0 (none required).
+    let mut data_size: u32 = 0;
+    let status = unsafe {
+        AudioObjectGetPropertyDataSize(
+            device_id,
+            NonNull::new_unchecked(&mut address),
+            0,
+            std::ptr::null(),
+            NonNull::new_unchecked(&mut data_size),
+        )
+    };
+    if status != kAudioHardwareNoError {
+        return None;
+    }
+    if data_size as usize != std::mem::size_of::<u32>() {
+        return None;
+    }
+
+    let mut value: u32 = 0;
+    // SAFETY: value is a valid u32 on the stack; size confirmed above.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device_id,
+            NonNull::new_unchecked(&mut address),
+            0,
+            std::ptr::null(),
+            NonNull::new_unchecked(&mut data_size),
+            NonNull::new_unchecked(&mut value as *mut u32 as *mut c_void),
+        )
+    };
+    if status != kAudioHardwareNoError {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+/// Read the transport type of a CoreAudio device object (by numeric ID).
+fn device_transport_type(device_id: u32) -> Option<u32> {
+    use objc2_core_audio::{kAudioDevicePropertyTransportType, kAudioObjectPropertyScopeGlobal};
+    read_audio_property_u32(
+        device_id,
+        kAudioDevicePropertyTransportType,
+        kAudioObjectPropertyScopeGlobal,
+    )
+}
+
+/// Query the default input device's transport type and return `true` if it is
+/// Bluetooth (classic or LE). Returns `false` on any FFI failure so callers
+/// degrade gracefully — an FFI error never blocks recording.
+pub fn default_input_transport_is_bluetooth() -> bool {
+    use core::ffi::c_void;
+    use core::ptr::NonNull;
+    use objc2_core_audio::{
+        kAudioHardwareNoError, kAudioHardwarePropertyDefaultInputDevice,
+        kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
+        AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectPropertyAddress,
+    };
+
+    let address = AudioObjectPropertyAddress {
+        mSelector: kAudioHardwarePropertyDefaultInputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut address = address;
+    let sys_obj = kAudioObjectSystemObject as u32;
+
+    let mut data_size: u32 = 0;
+    // SAFETY: address and data_size are valid stack allocations.
+    let status = unsafe {
+        AudioObjectGetPropertyDataSize(
+            sys_obj,
+            NonNull::new_unchecked(&mut address),
+            0,
+            std::ptr::null(),
+            NonNull::new_unchecked(&mut data_size),
+        )
+    };
+    if status != kAudioHardwareNoError {
+        tracing::warn!("CoreAudio: AudioObjectGetPropertyDataSize for default input failed ({}); assuming non-Bluetooth", status);
+        return false;
+    }
+
+    let mut default_device_id: u32 = 0;
+    // SAFETY: default_device_id is a valid u32 stack allocation; size confirmed above.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            sys_obj,
+            NonNull::new_unchecked(&mut address),
+            0,
+            std::ptr::null(),
+            NonNull::new_unchecked(&mut data_size),
+            NonNull::new_unchecked(&mut default_device_id as *mut u32 as *mut c_void),
+        )
+    };
+    if status != kAudioHardwareNoError {
+        tracing::warn!("CoreAudio: AudioObjectGetPropertyData for default input failed ({}); assuming non-Bluetooth", status);
+        return false;
+    }
+
+    let transport = match device_transport_type(default_device_id) {
+        Some(t) => t,
+        None => {
+            tracing::warn!("CoreAudio: could not read transport type of default input device; assuming non-Bluetooth");
+            return false;
+        }
+    };
+
+    let is_bt = transport == transport::BLUETOOTH || transport == transport::BLUETOOTH_LE;
+    if is_bt {
+        tracing::debug!(
+            "Default input device (id={}) has Bluetooth transport type (0x{:x})",
+            default_device_id,
+            transport
+        );
+    }
+    is_bt
+}
+
+/// Enumerate CoreAudio devices and return the display name of the first
+/// Built-in input device found.
+///
+/// Approach: enumerate all devices via `kAudioHardwarePropertyDevices`, check each
+/// for `kAudioDeviceTransportTypeBuiltIn`, then read its `kAudioObjectPropertyName`
+/// as a CFStringRef. The CoreAudio name is the system name (e.g. "MacBook Pro
+/// Microphone"), which matches what cpal returns via `device.name()`.
+///
+/// Returns `None` if no built-in input device is found or if all FFI calls fail.
+pub fn builtin_input_device_name() -> Option<String> {
+    use core::ffi::c_void;
+    use core::ptr::NonNull;
+    use objc2_core_audio::{
+        kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyName,
+        kAudioObjectPropertyScopeInput,
+    };
+    use objc2_core_audio::{
+        kAudioHardwareNoError, kAudioHardwarePropertyDevices, kAudioObjectPropertyElementMain,
+        kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, AudioObjectGetPropertyData,
+        AudioObjectGetPropertyDataSize, AudioObjectPropertyAddress,
+    };
+    use objc2_core_foundation::{CFRetained, CFString, CFStringBuiltInEncodings};
+
+    let sys_obj = kAudioObjectSystemObject as u32;
+
+    // --- Step 1: get the list of all CoreAudio devices. ---
+    let devices_address = AudioObjectPropertyAddress {
+        mSelector: kAudioHardwarePropertyDevices,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut devices_address = devices_address;
+
+    let mut devices_size: u32 = 0;
+    // SAFETY: devices_address and devices_size are valid stack allocations.
+    let status = unsafe {
+        AudioObjectGetPropertyDataSize(
+            sys_obj,
+            NonNull::new_unchecked(&mut devices_address),
+            0,
+            std::ptr::null(),
+            NonNull::new_unchecked(&mut devices_size),
+        )
+    };
+    if status != kAudioHardwareNoError {
+        tracing::warn!("CoreAudio: could not get device list size ({})", status);
+        return None;
+    }
+
+    let device_count = devices_size as usize / std::mem::size_of::<u32>();
+    if device_count == 0 {
+        return None;
+    }
+
+    let mut device_ids: Vec<u32> = vec![0u32; device_count];
+    // SAFETY: device_ids is a valid Vec<u32> with the confirmed byte size.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            sys_obj,
+            NonNull::new_unchecked(&mut devices_address),
+            0,
+            std::ptr::null(),
+            NonNull::new_unchecked(&mut devices_size),
+            NonNull::new_unchecked(device_ids.as_mut_ptr() as *mut c_void),
+        )
+    };
+    if status != kAudioHardwareNoError {
+        tracing::warn!("CoreAudio: could not read device list ({})", status);
+        return None;
+    }
+
+    // --- Step 2: find the first Built-in device with input channels. ---
+    for &dev_id in &device_ids {
+        // Check transport type.
+        let transport = match device_transport_type(dev_id) {
+            Some(t) => t,
+            None => continue,
+        };
+        if transport != transport::BUILT_IN {
+            continue;
+        }
+
+        // Confirm the device has at least one input stream by checking its
+        // stream configuration on the input scope. A Built-in device may be
+        // output-only (e.g. a virtual aggregate output device).
+        let stream_cfg_addr = AudioObjectPropertyAddress {
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioObjectPropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain,
+        };
+        let mut stream_cfg_addr = stream_cfg_addr;
+
+        let mut stream_size: u32 = 0;
+        // SAFETY: stream_cfg_addr and stream_size are valid stack allocations.
+        let stream_status = unsafe {
+            AudioObjectGetPropertyDataSize(
+                dev_id,
+                NonNull::new_unchecked(&mut stream_cfg_addr),
+                0,
+                std::ptr::null(),
+                NonNull::new_unchecked(&mut stream_size),
+            )
+        };
+        if stream_status != kAudioHardwareNoError || stream_size == 0 {
+            // No input streams on this built-in device — skip.
+            continue;
+        }
+
+        // --- Step 3: read the device name as a CFStringRef. ---
+        // kAudioObjectPropertyName returns a CFStringRef (a retained CF object).
+        // The data size is sizeof(CFStringRef) = pointer size.
+        let name_addr = AudioObjectPropertyAddress {
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain,
+        };
+        let mut name_addr = name_addr;
+
+        let mut name_size: u32 = std::mem::size_of::<*const c_void>() as u32;
+        let mut cf_str_ptr: *const CFString = std::ptr::null();
+
+        // SAFETY: cf_str_ptr is a valid pointer-sized allocation; name_addr is a valid stack address.
+        let name_status = unsafe {
+            AudioObjectGetPropertyData(
+                dev_id,
+                NonNull::new_unchecked(&mut name_addr),
+                0,
+                std::ptr::null(),
+                NonNull::new_unchecked(&mut name_size),
+                NonNull::new_unchecked(&mut cf_str_ptr as *mut *const CFString as *mut c_void),
+            )
+        };
+        if name_status != kAudioHardwareNoError || cf_str_ptr.is_null() {
+            tracing::warn!(
+                "CoreAudio: could not read name for built-in device id={} ({})",
+                dev_id,
+                name_status
+            );
+            continue;
+        }
+
+        // Wrap in CFRetained so the CFString is released when it goes out of scope.
+        // SAFETY: cf_str_ptr is a non-null, just-retained CFStringRef from CoreAudio.
+        let cf_string: CFRetained<CFString> =
+            unsafe { CFRetained::from_raw(NonNull::new_unchecked(cf_str_ptr as *mut CFString)) };
+
+        // Extract as a Rust String using CFStringGetCString with UTF-8 encoding.
+        let len = cf_string.length();
+        // Allow 4 bytes per code unit (worst-case UTF-8) plus a null terminator.
+        let buf_len = (len as usize) * 4 + 1;
+        let mut buf: Vec<u8> = vec![0u8; buf_len];
+
+        // SAFETY: buf is a valid allocation of buf_len bytes; EncodingUTF8 is a valid encoding.
+        let ok = unsafe {
+            cf_string.c_string(
+                buf.as_mut_ptr() as *mut i8,
+                buf_len as isize,
+                CFStringBuiltInEncodings::EncodingUTF8.0,
+            )
+        };
+
+        if ok {
+            // Find the null terminator and convert.
+            let c_str = std::ffi::CStr::from_bytes_until_nul(&buf).ok()?;
+            let name = c_str.to_str().ok()?.to_string();
+            tracing::debug!(
+                "CoreAudio: found built-in input device id={} name='{}'",
+                dev_id,
+                name
+            );
+            return Some(name);
+        } else {
+            tracing::warn!(
+                "CoreAudio: CFStringGetCString failed for built-in device id={}",
+                dev_id
+            );
+        }
+    }
+
+    tracing::debug!("CoreAudio: no built-in input device found");
+    None
+}
+
+/// Read a CoreAudio device's display name (`kAudioObjectPropertyName`) as a
+/// Rust `String`. Returns `None` on any FFI failure.
+#[cfg(target_os = "macos")]
+fn read_device_name(dev_id: u32) -> Option<String> {
+    use core::ffi::c_void;
+    use core::ptr::NonNull;
+    use objc2_core_audio::{
+        kAudioHardwareNoError, kAudioObjectPropertyElementMain, kAudioObjectPropertyName,
+        kAudioObjectPropertyScopeGlobal, AudioObjectGetPropertyData, AudioObjectPropertyAddress,
+    };
+    use objc2_core_foundation::{CFRetained, CFString, CFStringBuiltInEncodings};
+
+    let mut name_addr = AudioObjectPropertyAddress {
+        mSelector: kAudioObjectPropertyName,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut name_size: u32 = std::mem::size_of::<*const c_void>() as u32;
+    let mut cf_str_ptr: *const CFString = std::ptr::null();
+
+    // SAFETY: cf_str_ptr is a valid pointer-sized out-param; name_addr is a valid stack address.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            dev_id,
+            NonNull::new_unchecked(&mut name_addr),
+            0,
+            std::ptr::null(),
+            NonNull::new_unchecked(&mut name_size),
+            NonNull::new_unchecked(&mut cf_str_ptr as *mut *const CFString as *mut c_void),
+        )
+    };
+    if status != kAudioHardwareNoError || cf_str_ptr.is_null() {
+        return None;
+    }
+
+    // SAFETY: cf_str_ptr is a non-null, just-retained CFStringRef from CoreAudio.
+    let cf_string: CFRetained<CFString> =
+        unsafe { CFRetained::from_raw(NonNull::new_unchecked(cf_str_ptr as *mut CFString)) };
+
+    let len = cf_string.length();
+    let buf_len = (len as usize) * 4 + 1;
+    let mut buf: Vec<u8> = vec![0u8; buf_len];
+    // SAFETY: buf is a valid allocation of buf_len bytes; EncodingUTF8 is valid.
+    let ok = unsafe {
+        cf_string.c_string(
+            buf.as_mut_ptr() as *mut i8,
+            buf_len as isize,
+            CFStringBuiltInEncodings::EncodingUTF8.0,
+        )
+    };
+    if !ok {
+        return None;
+    }
+    let c_str = std::ffi::CStr::from_bytes_until_nul(&buf).ok()?;
+    Some(c_str.to_str().ok()?.to_string())
+}
+
+/// Return `true` if the CoreAudio input device whose name matches `target_name`
+/// has a Bluetooth (classic or LE) transport type.
+///
+/// Used at stop time to decide whether to release the recording stream
+/// immediately (Bluetooth — must not be pinned in HFP call mode) or keep it warm
+/// (built-in / USB). Matching by NAME — the device we actually recorded from,
+/// stored in `LAST_DEVICE_NAME` — is correct even when the *default* input
+/// differs (e.g. the default is AirPods but recording was redirected to the
+/// built-in mic). Returns `false` on any FFI failure so the warm path is kept.
+pub fn device_name_is_bluetooth(target_name: &str) -> bool {
+    use core::ffi::c_void;
+    use core::ptr::NonNull;
+    use objc2_core_audio::{
+        kAudioHardwareNoError, kAudioHardwarePropertyDevices, kAudioObjectPropertyElementMain,
+        kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, AudioObjectGetPropertyData,
+        AudioObjectGetPropertyDataSize, AudioObjectPropertyAddress,
+    };
+
+    let sys_obj = kAudioObjectSystemObject as u32;
+    let mut devices_address = AudioObjectPropertyAddress {
+        mSelector: kAudioHardwarePropertyDevices,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+
+    let mut devices_size: u32 = 0;
+    // SAFETY: devices_address and devices_size are valid stack allocations.
+    let status = unsafe {
+        AudioObjectGetPropertyDataSize(
+            sys_obj,
+            NonNull::new_unchecked(&mut devices_address),
+            0,
+            std::ptr::null(),
+            NonNull::new_unchecked(&mut devices_size),
+        )
+    };
+    if status != kAudioHardwareNoError {
+        return false;
+    }
+    let device_count = devices_size as usize / std::mem::size_of::<u32>();
+    if device_count == 0 {
+        return false;
+    }
+    let mut device_ids: Vec<u32> = vec![0u32; device_count];
+    // SAFETY: device_ids matches the confirmed byte size.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            sys_obj,
+            NonNull::new_unchecked(&mut devices_address),
+            0,
+            std::ptr::null(),
+            NonNull::new_unchecked(&mut devices_size),
+            NonNull::new_unchecked(device_ids.as_mut_ptr() as *mut c_void),
+        )
+    };
+    if status != kAudioHardwareNoError {
+        return false;
+    }
+
+    for &dev_id in &device_ids {
+        let Some(transport) = device_transport_type(dev_id) else {
+            continue;
+        };
+        if transport != transport::BLUETOOTH && transport != transport::BLUETOOTH_LE {
+            continue;
+        }
+        if read_device_name(dev_id).as_deref() == Some(target_name) {
+            tracing::debug!(
+                "CoreAudio: recording device '{}' has Bluetooth transport",
+                target_name
+            );
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -697,5 +1168,19 @@ mod tests {
         // Out-of-range values map to Unknown
         assert_eq!(MicrophoneStatus::from(99), MicrophoneStatus::Unknown);
         assert_eq!(MicrophoneStatus::from(-1), MicrophoneStatus::Unknown);
+    }
+
+    #[test]
+    fn test_default_input_transport_is_bluetooth() {
+        // Verifies the function completes without panicking on real hardware.
+        // Value depends on the test runner's connected devices — not asserted.
+        let _result = default_input_transport_is_bluetooth();
+    }
+
+    #[test]
+    fn test_builtin_input_device_name() {
+        // Verifies the function completes without panicking.
+        // A macOS machine will typically have a built-in mic; CI may return None.
+        let _name = builtin_input_device_name();
     }
 }

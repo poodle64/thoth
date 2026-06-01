@@ -105,6 +105,9 @@ core-graphics = "0.24"
 # Recording-cue playback via AVAudioPlayer: a mixable CoreAudio client, so the
 # cue doesn't duck the user's music and isn't clipped when cpal opens the mic.
 objc2-avf-audio = { version = "0.3", features = ["AVAudioPlayer"] }
+# CoreAudio transport-type detection for Bluetooth avoidance.
+objc2-core-audio = "0.3"
+objc2-core-foundation = { version = "0.3", features = ["CFString"] }
 
 [features]
 default = ["parakeet", "fluidaudio"]

@@ -149,6 +149,38 @@ pub fn get_recording_device(device_id: Option<&str>) -> Option<cpal::Device> {
         );
     }
 
+    // When falling back to the default, check whether it is a Bluetooth device.
+    // If so, prefer the built-in microphone to avoid forcing the Bluetooth
+    // headset from A2DP (high-quality stereo) into HFP "call" mode, which
+    // degrades the user's music until the app quits. This only triggers when
+    // no device_id is explicitly configured (or the configured one was not found).
+    if crate::platform::default_input_transport_is_bluetooth() {
+        if let Some(builtin_name) = crate::platform::builtin_input_device_name() {
+            let host = cpal::default_host();
+            let builtin_device = host
+                .input_devices()
+                .ok()
+                .and_then(|mut iter| iter.find(|d| get_device_display_name(d) == builtin_name));
+
+            if let Some(device) = builtin_device {
+                tracing::info!(
+                    "Default input is Bluetooth; using built-in mic '{}' to avoid degrading its audio",
+                    builtin_name
+                );
+                return Some(device);
+            } else {
+                tracing::warn!(
+                    "Default input is Bluetooth but built-in mic '{}' not found in cpal list; falling back to Bluetooth default",
+                    builtin_name
+                );
+            }
+        } else {
+            tracing::warn!(
+                "Default input is Bluetooth but no built-in mic found via CoreAudio; falling back to Bluetooth default"
+            );
+        }
+    }
+
     let device = get_default_input_device();
     if let Some(ref d) = device {
         let name = get_device_display_name(d);

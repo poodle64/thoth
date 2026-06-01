@@ -227,16 +227,38 @@ pub fn stop_recording() -> Result<String, String> {
     let config = crate::config::get_config().map_err(|e| format!("Failed to get config: {}", e))?;
     let use_warm = config.audio.warm_stream;
 
+    // Determine whether the device we ACTUALLY recorded from is Bluetooth, by
+    // checking the transport type of the device named in LAST_DEVICE_NAME. This
+    // is correct even when the system default differs from the recording device
+    // — e.g. when the default input is AirPods but recording was redirected to
+    // the built-in mic (get_recording_device's Bluetooth-avoidance). Querying
+    // the *default* input here would wrongly report Bluetooth and cool down the
+    // built-in stream, losing its warm-stream latency benefit.
+    let recording_is_bluetooth = get_last_device_name()
+        .lock()
+        .as_deref()
+        .map(crate::platform::device_name_is_bluetooth)
+        .unwrap_or(false);
+
     let path = if use_warm {
-        // Disarm only — stream stays warm for IDLE_TEARDOWN_SECS.
         let p = recorder.disarm().map_err(|e| e.to_string())?;
 
-        // Bump the generation and schedule an idle teardown.
-        let gen = IDLE_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
-        spawn_idle_teardown(gen);
+        if recording_is_bluetooth {
+            // Never hold a Bluetooth input stream warm — that pins the
+            // device in HFP call mode and degrades the user's audio.
+            tracing::info!("Audio: recording device is Bluetooth — closing stream immediately instead of warming");
+            recorder.cool_down();
+            *get_metering_buffer().lock() = None;
+            // Bump generation so any pre-existing teardown timer aborts.
+            IDLE_GENERATION.fetch_add(1, Ordering::Relaxed);
+        } else {
+            // Built-in or USB device: keep warm for IDLE_TEARDOWN_SECS.
+            let gen = IDLE_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+            spawn_idle_teardown(gen);
+        }
         p
     } else {
-        // Cold path: close the device immediately.
+        // Cold path: close the device immediately regardless of transport.
         recorder.clear_metering_buffer();
         *get_metering_buffer().lock() = None;
         recorder.stop().map_err(|e| e.to_string())?
