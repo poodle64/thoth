@@ -4,7 +4,7 @@ Privacy-first, offline-capable voice transcription application.
 
 ## Dev Environment
 
-- Environment: `thoth` (conda)
+- Environment: `thoth` (micromamba)
 - Framework: Tauri 2.0 (Rust backend, Svelte 5 frontend)
 - Minimum macOS: 14.0 (Sonoma)
 - Dev server: port 1422, HMR: port 1423
