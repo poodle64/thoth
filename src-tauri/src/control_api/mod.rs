@@ -4,9 +4,8 @@
 //! Off by default; opt-in via `integrations.apiEnabled` config.
 
 use axum::{
-    extract::{Path, Request, State},
-    http::{HeaderMap, StatusCode},
-    middleware::{self, Next},
+    extract::{Path, State},
+    http::StatusCode,
     response::{IntoResponse, Response},
     routing::{delete, get, patch, post, put},
     Json, Router,
@@ -16,6 +15,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tower_http::validate_request::ValidateRequestHeaderLayer;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -69,8 +69,6 @@ static SERVER: Mutex<Option<ServerHandle>> = Mutex::const_new(None);
 #[derive(Clone)]
 struct ApiState {
     app_version: String,
-    /// Expected bearer token; compared in constant time (== is fine for local-only use)
-    expected_token: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -384,34 +382,46 @@ async fn handle_get_transcribe_job(Path(id): Path<String>) -> Result<impl IntoRe
 }
 
 // ---------------------------------------------------------------------------
-// Bearer-token auth middleware
+// Bearer-token auth layer
 // ---------------------------------------------------------------------------
 
-/// Extract the raw token from an `Authorization: Bearer <token>` header.
-fn extract_bearer(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-}
-
-/// Middleware that enforces bearer-token authentication.
+/// Build a [`ValidateRequestHeaderLayer`] that enforces bearer-token auth,
+/// returning `{"error":"Unauthorized"}` with a 401 status on failure.
 ///
-/// Compared with `ValidateRequestHeaderLayer::bearer` (removed in tower-http 0.6),
-/// this uses axum's built-in middleware system, which has no additional deps.
-async fn auth_middleware(
-    State(state): State<Arc<ApiState>>,
-    headers: HeaderMap,
-    request: Request,
-    next: Next,
-) -> Response {
-    match extract_bearer(&headers) {
-        Some(tok) if tok == state.expected_token => next.run(request).await,
-        _ => {
-            let body = serde_json::json!({ "error": "Unauthorized" });
-            (StatusCode::UNAUTHORIZED, Json(body)).into_response()
+/// Uses `ValidateRequestHeaderLayer::custom` with a closure so the JSON error
+/// body is preserved (the `accept` variant returns a bare status only).
+fn bearer_auth_layer(
+    token: String,
+) -> ValidateRequestHeaderLayer<
+    impl tower_http::validate_request::ValidateRequest<
+            axum::body::Body,
+            ResponseBody = axum::body::Body,
+        > + Clone,
+> {
+    ValidateRequestHeaderLayer::custom(move |req: &mut axum::http::Request<axum::body::Body>| {
+        let ok = req
+            .headers()
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.strip_prefix("Bearer "))
+            .is_some_and(|t| t == token);
+
+        if ok {
+            Ok(())
+        } else {
+            let body_bytes =
+                serde_json::to_vec(&serde_json::json!({ "error": "Unauthorized" }))
+                    .unwrap_or_default();
+            let body = axum::body::Body::from(body_bytes);
+            let mut res = axum::http::Response::new(body);
+            *res.status_mut() = StatusCode::UNAUTHORIZED;
+            res.headers_mut().insert(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static("application/json"),
+            );
+            Err(res)
         }
-    }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -419,10 +429,9 @@ async fn auth_middleware(
 // ---------------------------------------------------------------------------
 
 fn build_router(token: String, app_version: String, mcp_enabled: bool) -> Router {
-    let state = Arc::new(ApiState {
-        app_version,
-        expected_token: token,
-    });
+    let state = Arc::new(ApiState { app_version });
+
+    let auth = bearer_auth_layer(token.clone());
 
     let mut router = Router::new()
         .route("/health", get(handle_health))
@@ -441,15 +450,15 @@ fn build_router(token: String, app_version: String, mcp_enabled: bool) -> Router
         .route("/transcriptions/{id}", get(handle_get_transcription))
         .route("/transcribe", post(handle_post_transcribe))
         .route("/transcribe/{id}", get(handle_get_transcribe_job))
-        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
-        .with_state(state.clone());
+        .layer(auth)
+        .with_state(state);
 
     // Mount the bundled MCP server at /mcp when enabled, behind the same bearer auth.
     if mcp_enabled {
         let mcp_service = crate::mcp_server::build_service();
         let mcp_router = Router::new()
             .nest_service("/mcp", mcp_service)
-            .layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
+            .layer(bearer_auth_layer(token));
         router = router.merge(mcp_router);
         tracing::info!("MCP server mounted at /mcp");
     }

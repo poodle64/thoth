@@ -5,6 +5,7 @@
 
 use crate::database;
 use chrono::{DateTime, Utc};
+use csv::WriterBuilder;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;
@@ -248,47 +249,89 @@ fn export_json(records: &[TranscriptionRecord], path: &Path) -> Result<(), Strin
 }
 
 /// Exports records to CSV format.
+///
+/// Uses the `csv` crate for RFC-4180-compliant quoting. Free-text string fields
+/// (transcription text, raw text, model names, enhancement prompt) are
+/// formula-injection sanitised before writing; numeric, boolean, and timestamp
+/// columns are written verbatim.
 fn export_csv(records: &[TranscriptionRecord], path: &Path) -> Result<(), String> {
-    let mut file = File::create(path).map_err(|e| {
+    let file = File::create(path).map_err(|e| {
         tracing::error!("Failed to create export file: {}", e);
         format!("Failed to create file: {}", e)
     })?;
 
-    // Write CSV header
-    writeln!(
-        file,
-        "id,text,raw_text,duration_seconds,created_at,audio_path,is_enhanced,enhancement_prompt,transcription_model_name,transcription_duration_seconds,enhancement_model_name,enhancement_duration_seconds"
-    )
+    let mut wtr = WriterBuilder::new().from_writer(file);
+
+    // Header — exact column names preserved for downstream compatibility.
+    wtr.write_record(&[
+        "id",
+        "text",
+        "raw_text",
+        "duration_seconds",
+        "created_at",
+        "audio_path",
+        "is_enhanced",
+        "enhancement_prompt",
+        "transcription_model_name",
+        "transcription_duration_seconds",
+        "enhancement_model_name",
+        "enhancement_duration_seconds",
+    ])
     .map_err(|e| format!("Failed to write CSV header: {}", e))?;
 
-    // Write records
     for record in records {
-        let line = format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{}",
-            escape_csv(&record.id),
-            escape_csv(&record.text),
-            escape_csv(&record.raw_text.clone().unwrap_or_default()),
-            record
+        wtr.write_record(&[
+            // Identifier and path fields: not free-text, no injection guard needed.
+            record.id.as_str(),
+            // Free-text fields dictated by the user: apply injection guard.
+            &sanitize_csv_field(&record.text),
+            &sanitize_csv_field(record.raw_text.as_deref().unwrap_or("")),
+            // Numeric column: written as a plain string so empty stays empty.
+            &record
                 .duration_seconds
-                .map_or(String::new(), |d| d.to_string()),
-            escape_csv(&record.created_at),
-            escape_csv(&record.audio_path.clone().unwrap_or_default()),
-            record.is_enhanced,
-            escape_csv(&record.enhancement_prompt.clone().unwrap_or_default()),
-            escape_csv(&record.transcription_model_name.clone().unwrap_or_default()),
-            record
+                .map_or_else(String::new, |d| d.to_string()),
+            // Timestamp: structured, not user-controlled.
+            record.created_at.as_str(),
+            // Filesystem path: structured, not user-controlled.
+            record.audio_path.as_deref().unwrap_or(""),
+            // Boolean: always "true"/"false", cannot be a formula.
+            &record.is_enhanced.to_string(),
+            // Free-text fields.
+            &sanitize_csv_field(record.enhancement_prompt.as_deref().unwrap_or("")),
+            &sanitize_csv_field(record.transcription_model_name.as_deref().unwrap_or("")),
+            // Numeric columns.
+            &record
                 .transcription_duration_seconds
-                .map_or(String::new(), |d| d.to_string()),
-            escape_csv(&record.enhancement_model_name.clone().unwrap_or_default()),
-            record
+                .map_or_else(String::new, |d| d.to_string()),
+            // Free-text field.
+            &sanitize_csv_field(record.enhancement_model_name.as_deref().unwrap_or("")),
+            // Numeric column.
+            &record
                 .enhancement_duration_seconds
-                .map_or(String::new(), |d| d.to_string()),
-        );
-        writeln!(file, "{}", line).map_err(|e| format!("Failed to write CSV row: {}", e))?;
+                .map_or_else(String::new, |d| d.to_string()),
+        ])
+        .map_err(|e| format!("Failed to write CSV row: {}", e))?;
     }
+
+    wtr.flush()
+        .map_err(|e| format!("Failed to flush CSV writer: {}", e))?;
 
     tracing::info!("Exported {} records to CSV: {:?}", records.len(), path);
     Ok(())
+}
+
+/// Prefixes a string cell with a single apostrophe if its first character is a
+/// spreadsheet formula trigger (`=`, `+`, `-`, `@`, tab, or carriage-return).
+///
+/// This is the standard neutralisation technique (CWE-1236) that causes
+/// Excel, Google Sheets, and LibreOffice Calc to treat the value as text
+/// rather than evaluating it as a formula. Applied only to free-text fields
+/// that users dictate; numeric and structured fields are left untouched.
+pub(crate) fn sanitize_csv_field(s: &str) -> String {
+    match s.chars().next() {
+        Some('=' | '+' | '-' | '@') | Some('\t') | Some('\r') => format!("'{}", s),
+        _ => s.to_string(),
+    }
 }
 
 /// Exports records to plain text format.
@@ -322,15 +365,6 @@ fn export_txt(records: &[TranscriptionRecord], path: &Path) -> Result<(), String
 
     tracing::info!("Exported {} records to TXT: {:?}", records.len(), path);
     Ok(())
-}
-
-/// Escapes a string for CSV format (handles quotes and commas).
-fn escape_csv(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
 }
 
 // =============================================================================
@@ -442,64 +476,144 @@ mod tests {
     use tempfile::TempDir;
 
     // =========================================================================
-    // CSV escape function tests
+    // sanitize_csv_field tests
     // =========================================================================
 
     #[test]
-    fn test_escape_csv_simple() {
-        assert_eq!(escape_csv("hello"), "hello");
+    fn test_sanitize_csv_field_plain_text_unchanged() {
+        assert_eq!(sanitize_csv_field("hello world"), "hello world");
     }
 
     #[test]
-    fn test_escape_csv_with_comma() {
-        assert_eq!(escape_csv("hello, world"), "\"hello, world\"");
+    fn test_sanitize_csv_field_empty_unchanged() {
+        assert_eq!(sanitize_csv_field(""), "");
     }
 
     #[test]
-    fn test_escape_csv_with_quotes() {
-        assert_eq!(escape_csv("say \"hello\""), "\"say \"\"hello\"\"\"");
+    fn test_sanitize_csv_field_leading_equals_prefixed() {
+        // Formula-injection guard: = triggers an apostrophe prefix.
+        assert_eq!(sanitize_csv_field("=SUM(A1:A2)"), "'=SUM(A1:A2)");
     }
 
     #[test]
-    fn test_escape_csv_with_newline() {
-        assert_eq!(escape_csv("line1\nline2"), "\"line1\nline2\"");
+    fn test_sanitize_csv_field_leading_plus_prefixed() {
+        assert_eq!(sanitize_csv_field("+1300"), "'+1300");
     }
 
     #[test]
-    fn test_escape_csv_with_carriage_return() {
-        assert_eq!(escape_csv("line1\rline2"), "\"line1\rline2\"");
+    fn test_sanitize_csv_field_leading_minus_prefixed() {
+        assert_eq!(sanitize_csv_field("-CMD"), "'-CMD");
     }
 
     #[test]
-    fn test_escape_csv_empty_string() {
-        assert_eq!(escape_csv(""), "");
+    fn test_sanitize_csv_field_leading_at_prefixed() {
+        assert_eq!(sanitize_csv_field("@SUM"), "'@SUM");
     }
 
     #[test]
-    fn test_escape_csv_multiple_special_chars() {
-        // Contains comma, quote, and newline
-        assert_eq!(
-            escape_csv("hello, \"world\"\nnew line"),
-            "\"hello, \"\"world\"\"\nnew line\""
-        );
+    fn test_sanitize_csv_field_leading_tab_prefixed() {
+        assert_eq!(sanitize_csv_field("\tSUM"), "'\tSUM");
     }
 
     #[test]
-    fn test_escape_csv_only_quotes() {
-        assert_eq!(escape_csv("\"\""), "\"\"\"\"\"\"");
+    fn test_sanitize_csv_field_leading_cr_prefixed() {
+        assert_eq!(sanitize_csv_field("\rSUM"), "'\rSUM");
     }
 
     #[test]
-    fn test_escape_csv_whitespace() {
-        // Whitespace alone doesn't need escaping
-        assert_eq!(escape_csv("hello world"), "hello world");
-        assert_eq!(escape_csv("  hello  "), "  hello  ");
+    fn test_sanitize_csv_field_equals_not_at_start_unchanged() {
+        // Only the first character is checked; mid-string = is fine.
+        assert_eq!(sanitize_csv_field("a=b"), "a=b");
     }
 
     #[test]
-    fn test_escape_csv_tabs() {
-        // Tabs don't require escaping in standard CSV
-        assert_eq!(escape_csv("hello\tworld"), "hello\tworld");
+    fn test_sanitize_csv_field_whitespace_unchanged() {
+        assert_eq!(sanitize_csv_field("  hello  "), "  hello  ");
+    }
+
+    // =========================================================================
+    // Formula-injection integration tests (full CSV round-trip)
+    // =========================================================================
+
+    /// Parses the CSV content produced by export_csv and returns a Vec of rows
+    /// (each row is a Vec of String fields), skipping the header row.
+    fn parse_csv_rows(content: &str) -> Vec<Vec<String>> {
+        let mut rdr = csv::Reader::from_reader(content.as_bytes());
+        rdr.records()
+            .map(|r| r.unwrap().iter().map(|f| f.to_string()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn test_export_csv_formula_injection_neutralised() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("injection.csv");
+
+        let records = vec![TranscriptionRecord {
+            id: "id3".to_string(),
+            text: "=SUM(A1:A2)".to_string(),
+            raw_text: Some("+malicious".to_string()),
+            duration_seconds: Some(2.0),
+            created_at: "2024-01-15T10:40:00".to_string(),
+            audio_path: None,
+            is_enhanced: false,
+            enhancement_prompt: Some("@BAD".to_string()),
+            transcription_model_name: Some("-model".to_string()),
+            transcription_duration_seconds: None,
+            enhancement_model_name: None,
+            enhancement_duration_seconds: None,
+        }];
+
+        export_csv(&records, &path).expect("Export should succeed");
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let rows = parse_csv_rows(&content);
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+
+        // text column (index 1): formula must be prefixed.
+        assert_eq!(row[1], "'=SUM(A1:A2)");
+        // raw_text column (index 2): + prefix must be neutralised.
+        assert_eq!(row[2], "'+malicious");
+        // enhancement_prompt column (index 7): @ prefix must be neutralised.
+        assert_eq!(row[7], "'@BAD");
+        // transcription_model_name column (index 8): - prefix must be neutralised.
+        assert_eq!(row[8], "'-model");
+    }
+
+    #[test]
+    fn test_export_csv_numeric_column_not_prefixed() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("numeric.csv");
+
+        let records = vec![TranscriptionRecord {
+            id: "id4".to_string(),
+            text: "normal".to_string(),
+            raw_text: None,
+            duration_seconds: Some(5.5),
+            created_at: "2024-01-15T10:45:00".to_string(),
+            audio_path: None,
+            is_enhanced: false,
+            enhancement_prompt: None,
+            transcription_model_name: None,
+            transcription_duration_seconds: Some(1.0),
+            enhancement_model_name: None,
+            enhancement_duration_seconds: Some(0.5),
+        }];
+
+        export_csv(&records, &path).expect("Export should succeed");
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let rows = parse_csv_rows(&content);
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+
+        // duration_seconds (index 3): must be a plain number, not apostrophe-prefixed.
+        assert_eq!(row[3], "5.5");
+        // transcription_duration_seconds (index 9).
+        assert_eq!(row[9], "1");
+        // enhancement_duration_seconds (index 11).
+        assert_eq!(row[11], "0.5");
     }
 
     // =========================================================================

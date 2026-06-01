@@ -8,6 +8,7 @@
   import * as Card from '$components/ui/card';
   import * as AlertDialog from '$components/ui/alert-dialog';
   import * as Alert from '$components/ui/alert';
+  import { formatBytes } from '$lib/utils/format';
 
   interface ModelInfo {
     id: string;
@@ -215,13 +216,6 @@
     } finally {
       initialisingModelId = null;
     }
-  }
-
-  function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   }
 
   function isDownloading(modelId?: string): boolean {

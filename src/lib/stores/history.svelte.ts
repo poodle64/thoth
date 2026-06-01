@@ -4,6 +4,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { formatDuration } from '$lib/utils/format';
 
 /** Transcription record structure matching SQLite backend */
 export interface TranscriptionRecord {
@@ -123,16 +124,6 @@ function createHistoryStore() {
         year: 'numeric',
       });
     }
-  }
-
-  /** Format duration in seconds to human-readable string */
-  function formatDuration(seconds: number): string {
-    if (seconds < 60) {
-      return `${Math.round(seconds)}s`;
-    }
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = Math.round(seconds % 60);
-    return `${minutes}m ${remainingSeconds}s`;
   }
 
   /** Load initial records from backend */

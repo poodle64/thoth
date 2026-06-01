@@ -12,6 +12,7 @@
   import * as Alert from '$components/ui/alert';
   import * as AlertDialog from '$components/ui/alert-dialog';
   import LoadingState from '$components/common/LoadingState.svelte';
+  import { formatBytes } from '$lib/utils/format';
 
   interface StorageUsage {
     modelsBytes: number;
@@ -43,14 +44,6 @@
     } finally {
       isLoading = false;
     }
-  }
-
-  function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   }
 
   /** Calculate percentage of total for the bar chart */

@@ -142,13 +142,12 @@ impl WhisperTranscriptionService {
         let (trim_start, trim_end) = crate::audio::vad::trim_silence(&samples, sample_rate);
         let samples = samples[trim_start..trim_end].to_vec();
 
-        // Resample if needed
-        let samples = if sample_rate != 16000 {
-            tracing::info!("Resampling from {}Hz to 16000Hz", sample_rate);
-            resample_audio(&samples, sample_rate, 16000)
-        } else {
-            samples
-        };
+        if sample_rate != 16000 {
+            tracing::warn!(
+                "Audio sample rate is {}Hz, expected 16000Hz. Results may be affected.",
+                sample_rate
+            );
+        }
 
         // Pad with silence so the model can initialise before the first word
         // and finalise after the last word. Whisper processes in 30-second
@@ -271,35 +270,6 @@ fn load_wav_samples(path: &Path) -> Result<(Vec<f32>, u32)> {
     Ok((mono_samples, sample_rate))
 }
 
-/// Simple linear resampling (for basic sample rate conversion)
-fn resample_audio(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
-    if from_rate == to_rate {
-        return samples.to_vec();
-    }
-
-    let ratio = from_rate as f64 / to_rate as f64;
-    let new_len = (samples.len() as f64 / ratio) as usize;
-    let mut output = Vec::with_capacity(new_len);
-
-    for i in 0..new_len {
-        let src_idx = i as f64 * ratio;
-        let idx = src_idx as usize;
-        let frac = src_idx - idx as f64;
-
-        let sample = if idx + 1 < samples.len() {
-            samples[idx] * (1.0 - frac as f32) + samples[idx + 1] * frac as f32
-        } else if idx < samples.len() {
-            samples[idx]
-        } else {
-            0.0
-        };
-
-        output.push(sample);
-    }
-
-    output
-}
-
 /// Get the default whisper model directory path
 pub fn get_whisper_model_directory() -> PathBuf {
     dirs::home_dir()
@@ -337,12 +307,5 @@ mod tests {
     fn test_get_whisper_model_path() {
         let path = get_whisper_model_path("ggml-large-v3-turbo");
         assert!(path.to_string_lossy().contains("ggml-large-v3-turbo.bin"));
-    }
-
-    #[test]
-    fn test_resample_same_rate() {
-        let samples = vec![1.0, 2.0, 3.0, 4.0];
-        let result = resample_audio(&samples, 16000, 16000);
-        assert_eq!(result, samples);
     }
 }

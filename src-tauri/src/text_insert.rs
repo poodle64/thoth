@@ -201,10 +201,15 @@ impl TextInsertService {
 
     #[cfg(target_os = "macos")]
     fn paste_macos(&self) -> Result<(), String> {
-        // Use AppleScript for paste because enigo requires main thread access on macOS.
-        // When called from async context (tokio worker thread), enigo crashes with
-        // "dispatch_assert_queue_fail" because macOS input APIs require main thread.
-        self.paste_applescript()
+        // Synthesise Cmd+V with a Core Graphics event, the standard way macOS
+        // dictation/paste tools inject a paste. Replaces the previous approach of
+        // shelling out to `osascript`, which: (1) required a SECOND TCC grant
+        // (Automation, to drive System Events) on top of Accessibility; (2) forked
+        // an interpreter on the hot paste path. `CGEventPost` is callable from any
+        // thread (it does not touch the main-thread-only AppKit input machinery),
+        // so it also resolves the off-main-thread enigo crash that drove the
+        // osascript workaround — with only the Accessibility permission.
+        post_paste_cgevent()
     }
 
     #[cfg(target_os = "macos")]
@@ -240,27 +245,6 @@ impl TextInsertService {
     #[cfg(target_os = "macos")]
     fn type_char_applescript(&self, c: char) -> Result<(), String> {
         self.type_text_applescript(&c.to_string())
-    }
-
-    #[cfg(target_os = "macos")]
-    fn paste_applescript(&self) -> Result<(), String> {
-        use std::process::Command;
-
-        let script = "tell application \"System Events\" to keystroke \"v\" using command down";
-
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg(script)
-            .output()
-            .map_err(|e| format!("Failed to execute AppleScript: {}", e))?;
-
-        if output.status.success() {
-            debug!("Pasted via AppleScript");
-            Ok(())
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(format!("AppleScript paste failed: {}", stderr))
-        }
     }
 
     // ========================================================================
@@ -399,6 +383,37 @@ impl Default for TextInsertService {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Synthesise a Cmd+V keystroke via Core Graphics to paste the clipboard.
+///
+/// Posts a key-down (V with the Command flag) followed by a key-up to the HID
+/// event tap. Uses an event source in `HIDSystemState` so the synthetic event
+/// behaves like real hardware input. Requires only the Accessibility permission
+/// and is safe to call from any thread.
+#[cfg(target_os = "macos")]
+fn post_paste_cgevent() -> Result<(), String> {
+    use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+    /// ANSI virtual key code for the V key.
+    const KEY_V: u16 = 0x09;
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| "Failed to create CGEventSource for paste".to_string())?;
+
+    let key_down = CGEvent::new_keyboard_event(source.clone(), KEY_V, true)
+        .map_err(|_| "Failed to create key-down event for paste".to_string())?;
+    key_down.set_flags(CGEventFlags::CGEventFlagCommand);
+    key_down.post(CGEventTapLocation::HID);
+
+    let key_up = CGEvent::new_keyboard_event(source, KEY_V, false)
+        .map_err(|_| "Failed to create key-up event for paste".to_string())?;
+    key_up.set_flags(CGEventFlags::CGEventFlagCommand);
+    key_up.post(CGEventTapLocation::HID);
+
+    debug!("Pasted via CGEvent Cmd+V");
+    Ok(())
 }
 
 /// Escape special characters for AppleScript string.

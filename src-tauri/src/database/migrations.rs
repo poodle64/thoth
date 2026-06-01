@@ -44,16 +44,22 @@ const MIGRATIONS: &[Migration] = &[
 ];
 
 /// Returns the current schema version from the database.
+///
+/// Returns 0 when the migrations table does not yet exist (fresh database).
+/// Propagates any other query error so callers can fail fast rather than
+/// silently re-running non-idempotent migrations.
 fn get_current_version(conn: &Connection) -> Result<i32, DatabaseError> {
-    let version: i32 = conn
-        .query_row(
-            "SELECT COALESCE(MAX(version), 0) FROM migrations",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap_or(0);
-
-    Ok(version)
+    match conn.query_row(
+        "SELECT COALESCE(MAX(version), 0) FROM migrations",
+        [],
+        |row| row.get::<_, i32>(0),
+    ) {
+        Ok(version) => Ok(version),
+        Err(rusqlite::Error::SqliteFailure(_, Some(ref msg))) if msg.contains("no such table") => {
+            Ok(0)
+        }
+        Err(e) => Err(DatabaseError::from(e)),
+    }
 }
 
 /// Records a migration as applied.

@@ -70,6 +70,9 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 # Keyboard capture (for shortcut recording)
 device_query = "2.1"
 
+# CSV export
+csv = "1"
+
 # Utilities
 anyhow = "1.0"
 thiserror = "2.0"
