@@ -123,9 +123,15 @@ export async function checkForUpdate(): Promise<void> {
       updaterState.update = update;
       updaterState.updateVersion = update.version;
 
+      // Persist until acted on, but always dismissible: "Update Now" installs,
+      // "Later" (cancel) closes it. Without an explicit dismiss path an
+      // Infinity-duration toast can only be cleared by updating, which is the
+      // toast-era version of the old banner being impossible to get rid of.
       toast.info(`Update available: v${update.version}`, {
+        description: `Version ${update.version} is ready to install`,
         duration: Infinity,
         action: { label: 'Update Now', onClick: () => void downloadAndInstall() },
+        cancel: { label: 'Later', onClick: () => {} },
       });
     } else {
       updaterState.state = 'up-to-date';

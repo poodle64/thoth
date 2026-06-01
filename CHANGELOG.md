@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.1] - 2026-05-31
+
+### Fixed
+
+- Transcription no longer drops the final words of long recordings (#46). On recordings over ~20 seconds the silence trimmer used voice-activity detection to cut both the leading and trailing silence; on quiet input (e.g. a lapel mic) it regularly misjudged the trailing-off end of a sentence as silence and sliced real words away before either transcription engine saw them. This was why both backends truncated at the identical word. The trimmer now removes leading silence only and always keeps the audio through to the very end.
+- The recording start tone ("bing") now plays reliably (#58). It was loaded by-reference, so NSSound deferred reading the audio until play time; fired at the busiest moment of a start (keypress, indicator show, window positioning and IPC at once), that lazy load frequently lost the race and the tone silently failed. The stop tone ("bong") plays at a quiet moment and was always reliable. The audio is now loaded eagerly so playback starts immediately.
+- The "update available" notification can now be dismissed (#67, #52). The toast was shown with infinite duration but only an "Update Now" action, so it could not be cleared without installing the update. It now has a "Later" button that dismisses it, plus a description line. (The old full-width banner with overlapping buttons was already replaced by this corner toast in 2026.6.0; this completes the dismiss-ability the toast was missing.)
+
 ## [2026.6.0] - 2026-06-01
 
 ### Added
