@@ -547,20 +547,6 @@ pub(crate) fn maybe_play_start_indicator<R: Runtime>(app: &AppHandle<R>) {
         if let Err(e) = show_indicator_instant(app) {
             tracing::warn!("Failed to show recording indicator: {}", e);
         }
-
-        // Open the audio input device BEFORE playing the tone. On a cold start
-        // (first press after the ~45s warm-stream teardown) the device would
-        // otherwise be opened ~80ms later on the IPC-driven start path, while
-        // the ~0.5s tone is still playing; CoreAudio reconfiguring the shared
-        // session to admit the input stream clips the tone audibly ("cut in
-        // half"). Warming first lets the session settle so the tone plays clean.
-        // Idempotent and instant when the stream is already warm, so it adds no
-        // latency on the common warm path; on a cold start it just moves the
-        // unavoidable device-open a few milliseconds earlier.
-        if let Err(e) = crate::audio::warm_up_recording() {
-            tracing::warn!("Pre-warm before start tone failed: {}", e);
-        }
-
         crate::sound::play_sound(crate::sound::SoundEvent::RecordingStart);
     }
 }
