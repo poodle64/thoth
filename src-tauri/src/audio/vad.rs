@@ -2,7 +2,9 @@
 //!
 //! This module provides VAD functionality using webrtc-vad to detect speech
 //! boundaries. The primary export is `trim_silence`, used by the transcription
-//! pipeline to strip leading/trailing silence from every recording.
+//! pipeline to strip *leading* silence (dead air before the user starts
+//! talking) from long recordings. The trailing edge is never trimmed — see
+//! `trim_silence` for why.
 
 use serde::{Deserialize, Serialize};
 use webrtc_vad::{SampleRate, Vad, VadMode};
@@ -42,20 +44,30 @@ impl VadFrameDuration {
 /// 20 seconds × 16 000 Hz = 320 000 samples.
 const TRIM_MIN_SAMPLES_16KHZ: usize = 320_000;
 
-/// Safety margin (in seconds) kept around detected speech boundaries so we
-/// don't clip into the start or end of an utterance. 500 ms gives enough
-/// room for trailing consonants and natural speech deceleration.
+/// Safety margin (in seconds) kept before the first detected speech frame so we
+/// don't clip into the start of an utterance. 500 ms gives enough room for a
+/// soft onset.
 const TRIM_MARGIN_SECS: f32 = 0.5;
 
-/// Trim leading and trailing silence from audio samples using VAD.
+/// Trim leading silence from audio samples using VAD.
 ///
 /// For recordings shorter than ~20 seconds (at the given sample rate) the
 /// original slice is returned unchanged because the VAD overhead is not worth
 /// the saving.
 ///
 /// The function runs a single-pass VAD scan over the audio, locates the first
-/// and last speech frames, and returns a sub-slice that keeps a safety margin
-/// (500 ms) around the detected speech boundaries.
+/// speech frame, and returns a sub-slice that starts a safety margin (500 ms)
+/// before it. **The trailing edge is never trimmed** — `end` is always
+/// `samples.len()`.
+///
+/// Trailing trimming used to clip real words off the end of long dictations:
+/// WebRTC VAD in aggressive mode regularly tags the trailing-off end of a
+/// sentence (especially on a quiet lapel mic) as non-speech, so the detected
+/// "last speech frame" landed before the true end and the final words were
+/// sliced away before the decoder ever saw them. This was the shared root cause
+/// behind both backends truncating at the identical word (#46). Leading silence
+/// is where the latency saving actually lives; keeping the whole tail costs a
+/// little decode time on a long clip and never loses a word.
 ///
 /// # Arguments
 /// * `samples` — mono f32 audio samples normalised to [-1.0, 1.0]
@@ -63,8 +75,9 @@ const TRIM_MARGIN_SECS: f32 = 0.5;
 ///
 /// # Returns
 /// A `(start, end)` range into `samples`. Callers should use `samples[start..end]`.
-/// If no speech is detected the full range `(0, samples.len())` is returned so
-/// the downstream silence check can decide what to do.
+/// `end` is always `samples.len()`. If no speech is detected the full range
+/// `(0, samples.len())` is returned so the downstream silence check can decide
+/// what to do.
 pub fn trim_silence(samples: &[f32], sample_rate: u32) -> (usize, usize) {
     let total = samples.len();
 
@@ -95,12 +108,12 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> (usize, usize) {
     let mut vad = Vad::new_with_rate_and_mode(SampleRate::Rate16kHz, VadMode::Aggressive);
 
     let mut first_speech_frame: Option<usize> = None;
-    let mut last_speech_frame: Option<usize> = None;
 
     let mut frame_idx: usize = 0;
     let mut pos: usize = 0;
 
-    while pos + actual_frame_size <= total {
+    // We only need the first speech frame, so stop scanning once we've found it.
+    while pos + actual_frame_size <= total && first_speech_frame.is_none() {
         let frame_i16: Vec<i16> = if need_resample {
             // Cheap linear resample of this frame to 16 kHz
             (0..frame_size)
@@ -118,13 +131,8 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> (usize, usize) {
                 .collect()
         };
 
-        if let Ok(is_speech) = vad.is_voice_segment(&frame_i16) {
-            if is_speech {
-                if first_speech_frame.is_none() {
-                    first_speech_frame = Some(frame_idx);
-                }
-                last_speech_frame = Some(frame_idx);
-            }
+        if let Ok(true) = vad.is_voice_segment(&frame_i16) {
+            first_speech_frame = Some(frame_idx);
         }
 
         frame_idx += 1;
@@ -133,25 +141,22 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32) -> (usize, usize) {
 
     // No speech found — return the full range so downstream silence detection
     // can handle it (returning an empty range would silently discard audio).
-    let (first, last) = match (first_speech_frame, last_speech_frame) {
-        (Some(f), Some(l)) => (f, l),
-        _ => return (0, total),
+    let Some(first) = first_speech_frame else {
+        return (0, total);
     };
 
     let margin_samples = (TRIM_MARGIN_SECS * sample_rate as f32) as usize;
 
     let start = (first * actual_frame_size).saturating_sub(margin_samples);
-    // End is one frame *past* the last speech frame, plus margin
-    let end = ((last + 1) * actual_frame_size + margin_samples).min(total);
+    // The trailing edge is never trimmed — keep every sample through to the end.
+    let end = total;
 
-    let trimmed_duration = (end - start) as f32 / sample_rate as f32;
     let original_duration = total as f32 / sample_rate as f32;
     tracing::info!(
-        "VAD silence trim: {:.1}s → {:.1}s (removed {:.1}s leading + {:.1}s trailing)",
+        "VAD leading-silence trim: {:.1}s → {:.1}s (removed {:.1}s leading; tail kept in full)",
         original_duration,
-        trimmed_duration,
+        (end - start) as f32 / sample_rate as f32,
         start as f32 / sample_rate as f32,
-        (total - end) as f32 / sample_rate as f32,
     );
 
     (start, end)
@@ -188,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn test_trim_silence_trims_leading_and_trailing() {
+    fn test_trim_silence_trims_leading_only_and_keeps_tail() {
         // 30 seconds at 16 kHz: silence, then speech-like noise, then silence
         let sample_rate = 16_000u32;
         let total_samples = 30 * sample_rate as usize; // 480_000
@@ -205,21 +210,18 @@ mod tests {
 
         let (start, end) = trim_silence(&samples, sample_rate);
 
-        // The trimmed region should be smaller than the original
+        // Leading silence is trimmed...
         assert!(start > 0, "Should trim leading silence");
-        assert!(end < total_samples, "Should trim trailing silence");
+        // ...but the trailing edge is always kept in full, so no real trailing
+        // word can ever be sliced away (#46).
+        assert_eq!(end, total_samples, "Trailing edge must never be trimmed");
 
-        // The speech region (10s-20s) should be fully contained
+        // The trim must start at or before the speech onset (allowing the margin).
         let margin = (TRIM_MARGIN_SECS * sample_rate as f32) as usize;
         assert!(
             start <= speech_start + margin,
             "Trim start ({start}) should be at or before speech start + margin ({})",
             speech_start + margin
-        );
-        assert!(
-            end >= speech_end.saturating_sub(margin),
-            "Trim end ({end}) should be at or after speech end - margin ({})",
-            speech_end.saturating_sub(margin)
         );
     }
 

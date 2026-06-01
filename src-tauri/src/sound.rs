@@ -70,6 +70,16 @@ pub fn play_sound(event: SoundEvent) {
 }
 
 /// Play a macOS sound file using NSSound (instant, no subprocess overhead).
+///
+/// The audio is loaded eagerly into memory (`byReference: false`). With
+/// `byReference: true` NSSound keeps only a reference to the file and loads the
+/// samples lazily at play time; when a recording cue fired at the busiest moment
+/// (keypress + indicator show + window positioning + IPC all at once) that lazy
+/// load frequently lost the race and the sound silently failed to start. The
+/// start tone ("bing") was the intermittent victim because it always fires in
+/// that busy window; the stop tone ("bong") plays at a quiet moment and was
+/// always reliable. Loading eagerly makes `play()` a synchronous in-memory
+/// trigger that can't lose that race (#58).
 #[cfg(target_os = "macos")]
 fn play_macos_sound(path: &str) {
     use objc2::AnyThread;
@@ -77,9 +87,11 @@ fn play_macos_sound(path: &str) {
     use objc2_foundation::NSString;
 
     let ns_path = NSString::from_str(path);
-    let sound = NSSound::initWithContentsOfFile_byReference(NSSound::alloc(), &ns_path, true);
+    let sound = NSSound::initWithContentsOfFile_byReference(NSSound::alloc(), &ns_path, false);
     match sound {
         Some(s) => {
+            // A fresh instance per call, so there is never a "already playing"
+            // instance to interrupt; eager loading means play() starts at once.
             s.play();
             // NSSound plays asynchronously. We intentionally leak the reference
             // so the sound finishes playing. The OS reclaims it when playback ends.

@@ -124,7 +124,7 @@ impl TranscriptionService {
             );
         }
 
-        // Trim leading/trailing silence for long recordings
+        // Trim leading silence for long recordings (the tail is always kept).
         let (trim_start, trim_end) = crate::audio::vad::trim_silence(&samples, sample_rate);
         let samples = samples[trim_start..trim_end].to_vec();
 
