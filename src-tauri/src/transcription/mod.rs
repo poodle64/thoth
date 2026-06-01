@@ -3,6 +3,7 @@
 //! Primary: whisper.cpp with Metal GPU acceleration (fastest)
 //! Fallback: Sherpa-ONNX with Parakeet models (cross-platform)
 
+mod au_spelling_map;
 pub mod download;
 pub mod filter;
 #[cfg(all(target_os = "macos", feature = "fluidaudio"))]

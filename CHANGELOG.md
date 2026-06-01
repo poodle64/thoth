@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.2] - 2026-05-31
+
+### Fixed
+
+- Spoken-number conversion now reads digit sequences correctly. Saying "one two three" produces "123" (it previously summed the words to "6"); a run of two or more single digits — including "oh" and "zero", as in "four oh four" → "404" — is read digit-by-digit, while phrases containing a teen, ten, or magnitude word stay cardinal ("twenty three" → "23", "two hundred" → "200", "fifteen hundred and three" → "1503").
+
+### Changed
+
+- Australian-spelling conversion is rebuilt on the canonical VARCON / English Speller Database word map (the same data behind the en_AU dictionary in browsers and office suites), replacing a hand-maintained word list. The whole `-ise` family now converts (realise, institutionalise, modernise, hospitalise — not just the words someone happened to list), alongside `-our`, `-re`, `-ence`, `-ogue` and irregular forms, while false friends (size, capsize, seize, prize) and homograph hazards (tire, curb, story, practice) are left untouched. ~3000 verified pairs.
+
 ## [2026.6.1] - 2026-05-31
 
 ### Fixed

@@ -213,204 +213,86 @@ fn ends_sentence(word: &str) -> bool {
     matches!(word.as_bytes().last(), Some(b'.' | b'?' | b'!'))
 }
 
-/// Mapping of US spellings to Australian/British equivalents.
-///
-/// Entries are grouped by suffix family. Each tuple is (US word, AU word);
-/// the replacement preserves leading capitalisation at apply time.
-/// Inflected forms are listed explicitly — word-boundary regex cannot handle
-/// partial-stem substitution safely enough for a curated list.
-static AU_SPELLING_PAIRS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
-    // (US pattern [word-boundary, case-insensitive], AU replacement [lowercase])
-    let pairs: &[(&str, &str)] = &[
-        // -or → -our
-        (r"\bcolor\b", "colour"),
-        (r"\bcolors\b", "colours"),
-        (r"\bcolored\b", "coloured"),
-        (r"\bcoloring\b", "colouring"),
-        (r"\bfavor\b", "favour"),
-        (r"\bfavors\b", "favours"),
-        (r"\bfavored\b", "favoured"),
-        (r"\bfavoring\b", "favouring"),
-        (r"\bfavorite\b", "favourite"),
-        (r"\bfavorites\b", "favourites"),
-        (r"\bhonor\b", "honour"),
-        (r"\bhonors\b", "honours"),
-        (r"\bhonored\b", "honoured"),
-        (r"\bhonoring\b", "honouring"),
-        (r"\bhumor\b", "humour"),
-        (r"\bhumors\b", "humours"),
-        (r"\bhumored\b", "humoured"),
-        (r"\bhumoring\b", "humouring"),
-        (r"\blabor\b", "labour"),
-        (r"\blabors\b", "labours"),
-        (r"\blabored\b", "laboured"),
-        (r"\blaboring\b", "labouring"),
-        (r"\bneighbor\b", "neighbour"),
-        (r"\bneighbors\b", "neighbours"),
-        (r"\bneighborhood\b", "neighbourhood"),
-        (r"\bneighborhoods\b", "neighbourhoods"),
-        (r"\bneighboring\b", "neighbouring"),
-        (r"\brumor\b", "rumour"),
-        (r"\brumors\b", "rumours"),
-        (r"\brumored\b", "rumoured"),
-        (r"\bsavior\b", "saviour"),
-        (r"\bsaviors\b", "saviours"),
-        (r"\bflavor\b", "flavour"),
-        (r"\bflavors\b", "flavours"),
-        (r"\bflavored\b", "flavoured"),
-        (r"\bflavoring\b", "flavouring"),
-        (r"\bvapor\b", "vapour"),
-        (r"\bvapors\b", "vapours"),
-        // -er → -re (unit meanings; "meter" as instrument stays, only the unit sense changes)
-        // Map "metre" as the unit spelling for these common cases.
-        (r"\bcenter\b", "centre"),
-        (r"\bcenters\b", "centres"),
-        (r"\bcentered\b", "centred"),
-        (r"\bcentering\b", "centring"),
-        (r"\btheatre\b", "theatre"), // already AU; include so no double-map
-        (r"\btheater\b", "theatre"),
-        (r"\btheaters\b", "theatres"),
-        (r"\blitre\b", "litre"), // already AU
-        (r"\bliter\b", "litre"),
-        (r"\bliters\b", "litres"),
-        (r"\bfibre\b", "fibre"), // already AU
-        (r"\bfiber\b", "fibre"),
-        (r"\bfibers\b", "fibres"),
-        (r"\bmaneuver\b", "manoeuvre"),
-        (r"\bmaneuvers\b", "manoeuvres"),
-        (r"\bmanoeuvre\b", "manoeuvre"), // already AU
-        // -ize → -ise family (most common ASR outputs)
-        (r"\borganize\b", "organise"),
-        (r"\borganizes\b", "organises"),
-        (r"\borganized\b", "organised"),
-        (r"\borganizing\b", "organising"),
-        (r"\borganization\b", "organisation"),
-        (r"\borganizations\b", "organisations"),
-        (r"\brecognize\b", "recognise"),
-        (r"\brecognizes\b", "recognises"),
-        (r"\brecognized\b", "recognised"),
-        (r"\brecognizing\b", "recognising"),
-        (r"\brecognition\b", "recognition"), // unchanged — keep to avoid false maps
-        (r"\banalyze\b", "analyse"),
-        (r"\banalyzes\b", "analyses"),
-        (r"\banalyzed\b", "analysed"),
-        (r"\banalyzing\b", "analysing"),
-        (r"\bsymbolize\b", "symbolise"),
-        (r"\bsymbolizes\b", "symbolises"),
-        (r"\bsymbolized\b", "symbolised"),
-        (r"\bcategorize\b", "categorise"),
-        (r"\bcategorizes\b", "categorises"),
-        (r"\bcategorized\b", "categorised"),
-        (r"\bcategorizing\b", "categorising"),
-        (r"\bprioritize\b", "prioritise"),
-        (r"\bprioritizes\b", "prioritises"),
-        (r"\bprioritized\b", "prioritised"),
-        (r"\bprioritizing\b", "prioritising"),
-        (r"\bspecialize\b", "specialise"),
-        (r"\bspecializes\b", "specialises"),
-        (r"\bspecialized\b", "specialised"),
-        (r"\bspecializing\b", "specialising"),
-        (r"\bspecialization\b", "specialisation"),
-        (r"\butilize\b", "utilise"),
-        (r"\butilizes\b", "utilises"),
-        (r"\butilized\b", "utilised"),
-        (r"\butilizing\b", "utilising"),
-        (r"\bminimize\b", "minimise"),
-        (r"\bminimizes\b", "minimises"),
-        (r"\bminimized\b", "minimised"),
-        (r"\bminimizing\b", "minimising"),
-        (r"\bmaximize\b", "maximise"),
-        (r"\bmaximizes\b", "maximises"),
-        (r"\bmaximized\b", "maximised"),
-        (r"\bmaximizing\b", "maximising"),
-        (r"\bstandardize\b", "standardise"),
-        (r"\bstandardizes\b", "standardises"),
-        (r"\bstandardized\b", "standardised"),
-        (r"\bstandardizing\b", "standardising"),
-        // -ense → -ence
-        (r"\bdefense\b", "defence"),
-        (r"\bdefenses\b", "defences"),
-        (r"\boffense\b", "offence"),
-        (r"\boffenses\b", "offences"),
-        // Double-consonant spelling differences (UK/AU doubles; US single)
-        (r"\btraveling\b", "travelling"),
-        (r"\btraveled\b", "travelled"),
-        (r"\btraveler\b", "traveller"),
-        (r"\btravelers\b", "travellers"),
-        (r"\bcanceled\b", "cancelled"),
-        (r"\bcanceling\b", "cancelling"),
-        (r"\bcancellation\b", "cancellation"), // unchanged — both spellings exist; AU prefers double-l
-        (r"\bmodeling\b", "modelling"),
-        (r"\bmodeled\b", "modelled"),
-        (r"\bmodeler\b", "modeller"),
-        (r"\blabeled\b", "labelled"),
-        (r"\blabeling\b", "labelling"),
-        (r"\blabeler\b", "labeller"),
-        (r"\bfulfill\b", "fulfil"),
-        (r"\bfulfills\b", "fulfils"),
-        (r"\bfulfilled\b", "fulfilled"), // unchanged — same
-        (r"\benroll\b", "enrol"),
-        (r"\benrolls\b", "enrols"),
-        (r"\benrolled\b", "enrolled"), // unchanged
-        (r"\bskillful\b", "skilful"),
-        (r"\bskillfully\b", "skilfully"),
-        // -og → -ogue
-        (r"\bcatalog\b", "catalogue"),
-        (r"\bcatalogs\b", "catalogues"),
-        (r"\bdialog\b", "dialogue"),
-        (r"\bdialogs\b", "dialogues"),
-        (r"\bmonolog\b", "monologue"),
-        (r"\banalog\b", "analogue"),
-        (r"\banalogous\b", "analogous"), // unchanged
-        // Miscellaneous
-        (r"\bgray\b", "grey"),
-        (r"\bgrays\b", "greys"),
-        (r"\bgrayed\b", "greyed"),
-        (r"\bplow\b", "plough"),
-        (r"\bplows\b", "ploughs"),
-        (r"\bplowed\b", "ploughed"),
-        (r"\bmold\b", "mould"),
-        (r"\bmolds\b", "moulds"),
-        (r"\bmolded\b", "moulded"),
-        (r"\bbehavior\b", "behaviour"),
-        (r"\bbehaviors\b", "behaviours"),
-        (r"\bbehavioral\b", "behavioural"),
-    ];
+// ── Australian/British spelling normalisation ─────────────────────────────
+//
+// US → AU spelling is a whole-word lookup against a map generated from VARCON
+// (the English Speller Database), the canonical dialect-variant dataset that
+// also generates the en_AU Hunspell dictionary shipped in browsers and office
+// suites. The generated table lives in `au_spelling_map.rs`
+// (`scripts/generate_au_spelling.py` rebuilds it from `data/varcon/varcon.txt`).
+//
+// A lookup approach is what every mature tool uses: the -ize/-ise split has too
+// many false friends (size, capsize, seize, prize) and the -our/-re families
+// too many non-members (doctor, motor, water) for suffix rules to be safe. The
+// generated map already excludes homograph hazards and the rare/archaic tail.
+//
+// Word splitting keeps everything that is not a run of ASCII letters verbatim,
+// so punctuation, digits and whitespace are untouched. Case is restored after.
 
-    pairs
-        .iter()
-        .map(|(pattern, replacement)| {
-            // (?i) makes the match case-insensitive; we restore case in the replacer.
-            let re = Regex::new(&format!("(?i){}", pattern)).expect("AU spelling regex is valid");
-            (re, *replacement)
-        })
-        .collect()
-});
+use super::au_spelling_map::AU_SPELLING_MAP;
 
-/// Apply Australian/British spelling substitutions.
+/// Look up the Australian spelling for a lowercase ASCII word, if one differs.
+fn lookup_au_word(lower: &str) -> Option<&'static str> {
+    AU_SPELLING_MAP
+        .binary_search_by(|(us, _)| (*us).cmp(lower))
+        .ok()
+        .map(|idx| AU_SPELLING_MAP[idx].1)
+}
+
+/// Restore the casing of `original` onto `converted`.
 ///
-/// Preserves leading capitalisation: if the matched word starts with an
-/// uppercase letter the replacement is also capitalised.
-pub fn apply_australian_spelling(text: &str) -> String {
-    let mut result = text.to_string();
-    for (re, replacement) in AU_SPELLING_PAIRS.iter() {
-        result = re
-            .replace_all(&result, |caps: &regex::Captures| {
-                let matched = caps.get(0).map_or("", |m| m.as_str());
-                // Preserve leading capital if the source word was capitalised.
-                if matched.chars().next().is_some_and(|c| c.is_uppercase()) {
-                    let mut capitalised = replacement.to_string();
-                    if let Some(first) = capitalised.get_mut(0..1) {
-                        first.make_ascii_uppercase();
-                    }
-                    capitalised
-                } else {
-                    replacement.to_string()
-                }
-            })
-            .to_string();
+/// Handles the three cases dictation produces: all-lower, Capitalised, and
+/// ALL-CAPS. Mixed/other casings fall back to matching the leading capital.
+fn restore_case(original: &str, converted: &str) -> String {
+    let all_upper =
+        original.chars().all(|c| !c.is_lowercase()) && original.chars().any(|c| c.is_uppercase());
+    if all_upper {
+        return converted.to_uppercase();
     }
-    result
+    if original.chars().next().is_some_and(|c| c.is_uppercase()) {
+        let mut out = converted.to_string();
+        if let Some(first) = out.get_mut(0..1) {
+            first.make_ascii_uppercase();
+        }
+        return out;
+    }
+    converted.to_string()
+}
+
+/// Apply Australian/British spelling normalisation across arbitrary text.
+///
+/// Splits on runs of ASCII letters (everything else — spaces, digits,
+/// punctuation — is emitted verbatim), looks each word up in the VARCON-derived
+/// map, and restores the original word's capitalisation on any replacement.
+pub fn apply_australian_spelling(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut word_start: Option<usize> = None;
+
+    let flush = |out: &mut String, word: &str| {
+        let lower = word.to_ascii_lowercase();
+        match lookup_au_word(&lower) {
+            Some(au) => out.push_str(&restore_case(word, au)),
+            None => out.push_str(word), // unchanged — preserve original casing exactly
+        }
+    };
+
+    for (idx, ch) in text.char_indices() {
+        if ch.is_ascii_alphabetic() {
+            if word_start.is_none() {
+                word_start = Some(idx);
+            }
+        } else if let Some(start) = word_start.take() {
+            flush(&mut out, &text[start..idx]);
+            out.push(ch);
+        } else {
+            out.push(ch);
+        }
+    }
+    if let Some(start) = word_start {
+        flush(&mut out, &text[start..]);
+    }
+
+    out
 }
 
 // ── Spoken-number → digit inverse text normalisation ──────────────────────
@@ -465,6 +347,51 @@ fn word_to_multiplier(word: &str) -> Option<u64> {
 fn is_number_token(token: &str) -> bool {
     let lower = token.to_ascii_lowercase();
     lower == "and" || word_to_value(&lower).is_some() || word_to_multiplier(&lower).is_some()
+}
+
+/// The single digit (0-9) a word denotes when read out digit-by-digit, if any.
+///
+/// Covers the spoken-digit vocabulary: "zero".."nine" plus "oh" (the spoken
+/// form of 0 in codes and phone numbers, e.g. "four oh four"). "oh" maps to a
+/// digit ONLY here — it is deliberately NOT a general number token, so the
+/// interjection in "oh, I see" is never treated as a number.
+fn word_to_single_digit(word: &str) -> Option<u8> {
+    match word.to_ascii_lowercase().as_str() {
+        "zero" | "oh" => Some(0),
+        "one" => Some(1),
+        "two" => Some(2),
+        "three" => Some(3),
+        "four" => Some(4),
+        "five" => Some(5),
+        "six" => Some(6),
+        "seven" => Some(7),
+        "eight" => Some(8),
+        "nine" => Some(9),
+        _ => None,
+    }
+}
+
+/// Read a run of number-word cores as a digit-by-digit sequence, if it is one.
+///
+/// A run qualifies only when it is **two or more** bare single-digit words and
+/// nothing else — no teens, tens, magnitudes ("hundred"/"thousand"), or "and".
+/// Such a run is how people dictate PINs, codes and phone numbers: "one two
+/// three" means the string "123", not the sum 1+2+3. Any run containing a
+/// larger number word is a cardinal phrase ("twenty three" → 23, "two hundred"
+/// → 200) and is handled by `tokens_to_number` instead.
+///
+/// Returns the concatenated digit string (e.g. "123"), or `None` if the run is
+/// not a pure multi-digit sequence.
+fn digit_sequence(cores: &[&str]) -> Option<String> {
+    if cores.len() < 2 {
+        return None;
+    }
+    let mut digits = String::with_capacity(cores.len());
+    for core in cores {
+        let d = word_to_single_digit(core)?;
+        digits.push((b'0' + d) as char);
+    }
+    Some(digits)
 }
 
 /// Parse a contiguous slice of number tokens into a single integer.
@@ -707,7 +634,13 @@ pub fn spoken_numbers_to_digits(text: &str) -> String {
 
         let core = alpha_core(word);
 
-        if !core.is_empty() && is_number_token(core) {
+        // A token starts a number run if it is a number token, or a spoken digit
+        // such as "oh" (which is not a general number token but does belong in a
+        // digit sequence like "four oh four").
+        let starts_run =
+            !core.is_empty() && (is_number_token(core) || word_to_single_digit(core).is_some());
+
+        if starts_run {
             // Identify the full run of consecutive number tokens.
             // "and" is included only when it is followed by another number word,
             // preventing a trailing "and" from being swallowed.
@@ -718,14 +651,18 @@ pub fn spoken_numbers_to_digits(text: &str) -> String {
             while j < n {
                 let (_, w) = tokens[j];
                 let c = alpha_core(w);
-                if c.is_empty() || !is_number_token(c) {
+                let in_run =
+                    !c.is_empty() && (is_number_token(c) || word_to_single_digit(c).is_some());
+                if !in_run {
                     break;
                 }
                 if c.eq_ignore_ascii_case("and") {
                     let next_is_number = j + 1 < n && {
                         let (_, nw) = tokens[j + 1];
                         let nc = alpha_core(nw);
-                        !nc.is_empty() && is_number_token(nc) && !nc.eq_ignore_ascii_case("and")
+                        !nc.is_empty()
+                            && (is_number_token(nc) || word_to_single_digit(nc).is_some())
+                            && !nc.eq_ignore_ascii_case("and")
                     };
                     if !next_is_number {
                         break;
@@ -739,7 +676,14 @@ pub fn spoken_numbers_to_digits(text: &str) -> String {
                 .map(|k| alpha_core(tokens[k].1))
                 .collect();
 
-            if let Some(number) = tokens_to_number(&run_cores) {
+            // A pure run of two or more single digits is read digit-by-digit
+            // ("one two three" → "123"); everything else is a cardinal number
+            // ("twenty three" → 23, "two hundred" → 200). digit_sequence returns
+            // None for the cardinal case, falling through to tokens_to_number.
+            let parsed: Option<String> = digit_sequence(&run_cores)
+                .or_else(|| tokens_to_number(&run_cores).map(|n| n.to_string()));
+
+            if let Some(number) = parsed {
                 // Emit: preceding whitespace of the first run token, then any
                 // punctuation that prefixes the first word, then the digit string,
                 // then any punctuation that suffixes the last word.
@@ -754,7 +698,7 @@ pub fn spoken_numbers_to_digits(text: &str) -> String {
                     out.push_str(&first_word[..core_start]);
                 }
 
-                out.push_str(&number.to_string());
+                out.push_str(&number);
 
                 let last_core = alpha_core(last_word);
                 if let Some(core_start) = last_word.find(last_core) {
@@ -1203,9 +1147,8 @@ mod tests {
 
     #[test]
     fn test_au_spelling_discolored() {
-        // "discolored" is not in the map — should pass through unchanged.
-        // Only exact listed forms are replaced; partial-stem substitution is not attempted.
-        assert_eq!(apply_australian_spelling("discolored"), "discolored");
+        // VARCON carries prefixed forms, so "discolored" → "discoloured".
+        assert_eq!(apply_australian_spelling("discolored"), "discoloured");
     }
 
     #[test]
@@ -1225,6 +1168,84 @@ mod tests {
     fn test_au_spelling_organization() {
         assert_eq!(apply_australian_spelling("organization"), "organisation");
         assert_eq!(apply_australian_spelling("organizations"), "organisations");
+    }
+
+    #[test]
+    fn test_au_spelling_ize_rule_covers_unlisted_words() {
+        // The whole -ize family converts by rule, including words that were never
+        // enumerated in the old hand-maintained list (the bug this fix targets).
+        assert_eq!(apply_australian_spelling("realize"), "realise");
+        assert_eq!(apply_australian_spelling("realized"), "realised");
+        assert_eq!(apply_australian_spelling("realizing"), "realising");
+        assert_eq!(apply_australian_spelling("realization"), "realisation");
+        assert_eq!(
+            apply_australian_spelling("institutionalize"),
+            "institutionalise"
+        );
+        assert_eq!(
+            apply_australian_spelling("institutionalized"),
+            "institutionalised"
+        );
+        assert_eq!(apply_australian_spelling("modernize"), "modernise");
+        assert_eq!(apply_australian_spelling("hospitalize"), "hospitalise");
+        assert_eq!(apply_australian_spelling("itemize"), "itemise");
+    }
+
+    #[test]
+    fn test_au_spelling_yze_rule() {
+        assert_eq!(apply_australian_spelling("analyze"), "analyse");
+        assert_eq!(apply_australian_spelling("analyzed"), "analysed");
+        assert_eq!(apply_australian_spelling("paralyze"), "paralyse");
+        assert_eq!(apply_australian_spelling("catalyzing"), "catalysing");
+    }
+
+    #[test]
+    fn test_au_spelling_ize_false_friends_unchanged() {
+        // Words where -ize/-ise letters are part of the stem must NOT be touched.
+        for w in [
+            "size", "sized", "sizing", "resize", "downsize", "capsize", "prize", "prized", "maize",
+            "seize", "seized",
+        ] {
+            assert_eq!(apply_australian_spelling(w), w, "{w} should be unchanged");
+        }
+    }
+
+    #[test]
+    fn test_au_spelling_our_does_not_overreach() {
+        // -or words that are NOT -our words must pass through untouched — the
+        // failure mode a blanket -or→-our rule would cause.
+        for w in [
+            "doctor", "motor", "actor", "error", "mirror", "factor", "tractor", "author", "razor",
+            "mentor", "vendor",
+        ] {
+            assert_eq!(apply_australian_spelling(w), w, "{w} should be unchanged");
+        }
+    }
+
+    #[test]
+    fn test_au_spelling_our_family_inflections() {
+        assert_eq!(apply_australian_spelling("favorite"), "favourite");
+        assert_eq!(apply_australian_spelling("behavior"), "behaviour");
+        assert_eq!(apply_australian_spelling("neighbors"), "neighbours");
+        assert_eq!(apply_australian_spelling("labored"), "laboured");
+    }
+
+    #[test]
+    fn test_au_spelling_all_caps_preserved() {
+        assert_eq!(apply_australian_spelling("COLOR"), "COLOUR");
+        assert_eq!(apply_australian_spelling("REALIZE"), "REALISE");
+    }
+
+    #[test]
+    fn test_au_spelling_punctuation_and_digits_untouched() {
+        assert_eq!(
+            apply_australian_spelling("color, flavor; honor!"),
+            "colour, flavour; honour!"
+        );
+        assert_eq!(
+            apply_australian_spelling("organize 5 colors"),
+            "organise 5 colours"
+        );
     }
 
     // ── Spoken-number ITN tests ────────────────────────────────────────────
@@ -1278,6 +1299,69 @@ mod tests {
         assert_eq!(
             spoken_numbers_to_digits("There were forty two people at the event"),
             "There were 42 people at the event"
+        );
+    }
+
+    // ── Digit-sequence ITN tests ──────────────────────────────────────────
+    // A run of two or more bare single-digit words is read digit-by-digit
+    // (PIN / code / phone style), NOT summed. This is the "one two three" → 123
+    // case that previously summed to 6.
+
+    #[test]
+    fn test_itn_digit_sequence_basic() {
+        assert_eq!(spoken_numbers_to_digits("one two three"), "123");
+        assert_eq!(spoken_numbers_to_digits("four five"), "45");
+        assert_eq!(
+            spoken_numbers_to_digits("nine eight seven six five"),
+            "98765"
+        );
+    }
+
+    #[test]
+    fn test_itn_digit_sequence_with_zero_and_oh() {
+        // "oh" is the spoken zero in codes ("four oh four" → 404).
+        assert_eq!(spoken_numbers_to_digits("four oh four"), "404");
+        assert_eq!(spoken_numbers_to_digits("one zero one"), "101");
+    }
+
+    #[test]
+    fn test_itn_lone_oh_is_not_a_number() {
+        // A single "oh" (or the interjection) must NOT become "0": digit
+        // sequences require two or more single-digit words.
+        assert_eq!(spoken_numbers_to_digits("oh"), "oh");
+        assert_eq!(spoken_numbers_to_digits("oh well"), "oh well");
+    }
+
+    #[test]
+    fn test_itn_cardinal_not_treated_as_digit_sequence() {
+        // Any run containing a teen/ten/magnitude is cardinal, not concatenated.
+        assert_eq!(spoken_numbers_to_digits("twenty three"), "23");
+        assert_eq!(spoken_numbers_to_digits("two hundred"), "200");
+        assert_eq!(spoken_numbers_to_digits("one hundred and two"), "102");
+    }
+
+    #[test]
+    fn test_itn_digit_sequence_in_sentence() {
+        assert_eq!(
+            spoken_numbers_to_digits("my code is one two three four"),
+            "my code is 1234"
+        );
+    }
+
+    #[test]
+    fn test_itn_fifteen_hundred_and_three() {
+        // "fifteen hundred" = 15 × 100; "and three" adds 3 → 1503.
+        assert_eq!(
+            spoken_numbers_to_digits("fifteen hundred and three"),
+            "1503"
+        );
+    }
+
+    #[test]
+    fn test_itn_eight_hundred_and_ninety_six() {
+        assert_eq!(
+            spoken_numbers_to_digits("eight hundred and ninety six"),
+            "896"
         );
     }
 
