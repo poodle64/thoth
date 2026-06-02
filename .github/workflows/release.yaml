@@ -19,10 +19,13 @@ jobs:
           - platform: macos-15
             args: '--target aarch64-apple-darwin'
             rustflags: ''
-          # Linux x86_64 (Whisper only; Parakeet excluded — upstream sherpa-onnx
-          # Linux static archive lacks .a libs; FluidAudio is macOS-only)
+          # Linux x86_64 (Whisper with Vulkan GPU acceleration; Parakeet excluded —
+          # upstream sherpa-onnx Linux static archive lacks .a libs; FluidAudio is
+          # macOS-only). Vulkan is vendor-neutral (NVIDIA/AMD/Intel via the GPU's
+          # Vulkan ICD), so one build serves every GPU; whisper.cpp falls back to
+          # CPU at runtime when no Vulkan device is present.
           - platform: ubuntu-22.04
-            args: '-- --no-default-features'
+            args: '-- --no-default-features --features vulkan'
             rustflags: ''
 
     runs-on: ${{ matrix.platform }}
@@ -61,7 +64,14 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev
+          # Vulkan toolchain: whisper.cpp's GGML Vulkan backend compiles its compute
+          # shaders at build time. Its CMake requires the glslc compiler
+          # (find_package(Vulkan COMPONENTS glslc REQUIRED)) and SPIRV-Headers
+          # (find_package(SPIRV-Headers REQUIRED)), beyond the Vulkan loader/headers
+          # in libvulkan-dev. glslang-tools (glslangValidator) does NOT satisfy this.
+          # At runtime users need only libvulkan.so.1 plus a GPU Vulkan driver.
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev \
+            libvulkan-dev glslc spirv-headers
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
