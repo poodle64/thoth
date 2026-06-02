@@ -63,11 +63,23 @@ The Linux AppImage is built with Vulkan enabled, but it does **not** bundle the 
 
 ## Display server notes
 
-Thoth's behaviour differs between X11 and Wayland because Wayland restricts what an application may do. The full support matrix is in [P09 Platform Support](../product/P09-decisions.md#platform-support); in short:
+Thoth's behaviour differs between X11 and Wayland because Wayland restricts what an application may do:
 
 - **Global shortcuts**: on Wayland these go through the XDG Desktop Portal, which KDE, wlroots-based compositors, and GNOME 48+ implement. On a compositor without it, Thoth tells you (a toast) and you use a function-key shortcut or an X11 session.
 - **Recording indicator**: on Wayland the indicator cannot follow the cursor (no global cursor position) and uses a fixed on-screen position.
 - **Modifier-only shortcuts** (e.g. double-tap Right Shift): unavailable on Wayland; use a function-key shortcut instead.
+
+### Known risk to verify on Wayland
+
+The portal's `Activated` D-Bus signals have been reported to stop arriving when the
+app is launched from an application launcher (e.g. fuzzel) rather than a terminal —
+the underlying zbus connection can be torn down in that environment. When testing,
+**launch Thoth both from a terminal and from your normal app launcher/menu, and
+confirm the global shortcut fires in both cases.** If it works from a terminal but
+not from the launcher, that is this issue; report it (the fix is to hold the portal
+proxy and session in process-lifetime state rather than a single task, and re-subscribe
+on signal-stream end). Note also that changing a shortcut in Settings does not currently
+re-bind the portal live — restart the app after changing a shortcut on Wayland.
 
 ## Continuous integration
 
