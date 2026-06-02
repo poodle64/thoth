@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.2] - 2026-06-02
+
+### Fixed
+
+- Long recordings no longer occasionally lose the back half of the transcription (#46). Audio was captured into a small fixed buffer (about 0.7 seconds at a typical microphone's rate) that was resampled in place by the same thread; whenever that thread briefly fell behind — for example while a previous transcription was still running on the GPU — the buffer filled and silently discarded incoming audio, clipping whatever was being said at that moment. On a long recording there were many more chances for this to happen, so the loss tended to land near the end. Capture is now fully decoupled from resampling: the microphone callback does nothing but hand raw samples to an unbounded queue, and a separate thread resamples and writes the file at its own pace. A slow moment can now only delay the file, never shorten it, so no spoken audio can be dropped regardless of recording length or system load.
+- The last fraction of a second of every recording (and of imported audio files) is no longer lost. The resampler holds a short internal delay that was never drained at end of stream, so the true tail never reached the file; it is now flushed properly on finalise.
+
 ## [2026.6.1] - 2026-06-01
 
 ### Added

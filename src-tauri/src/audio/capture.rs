@@ -1,14 +1,28 @@
-//! Audio capture using cpal with lock-free ring buffer
+//! Audio capture using cpal with a decoupled capture/encode pipeline.
 //!
-//! This module provides real-time safe audio recording. The audio callback
-//! uses a lock-free ring buffer to avoid allocations. The recorder keeps the
-//! cpal stream open ("warm") between recordings so that pressing record is an
-//! instant flag flip rather than a ~150ms device open.
+//! The cpal audio callback does the minimum possible work: while armed it copies
+//! its sample block and hands it to an **unbounded** channel. A separate writer
+//! thread drains that channel, resamples to 16kHz mono, and writes the WAV.
+//!
+//! This decoupling is deliberate. The recording is consumed *offline* by the
+//! transcription engine, so the only hard requirement is that **no captured
+//! sample is ever dropped**. An earlier design fed the callback into a fixed
+//! ~0.7s ring buffer that was resampled inline on the consumer side; whenever
+//! that resampling stalled (CPU/GPU contention from a previous transcription,
+//! scheduler preemption) the bounded buffer overflowed and silently discarded
+//! audio — truncating the tail of long recordings. An unbounded hand-off makes
+//! overflow structurally impossible: a consumer stall delays the WAV, it can
+//! never shorten it. Memory grows with recording length (~5.7 MB/min at 48kHz
+//! mono f32) and is released when the recording finalises.
+//!
+//! The recorder keeps the cpal stream open ("warm") between recordings so that
+//! pressing record is an instant flag flip rather than a ~150ms device open.
 
 use super::format::AudioConverter;
 use super::ring_buffer::AudioRingBuffer;
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use crossbeam_channel::{Receiver, Sender};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -20,35 +34,47 @@ const TARGET_SAMPLE_RATE: u32 = 16000;
 /// live capture and file import resample through the same well-tested path.
 const RESAMPLE_CHUNK_SIZE: usize = 1024;
 
+/// Messages from the audio callback to the writer thread.
+///
+/// `Samples` carries one callback's worth of device-native interleaved f32.
+/// `Stop` is the end-of-stream sentinel pushed by `disarm`; the writer drains
+/// every queued `Samples` ahead of it before finalising, so no tail is lost.
+enum RecordingMsg {
+    Samples(Vec<f32>),
+    Stop,
+}
+
 /// Audio recorder using cpal with warm-stream lifecycle.
 ///
 /// Lifecycle:
 /// 1. `warm_up` — opens the cpal device and starts the stream. The callback
-///    runs continuously but only writes to the recording ring buffer while armed.
-/// 2. `arm` — starts the writer thread and flips the armed flag so samples flow
-///    into the recording buffer. Does NOT open the device (instant).
-/// 3. `disarm` — flips the armed flag and joins the writer thread. Does NOT
-///    close the device. Returns the path to the finished WAV.
+///    runs continuously but only forwards samples to the writer while armed.
+/// 2. `arm` — spawns the writer thread and flips the armed flag so samples flow
+///    to the channel. Does NOT open the device (instant).
+/// 3. `disarm` — flips the armed flag, sends the stop sentinel, and joins the
+///    writer thread. Does NOT close the device. Returns the path to the WAV.
 /// 4. `cool_down` — closes the device. Called after an idle timeout or when
 ///    the device changes.
 pub struct AudioRecorder {
     /// The warm cpal stream (open from `warm_up` to `cool_down`).
     stream: Option<cpal::Stream>,
-    /// Writer thread that drains the ring buffer to a WAV file.
+    /// Writer thread that resamples queued samples to a WAV file.
     writer_handle: Option<std::thread::JoinHandle<Result<()>>>,
-    /// Signals the writer thread to stop draining.
-    stop_signal: Arc<AtomicBool>,
+    /// Sender end of the capture channel. Created in `warm_up`, held for the
+    /// stream's lifetime, cloned into the callback. Sending only happens while
+    /// armed; the channel persists across recordings.
+    sender: Option<Sender<RecordingMsg>>,
+    /// Receiver end. Cloned into the writer thread on each `arm`.
+    receiver: Option<Receiver<RecordingMsg>>,
     /// Path where the current/last recording is being written.
     output_path: Option<PathBuf>,
-    /// Primary recording ring buffer (stable for the warm stream's lifetime).
-    ring_buffer: Arc<AudioRingBuffer>,
     /// Optional ring buffer for real-time metering (recording indicator waveform).
     metering_buffer: Option<Arc<AudioRingBuffer>>,
     /// Source sample rate captured at warm_up time.
     source_rate: Option<u32>,
     /// Source channel count captured at warm_up time.
     source_channels: Option<usize>,
-    /// Whether the callback should write samples to the recording ring buffer.
+    /// Whether the callback should forward samples to the writer.
     armed: Arc<AtomicBool>,
 }
 
@@ -64,9 +90,9 @@ impl AudioRecorder {
         Self {
             stream: None,
             writer_handle: None,
-            stop_signal: Arc::new(AtomicBool::new(false)),
+            sender: None,
+            receiver: None,
             output_path: None,
-            ring_buffer: Arc::new(AudioRingBuffer::new()),
             metering_buffer: None,
             source_rate: None,
             source_channels: None,
@@ -79,6 +105,8 @@ impl AudioRecorder {
     /// The metering buffer receives samples continuously while warm (even before
     /// arming), so the recording indicator can show levels without delay. Must be
     /// called before `warm_up` — the callback captures the clone at warm-up time.
+    /// A bounded ring buffer is correct here: metering only needs recent levels,
+    /// so dropping the oldest samples under pressure is the desired behaviour.
     pub fn set_metering_buffer(&mut self, buffer: Arc<AudioRingBuffer>) {
         self.metering_buffer = Some(buffer);
     }
@@ -127,8 +155,14 @@ impl AudioRecorder {
         self.source_rate = Some(source_rate);
         self.source_channels = Some(source_channels);
 
-        // Clone all buffers — the callback holds these for the stream's lifetime.
-        let callback_ring = self.ring_buffer.clone();
+        // The capture channel lives for the whole warm-stream lifetime so the
+        // callback always holds a valid sender. Unbounded: the producer (audio
+        // thread) never blocks and never drops.
+        let (sender, receiver) = crossbeam_channel::unbounded::<RecordingMsg>();
+        let callback_sender = sender.clone();
+        self.sender = Some(sender);
+        self.receiver = Some(receiver);
+
         let callback_metering = self.metering_buffer.clone();
         let callback_armed = self.armed.clone();
 
@@ -141,16 +175,14 @@ impl AudioRecorder {
                     m.write(data);
                 }
 
-                // Recording buffers only receive data while armed.
-                // LOCK-FREE: armed check + ring buffer writes never allocate.
-                if callback_armed.load(Ordering::Relaxed) {
-                    let written = callback_ring.write(data);
-                    if written < data.len() {
-                        tracing::warn!(
-                            "Audio buffer overflow: dropped {} samples",
-                            data.len() - written
-                        );
-                    }
+                // While armed, hand this block to the writer thread. The copy +
+                // unbounded send is the only work done here; it never blocks and
+                // never drops, so no captured audio is ever lost. `disarm` pauses
+                // the stream before disarming, so once it has done so this callback
+                // cannot fire again and no block can be enqueued after the Stop
+                // sentinel — the channel order faithfully reflects capture order.
+                if callback_armed.load(Ordering::SeqCst) {
+                    let _ = callback_sender.send(RecordingMsg::Samples(data.to_vec()));
                 }
             },
             |err| {
@@ -185,39 +217,33 @@ impl AudioRecorder {
         let source_channels = self
             .source_channels
             .ok_or_else(|| anyhow!("source_channels not set — warm_up() must have failed"))?;
+        let receiver = self
+            .receiver
+            .as_ref()
+            .ok_or_else(|| anyhow!("capture channel missing — warm_up() must have failed"))?
+            .clone();
 
         tracing::info!("AudioRecorder::arm: output={}", output_path.display());
 
-        // Discard any samples that arrived before arming.
-        self.ring_buffer.clear();
+        // Drain any samples queued before arming (e.g. a stray callback racing
+        // the armed flag) so the recording starts clean.
+        while receiver.try_recv().is_ok() {}
 
-        self.stop_signal.store(false, Ordering::SeqCst);
         self.output_path = Some(output_path.to_path_buf());
 
-        // Spawn the writer thread BEFORE setting armed=true so it is reading
-        // before any samples can flow.
-        let ring_buffer = self.ring_buffer.clone();
-        let stop_signal = self.stop_signal.clone();
         let writer_path = output_path.to_path_buf();
-
         self.writer_handle = Some(std::thread::spawn(move || {
-            write_audio_to_file(
-                ring_buffer,
-                &writer_path,
-                source_rate,
-                source_channels,
-                stop_signal,
-            )
+            write_audio_to_file(receiver, &writer_path, source_rate, source_channels)
         }));
 
-        // Armed flag is set LAST so the callback doesn't write until the writer
+        // Armed flag is set LAST so the callback doesn't send until the writer
         // thread is running.
         self.armed.store(true, Ordering::SeqCst);
         tracing::info!("AudioRecorder::arm: armed, recording started");
         Ok(())
     }
 
-    /// Disarm the recorder: stop sampling into the recording buffer and finalise the WAV.
+    /// Disarm the recorder: stop forwarding samples and finalise the WAV.
     ///
     /// The cpal stream stays open (warm). Returns the path to the finished WAV file.
     pub fn disarm(&mut self) -> Result<PathBuf> {
@@ -225,16 +251,46 @@ impl AudioRecorder {
             return Err(anyhow!("Not armed / no recording in progress"));
         }
 
-        // Stop new samples entering the recording buffer first.
+        // Stop the callback forwarding new samples.
         self.armed.store(false, Ordering::SeqCst);
 
-        // Signal the writer thread to drain remaining samples and finalise.
-        self.stop_signal.store(true, Ordering::SeqCst);
+        // Pause the stream so the audio callback is quiesced before we send the
+        // Stop sentinel. cpal guarantees no callback runs after pause() returns,
+        // which closes the only race that could enqueue a Samples block AFTER
+        // Stop (a callback that had already passed the armed check on another
+        // thread). With the stream paused, the channel's FIFO order is exactly
+        // the capture order and Stop is genuinely last. We re-play() below to
+        // keep the device warm for the next instant arm — pause/play does not
+        // reopen the device, so it costs nothing close to a cold open.
+        if let Some(stream) = self.stream.as_ref() {
+            if let Err(e) = stream.pause() {
+                tracing::warn!("AudioRecorder::disarm: stream.pause() failed: {}", e);
+            }
+        }
+
+        // Push the end-of-stream sentinel. The writer drains every queued sample
+        // block before it sees this, so the full tail reaches the WAV.
+        if let Some(sender) = self.sender.as_ref() {
+            sender
+                .send(RecordingMsg::Stop)
+                .map_err(|_| anyhow!("Writer thread gone before stop sentinel"))?;
+        }
 
         if let Some(handle) = self.writer_handle.take() {
             handle
                 .join()
                 .map_err(|_| anyhow!("Writer thread panicked"))??;
+        }
+
+        // Resume the stream so metering keeps flowing and the next arm is instant.
+        // The device was only paused, never closed, so this is cheap.
+        if let Some(stream) = self.stream.as_ref() {
+            if let Err(e) = stream.play() {
+                tracing::warn!(
+                    "AudioRecorder::disarm: stream.play() (re-warm) failed: {}",
+                    e
+                );
+            }
         }
 
         let path = self
@@ -266,6 +322,10 @@ impl AudioRecorder {
             tracing::info!("AudioRecorder::cool_down: stream closed");
         }
 
+        // Drop the channel so a future warm_up starts a fresh one matched to the
+        // (possibly different) device's rate and channel count.
+        self.sender = None;
+        self.receiver = None;
         self.source_rate = None;
         self.source_channels = None;
     }
@@ -307,20 +367,19 @@ impl AudioRecorder {
     }
 }
 
-/// Write audio from ring buffer to WAV file.
+/// Resample queued capture samples to a 16kHz mono WAV file.
 ///
-/// Resamples the device-native interleaved f32 stream to 16kHz mono i16 using the
-/// same anti-aliased rubato resampler the file-import path uses (`AudioConverter`),
-/// rather than naive decimation. Decimation without a low-pass filter aliases
-/// content above 8kHz back into the speech band and corrupts transcription input;
-/// it also mislabelled any non-48kHz device (e.g. a 44.1kHz mic would have been
-/// written too fast). The WAV header is stamped at the true 16kHz output rate.
+/// Receives device-native interleaved f32 blocks from the capture channel,
+/// accumulates them, and resamples in exact `RESAMPLE_CHUNK_SIZE` chunks through
+/// the same anti-aliased rubato resampler the file-import path uses
+/// (`AudioConverter`). Runs until the `Stop` sentinel, then finalises the
+/// trailing partial chunk and drains the resampler's internal delay so the very
+/// end of the recording reaches the file. The WAV header is stamped at 16kHz.
 fn write_audio_to_file(
-    ring_buffer: Arc<AudioRingBuffer>,
+    receiver: Receiver<RecordingMsg>,
     path: &Path,
     source_rate: u32,
     source_channels: usize,
-    stop_signal: Arc<AtomicBool>,
 ) -> Result<()> {
     let spec = hound::WavSpec {
         channels: 1,
@@ -346,12 +405,11 @@ fn write_audio_to_file(
     .map_err(|e| anyhow!("Failed to create resampler: {}", e))?;
 
     // The resampler consumes fixed-size chunks of interleaved frames. Accumulate
-    // the variable-sized ring-buffer reads and drain in exact chunks.
+    // the variable-sized callback blocks and drain in exact chunks.
     let frames_per_chunk = RESAMPLE_CHUNK_SIZE * source_channels;
     let mut accumulator: Vec<f32> = Vec::with_capacity(frames_per_chunk * 2);
 
     let mut writer = hound::WavWriter::create(path, spec)?;
-    let mut read_buffer = vec![0.0f32; 4096];
     let mut total_samples = 0usize;
 
     let drain_full_chunks = |accumulator: &mut Vec<f32>,
@@ -372,49 +430,35 @@ fn write_audio_to_file(
         Ok(())
     };
 
-    while !stop_signal.load(Ordering::SeqCst) {
-        let read = ring_buffer.read(&mut read_buffer);
-        if read > 0 {
-            accumulator.extend_from_slice(&read_buffer[..read]);
-            drain_full_chunks(
-                &mut accumulator,
-                &mut converter,
-                &mut writer,
-                &mut total_samples,
-            )?;
-        } else {
-            // No data available, sleep briefly
-            std::thread::sleep(std::time::Duration::from_millis(10));
+    // Block on the channel; an unbounded receiver only returns Err once every
+    // Sender is dropped, which we never do while warm, so we rely on the Stop
+    // sentinel to end the loop.
+    for msg in receiver.iter() {
+        match msg {
+            RecordingMsg::Samples(block) => {
+                accumulator.extend_from_slice(&block);
+                drain_full_chunks(
+                    &mut accumulator,
+                    &mut converter,
+                    &mut writer,
+                    &mut total_samples,
+                )?;
+            }
+            RecordingMsg::Stop => break,
         }
     }
 
-    // Drain whatever the recorder produced after the stop signal.
-    loop {
-        let read = ring_buffer.read(&mut read_buffer);
-        if read == 0 {
-            break;
-        }
-        accumulator.extend_from_slice(&read_buffer[..read]);
-        drain_full_chunks(
-            &mut accumulator,
-            &mut converter,
-            &mut writer,
-            &mut total_samples,
-        )?;
+    // Finalise: resample the trailing partial chunk AND drain the resampler's
+    // internal delay line in one call. Without this the last few milliseconds —
+    // the resampler's filter delay — are left buffered and never written.
+    let leftover = std::mem::take(&mut accumulator);
+    let tail = converter
+        .finish_to_i16(&leftover)
+        .map_err(|e| anyhow!("Resampling error during finalise: {}", e))?;
+    for sample in &tail {
+        writer.write_sample(*sample)?;
     }
-
-    // Flush the final partial chunk by zero-padding it to a full chunk (matches
-    // the import path); the trailing silence is negligible at 16kHz.
-    if !accumulator.is_empty() {
-        accumulator.resize(frames_per_chunk, 0.0);
-        let resampled = converter
-            .process_to_i16(&accumulator)
-            .map_err(|e| anyhow!("Resampling error during flush: {}", e))?;
-        for sample in &resampled {
-            writer.write_sample(*sample)?;
-        }
-        total_samples += resampled.len();
-    }
+    total_samples += tail.len();
 
     writer.finalize()?;
     let duration_secs = total_samples as f32 / TARGET_SAMPLE_RATE as f32;
@@ -434,6 +478,39 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
+    /// Feed a number of interleaved frames through the writer thread and return
+    /// the finished WAV's sample count. Exercises the real channel + writer path.
+    fn run_writer(source_rate: u32, channels: usize, frames: usize, path: &Path) -> usize {
+        let (tx, rx) = crossbeam_channel::unbounded::<RecordingMsg>();
+        let writer_path = path.to_path_buf();
+        let handle = std::thread::spawn(move || {
+            write_audio_to_file(rx, &writer_path, source_rate, channels)
+        });
+
+        // Send the audio in small blocks, mimicking cpal callback cadence.
+        let block_frames = 512usize;
+        let mut sent = 0;
+        while sent < frames {
+            let n = block_frames.min(frames - sent);
+            let mut block = Vec::with_capacity(n * channels);
+            for _ in 0..n {
+                for _ in 0..channels {
+                    block.push(0.1f32);
+                }
+            }
+            tx.send(RecordingMsg::Samples(block)).unwrap();
+            sent += n;
+        }
+        tx.send(RecordingMsg::Stop).unwrap();
+        handle.join().unwrap().unwrap();
+
+        let reader = hound::WavReader::open(path).unwrap();
+        let spec = reader.spec();
+        assert_eq!(spec.sample_rate, 16000, "header must be stamped at 16kHz");
+        assert_eq!(spec.channels, 1, "output must be mono");
+        reader.into_samples::<i16>().count()
+    }
+
     #[test]
     fn test_recorder_new() {
         let recorder = AudioRecorder::new();
@@ -443,57 +520,37 @@ mod tests {
 
     #[test]
     fn test_writer_produces_correct_rate_wav() {
-        // A recorded WAV must be stamped at 16kHz and contain roughly the
-        // expected number of 16kHz samples for the input duration — proving
-        // the writer genuinely resamples rather than relabelling decimated data.
-        // Feed 1 second of 48kHz stereo silence-ish signal through the writer.
+        // 0.25s of 48kHz stereo should resample to ~4000 samples at 16kHz,
+        // proving the writer genuinely resamples rather than relabelling.
         let dir = tempdir().unwrap();
         let path = dir.path().join("rate_test.wav");
-
-        let ring = Arc::new(AudioRingBuffer::new());
-        let stop = Arc::new(AtomicBool::new(false));
-
-        // Spawn the writer, then feed it ~0.25s of 48kHz stereo audio in chunks
-        // small enough to fit the 65536-sample ring buffer, then stop.
-        let writer_ring = ring.clone();
-        let writer_stop = stop.clone();
-        let writer_path = path.clone();
-        let handle = std::thread::spawn(move || {
-            write_audio_to_file(writer_ring, &writer_path, 48000, 2, writer_stop)
-        });
-
-        // 0.25s at 48kHz stereo = 12000 frames = 24000 interleaved samples.
-        let frame = [0.2f32, -0.2f32];
-        let mut fed = 0;
-        while fed < 12000 {
-            let mut written = 0;
-            while written < frame.len() {
-                written += ring.write(&frame[written..]);
-                if written < frame.len() {
-                    std::thread::sleep(std::time::Duration::from_millis(1));
-                }
-            }
-            fed += 1;
-        }
-        // Give the writer a moment to drain, then stop.
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        stop.store(true, Ordering::SeqCst);
-        handle.join().unwrap().unwrap();
-
-        let reader = hound::WavReader::open(&path).unwrap();
-        let spec = reader.spec();
-        assert_eq!(spec.sample_rate, 16000, "header must be stamped at 16kHz");
-        assert_eq!(spec.channels, 1, "output must be mono");
-
-        // 0.25s of input should yield ~4000 samples at 16kHz; allow generous
-        // tolerance for resampler latency and flush padding.
-        let n = reader.into_samples::<i16>().count();
+        let n = run_writer(48000, 2, 12000, &path); // 0.25s @ 48kHz
         assert!(
             n > 3000 && n < 5000,
             "expected ~4000 samples for 0.25s at 16kHz, got {}",
             n
         );
+        fs::remove_file(path).ok();
+    }
 
+    #[test]
+    fn test_writer_preserves_tail_on_long_recording() {
+        // The whole point of the decoupled pipeline: a long recording must not
+        // lose its tail. 30s of 48kHz mono = 480000 frames -> ~480000 samples at
+        // 16kHz. The count must be within resampler-delay tolerance of the full
+        // duration; a truncated tail would fall well short.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("long_test.wav");
+        let n = run_writer(48000, 1, 48000 * 30, &path);
+        let expected = 16000 * 30;
+        // Allow a small shortfall for the resampler's fixed delay only (~ a few
+        // hundred samples), never a missing back-half.
+        assert!(
+            n >= expected - 2000 && n <= expected + 2000,
+            "expected ~{} samples for 30s at 16kHz, got {} (tail loss?)",
+            expected,
+            n
+        );
         fs::remove_file(path).ok();
     }
 
@@ -511,26 +568,22 @@ mod tests {
 
         let mut recorder = AudioRecorder::new();
 
-        // Test both the split lifecycle and the warm/is_warm checks.
         assert!(!recorder.is_warm());
         assert!(recorder.start_default(&output_path).is_ok());
         assert!(recorder.is_recording());
 
-        // Record for 500ms
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         let result_path = recorder.stop().unwrap();
         assert!(!recorder.is_recording());
         assert!(result_path.exists());
 
-        // Verify it's a valid WAV file
         let reader = hound::WavReader::open(&result_path).unwrap();
         let spec = reader.spec();
         assert_eq!(spec.sample_rate, 16000);
         assert_eq!(spec.channels, 1);
         assert_eq!(spec.bits_per_sample, 16);
 
-        // Clean up
         fs::remove_file(result_path).ok();
     }
 
@@ -539,7 +592,6 @@ mod tests {
         let dir = tempdir().unwrap();
         let output_path = dir.path().join("test.wav");
         let mut recorder = AudioRecorder::new();
-        // Calling arm without warming up must return an error.
         assert!(recorder.arm(&output_path).is_err());
     }
 

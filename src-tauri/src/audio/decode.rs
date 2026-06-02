@@ -199,18 +199,16 @@ pub fn decode_audio_to_wav(
         }
     }
 
-    // Flush remaining samples in the buffer (pad with zeros to fill a chunk)
-    if !resample_buffer.is_empty() {
-        resample_buffer.resize(frames_per_chunk, 0.0);
-        let resampled = converter
-            .process_to_i16(&resample_buffer)
-            .map_err(|e| format!("Resampling error during flush: {}", e))?;
-
-        for &sample in &resampled {
-            wav_writer
-                .write_sample(sample)
-                .map_err(|e| format!("Failed to write WAV sample: {}", e))?;
-        }
+    // Finalise: resample the trailing partial chunk AND drain the resampler's
+    // internal delay line, so the last few milliseconds of the file are not left
+    // buffered inside the resampler and lost.
+    let tail = converter
+        .finish_to_i16(&resample_buffer)
+        .map_err(|e| format!("Resampling error during finalise: {}", e))?;
+    for &sample in &tail {
+        wav_writer
+            .write_sample(sample)
+            .map_err(|e| format!("Failed to write WAV sample: {}", e))?;
     }
 
     wav_writer
