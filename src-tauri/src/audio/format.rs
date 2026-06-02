@@ -242,14 +242,10 @@ mod tests {
         // Generate a simple test signal
         let input: Vec<f32> = (0..3072).map(|i| (i as f32 * 0.01).sin() * 0.5).collect();
 
-        let output = converter.process_to_i16(&input).unwrap();
-
-        // Verify we got some output (rubato may buffer)
-        // The actual range check is redundant since i16 can't exceed its bounds
-        assert!(
-            !output.is_empty() || true,
-            "Some output expected after multiple chunks"
-        );
+        // The conversion must succeed; the `unwrap` is the assertion. rubato may
+        // legitimately buffer and return an empty chunk, so output length is not
+        // asserted (the previous `!is_empty() || true` was a tautology).
+        let _output = converter.process_to_i16(&input).unwrap();
     }
 
     #[test]

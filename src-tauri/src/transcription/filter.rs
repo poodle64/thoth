@@ -1058,9 +1058,7 @@ mod tests {
             }
         }
         // More words after
-        for _ in 0..10 {
-            parts.push("more");
-        }
+        parts.extend(std::iter::repeat_n("more", 10));
         let text = parts.join(" ");
         let result = format_paragraphs(&text);
 

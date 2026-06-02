@@ -14,6 +14,7 @@
 //!     record does not clip or swallow it (the failure NSSound had: the start
 //!     tone went silent or "cut in half" on the first record after the warm
 //!     audio stream had torn down).
+//!
 //! A fresh player is created per cue and leaked for its short lifetime; the OS
 //! reclaims it when playback ends.
 

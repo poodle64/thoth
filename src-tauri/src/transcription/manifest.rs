@@ -337,6 +337,8 @@ fn dir_size_recursive(path: &std::path::Path) -> u64 {
 }
 
 /// Check if the backend for a given model type is available in this build
+// Arms return different cfg!() expressions, not uniform true — matches! would be wrong.
+#[allow(clippy::match_like_matches_macro)]
 pub fn is_backend_available(model_type: &str) -> bool {
     match model_type {
         "whisper_ggml" => true,

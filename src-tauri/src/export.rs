@@ -263,7 +263,7 @@ fn export_csv(records: &[TranscriptionRecord], path: &Path) -> Result<(), String
     let mut wtr = WriterBuilder::new().from_writer(file);
 
     // Header — exact column names preserved for downstream compatibility.
-    wtr.write_record(&[
+    wtr.write_record([
         "id",
         "text",
         "raw_text",
@@ -280,7 +280,7 @@ fn export_csv(records: &[TranscriptionRecord], path: &Path) -> Result<(), String
     .map_err(|e| format!("Failed to write CSV header: {}", e))?;
 
     for record in records {
-        wtr.write_record(&[
+        wtr.write_record([
             // Identifier and path fields: not free-text, no injection guard needed.
             record.id.as_str(),
             // Free-text fields dictated by the user: apply injection guard.

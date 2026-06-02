@@ -124,42 +124,52 @@ impl ThothMcp {
     ) -> Result<CallToolResult, McpError> {
         match p.action.as_str() {
             "list" => {
-                let entries =
-                    crate::dictionary::get_dictionary_entries().map_err(core_err)?;
+                let entries = crate::dictionary::get_dictionary_entries().map_err(core_err)?;
                 json_result(&entries)
             }
             "add" => {
                 let entry = crate::dictionary::DictionaryEntry {
-                    from: p.from.ok_or_else(|| core_err("`from` required for add".into()))?,
-                    to: p.to.ok_or_else(|| core_err("`to` required for add".into()))?,
+                    from: p
+                        .from
+                        .ok_or_else(|| core_err("`from` required for add".into()))?,
+                    to: p
+                        .to
+                        .ok_or_else(|| core_err("`to` required for add".into()))?,
                     case_sensitive: p.case_sensitive.unwrap_or(false),
                 };
                 crate::dictionary::add_dictionary_entry(entry).map_err(core_err)?;
-                let entries =
-                    crate::dictionary::get_dictionary_entries().map_err(core_err)?;
+                let entries = crate::dictionary::get_dictionary_entries().map_err(core_err)?;
                 json_result(&entries)
             }
             "update" => {
-                let index = p.index.ok_or_else(|| core_err("`index` required for update".into()))?;
+                let index = p
+                    .index
+                    .ok_or_else(|| core_err("`index` required for update".into()))?;
                 let entry = crate::dictionary::DictionaryEntry {
-                    from: p.from.ok_or_else(|| core_err("`from` required for update".into()))?,
-                    to: p.to.ok_or_else(|| core_err("`to` required for update".into()))?,
+                    from: p
+                        .from
+                        .ok_or_else(|| core_err("`from` required for update".into()))?,
+                    to: p
+                        .to
+                        .ok_or_else(|| core_err("`to` required for update".into()))?,
                     case_sensitive: p.case_sensitive.unwrap_or(false),
                 };
                 crate::dictionary::update_dictionary_entry(index, entry).map_err(core_err)?;
-                let entries =
-                    crate::dictionary::get_dictionary_entries().map_err(core_err)?;
+                let entries = crate::dictionary::get_dictionary_entries().map_err(core_err)?;
                 json_result(&entries)
             }
             "delete" => {
-                let index = p.index.ok_or_else(|| core_err("`index` required for delete".into()))?;
+                let index = p
+                    .index
+                    .ok_or_else(|| core_err("`index` required for delete".into()))?;
                 crate::dictionary::remove_dictionary_entry(index).map_err(core_err)?;
-                let entries =
-                    crate::dictionary::get_dictionary_entries().map_err(core_err)?;
+                let entries = crate::dictionary::get_dictionary_entries().map_err(core_err)?;
                 json_result(&entries)
             }
             "import" => {
-                let json = p.json.ok_or_else(|| core_err("`json` required for import".into()))?;
+                let json = p
+                    .json
+                    .ok_or_else(|| core_err("`json` required for import".into()))?;
                 let count = crate::dictionary::import_dictionary(json, p.merge.unwrap_or(true))
                     .map_err(core_err)?;
                 json_result(&serde_json::json!({ "imported": count }))
@@ -185,12 +195,15 @@ impl ThothMcp {
                 json_result(&cfg)
             }
             "update" => {
-                let patch = p.patch.ok_or_else(|| core_err("`patch` required for update".into()))?;
+                let patch = p
+                    .patch
+                    .ok_or_else(|| core_err("`patch` required for update".into()))?;
                 // Merge the patch onto the current config, then set.
-                let mut current = serde_json::to_value(crate::config::get_config().map_err(core_err)?)
-                    .map_err(|e| core_err(e.to_string()))?;
-                let patch_val: serde_json::Value =
-                    serde_json::from_str(&patch).map_err(|e| core_err(format!("invalid patch JSON: {}", e)))?;
+                let mut current =
+                    serde_json::to_value(crate::config::get_config().map_err(core_err)?)
+                        .map_err(|e| core_err(e.to_string()))?;
+                let patch_val: serde_json::Value = serde_json::from_str(&patch)
+                    .map_err(|e| core_err(format!("invalid patch JSON: {}", e)))?;
                 merge_json(&mut current, &patch_val);
                 let new_cfg: crate::config::Config = serde_json::from_value(current)
                     .map_err(|e| core_err(format!("merged config invalid: {}", e)))?;
@@ -216,7 +229,8 @@ impl ThothMcp {
                 json_result(&stats)
             }
             "get" => {
-                let id = p.id.ok_or_else(|| core_err("`id` required for get".into()))?;
+                let id =
+                    p.id.ok_or_else(|| core_err("`id` required for get".into()))?;
                 let record = crate::database::transcription::get_transcription_by_id(id)
                     .map_err(core_err)?;
                 match record {
