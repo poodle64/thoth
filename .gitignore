@@ -28,6 +28,7 @@ desktop.ini
 .claude/.sessions/
 .claude/worktrees/
 .claude/agents/
+.claude/scheduled_tasks.lock
 
 # ============================================================================
 # Environment & Secrets
