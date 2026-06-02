@@ -14,7 +14,7 @@ pub enum InsertionMethod {
     /// Works with most applications but slower for long text.
     #[default]
     Typing,
-    /// Paste from clipboard using Cmd+V (macOS) or Ctrl+V (Linux/Windows).
+    /// Paste from clipboard using Cmd+V (macOS) or Ctrl+Shift+V (Linux).
     /// Faster but temporarily modifies clipboard contents.
     Paste,
 }
@@ -335,9 +335,17 @@ impl TextInsertService {
 
         // wtype is a native Wayland tool that avoids modifier key sync issues
         // Note: Only works on compositors supporting the virtual-keyboard protocol (Sway, Hyprland, etc.)
-        // Falls back to enigo on GNOME which triggers the "Allow Remote Interaction" dialog
+        // Falls back to enigo on GNOME which triggers the "Allow Remote Interaction" dialog.
+        //
+        // Use Ctrl+Shift+V, not Ctrl+V: terminal emulators (GNOME Terminal, Konsole,
+        // Alacritty, kitty, foot, xterm) reserve Ctrl+V for other functions and only
+        // accept Ctrl+Shift+V as paste, so a plain Ctrl+V pasted nothing in a
+        // terminal. Ctrl+Shift+V also pastes correctly in mainstream GUI apps
+        // (browsers, editors, GTK/Qt text fields), so it is the single safe binding.
         match Command::new("wtype")
-            .args(["-M", "ctrl", "v", "-m", "ctrl"])
+            .args([
+                "-M", "ctrl", "-M", "shift", "v", "-m", "shift", "-m", "ctrl",
+            ])
             .status()
         {
             Ok(status) => status.success(),
@@ -352,29 +360,33 @@ impl TextInsertService {
         let mut enigo = Enigo::new(&Settings::default())
             .map_err(|e| format!("Failed to initialise enigo: {}", e))?;
 
-        // Helper to ensure Control is released even on error
-        let result = {
-            // Press Control key
-            enigo
-                .key(Key::Control, Direction::Press)
-                .map_err(|e| format!("Failed to press Control: {}", e))?;
+        // Synthesise Ctrl+Shift+V (not Ctrl+V): terminal emulators only accept the
+        // shifted form as paste, and it also works in mainstream GUI apps. Hold
+        // both modifiers around the V click, then release in reverse press order
+        // (Shift, then Control), and always release both even if the click errors
+        // so we never leave a modifier stuck down.
+        enigo
+            .key(Key::Control, Direction::Press)
+            .map_err(|e| format!("Failed to press Control: {}", e))?;
+        if let Err(e) = enigo.key(Key::Shift, Direction::Press) {
+            // Release Control before bailing so it isn't left held.
+            let _ = enigo.key(Key::Control, Direction::Release);
+            return Err(format!("Failed to press Shift: {}", e));
+        }
 
-            // Click V key while Control is held
-            let click_result = enigo
-                .key(Key::Unicode('v'), Direction::Click)
-                .map_err(|e| format!("Failed to press V: {}", e));
+        let click_result = enigo
+            .key(Key::Unicode('v'), Direction::Click)
+            .map_err(|e| format!("Failed to press V: {}", e));
 
-            // Always release Control
-            let release_result = enigo.key(Key::Control, Direction::Release);
-            if let Err(e) = release_result {
-                tracing::error!("Failed to release Control key: {}", e);
-            }
+        if let Err(e) = enigo.key(Key::Shift, Direction::Release) {
+            tracing::error!("Failed to release Shift key: {}", e);
+        }
+        if let Err(e) = enigo.key(Key::Control, Direction::Release) {
+            tracing::error!("Failed to release Control key: {}", e);
+        }
 
-            click_result
-        };
-
-        result?;
-        debug!("Pasted via enigo");
+        click_result?;
+        debug!("Pasted via enigo (Ctrl+Shift+V)");
         Ok(())
     }
 }
@@ -473,7 +485,7 @@ pub fn insert_text_by_typing(
 
 /// Insert text at the current cursor position using clipboard paste.
 ///
-/// This copies the text to clipboard and simulates Cmd+V (macOS) or Ctrl+V (Linux).
+/// This copies the text to clipboard and simulates Cmd+V (macOS) or Ctrl+Shift+V (Linux).
 /// Faster than typing but temporarily modifies clipboard contents.
 /// The original clipboard content is restored after pasting.
 ///
