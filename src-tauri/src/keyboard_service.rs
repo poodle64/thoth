@@ -154,18 +154,10 @@ struct KeyState {
 }
 
 /// Registry of modifier shortcuts
+#[derive(Default)]
 struct ModifierRegistry {
     shortcuts: HashMap<String, ModifierShortcut>,
     key_states: HashMap<ModifierKey, KeyState>,
-}
-
-impl Default for ModifierRegistry {
-    fn default() -> Self {
-        Self {
-            shortcuts: HashMap::new(),
-            key_states: HashMap::new(),
-        }
-    }
 }
 
 static REGISTRY: OnceLock<RwLock<ModifierRegistry>> = OnceLock::new();
@@ -287,6 +279,26 @@ pub fn is_capture_active() -> bool {
 }
 
 /// Start the monitoring thread (called on app startup).
+/// Whether the modifier-key polling thread can run on this platform.
+///
+/// `device_query` reads global key state, which is unavailable on Wayland
+/// (the compositor does not expose it). Returns false on Wayland so neither the
+/// startup nor the runtime-restart path spins up a thread that can never see a
+/// key. Always true off Linux and on X11.
+fn modifier_monitoring_supported() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        if crate::shortcuts::get_display_server() == crate::shortcuts::DisplayServer::Wayland {
+            tracing::warn!(
+                "Modifier key shortcuts are not supported on Wayland (device_query cannot read \
+                 global key state). Use a function-key shortcut (F13, F14) instead."
+            );
+            return false;
+        }
+    }
+    true
+}
+
 /// Only enters Monitoring if there are registered modifier shortcuts.
 pub fn start_monitoring(app: AppHandle) {
     let has_shortcuts = !get_registry().read().shortcuts.is_empty();
@@ -295,17 +307,8 @@ pub fn start_monitoring(app: AppHandle) {
         return;
     }
 
-    // On Linux Wayland, device_query doesn't work
-    #[cfg(target_os = "linux")]
-    {
-        let display_server = crate::shortcuts::get_display_server();
-        if display_server == crate::shortcuts::DisplayServer::Wayland {
-            tracing::warn!(
-                "Modifier key shortcuts are not supported on Wayland. \
-                 Please use function key shortcuts (F13, F14) instead."
-            );
-            return;
-        }
+    if !modifier_monitoring_supported() {
+        return;
     }
 
     MODE.store(KeyboardMode::Monitoring as u8, Ordering::Release);
@@ -323,7 +326,7 @@ pub fn stop_service() {
 /// Sets mode to Monitoring and ensures thread is running.
 pub fn restart_monitoring(app: AppHandle) {
     let has_shortcuts = !get_registry().read().shortcuts.is_empty();
-    if has_shortcuts {
+    if has_shortcuts && modifier_monitoring_supported() {
         // Clear stale key states
         get_registry().write().key_states.clear();
         MODE.store(KeyboardMode::Monitoring as u8, Ordering::Release);
@@ -454,6 +457,8 @@ pub fn is_capture_active_cmd() -> bool {
 }
 
 /// Report a key event from the webview (used on Wayland where native capture doesn't work)
+// All args are required by the Tauri IPC contract; grouping would change the JS call-site.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn report_key_event(
     app: AppHandle,

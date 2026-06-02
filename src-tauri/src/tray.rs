@@ -132,6 +132,9 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Build the tray menu with current state
+// All args represent distinct, independent menu state; grouping would add
+// indirection without simplifying callers.
+#[allow(clippy::too_many_arguments)]
 fn build_tray_menu(
     app: &impl Manager<tauri::Wry>,
     is_recording: bool,
@@ -517,7 +520,31 @@ fn is_dark_theme() -> bool {
         }
     }
 
-    // Default to light theme assumption
+    // KDE/Plasma fallback: GNOME's gsettings is absent or empty there. Read the
+    // active colour scheme from kdeglobals, where a dark scheme name contains
+    // "dark" (e.g. "BreezeDark").
+    if let Some(home) = dirs::home_dir() {
+        let kdeglobals = home.join(".config").join("kdeglobals");
+        if let Ok(contents) = std::fs::read_to_string(&kdeglobals) {
+            for line in contents.lines() {
+                if let Some(scheme) = line.trim().strip_prefix("ColorScheme=") {
+                    if scheme.to_lowercase().contains("dark") {
+                        return true;
+                    }
+                    // A non-dark scheme is an explicit light signal.
+                    return false;
+                }
+            }
+        }
+    }
+
+    // No desktop reported a preference (non-GNOME/KDE compositor, or detection
+    // tools absent). Default to the light icon and note it so a user with a
+    // mismatched tray icon can report which desktop they run.
+    tracing::debug!(
+        "Could not detect a system colour scheme (no gsettings/kdeglobals/GTK_THEME signal); \
+         defaulting to the light-theme tray icon"
+    );
     false
 }
 

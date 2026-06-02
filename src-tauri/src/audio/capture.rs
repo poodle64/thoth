@@ -255,16 +255,29 @@ impl AudioRecorder {
         self.armed.store(false, Ordering::SeqCst);
 
         // Pause the stream so the audio callback is quiesced before we send the
-        // Stop sentinel. cpal guarantees no callback runs after pause() returns,
-        // which closes the only race that could enqueue a Samples block AFTER
-        // Stop (a callback that had already passed the armed check on another
-        // thread). With the stream paused, the channel's FIFO order is exactly
-        // the capture order and Stop is genuinely last. We re-play() below to
-        // keep the device warm for the next instant arm — pause/play does not
-        // reopen the device, so it costs nothing close to a cold open.
+        // Stop sentinel. This narrows the only race that could enqueue a Samples
+        // block AFTER Stop: a callback that had already passed the armed check
+        // and is mid-`send` on another thread. With the callback quiesced, the
+        // channel's FIFO order is exactly the capture order and Stop is last. We
+        // re-play() below to keep the device warm for the next instant arm —
+        // pause/play does not reopen the device, so it costs nothing close to a
+        // cold open.
+        //
+        // Data correctness does NOT depend on pause() succeeding. The `armed`
+        // flag was set false above with SeqCst ordering, so the callback stops
+        // forwarding new samples regardless. Some ALSA devices do not support
+        // pause(); there it is a no-op error (logged) and the worst case is one
+        // extra in-flight block of *real* captured audio arriving just before
+        // Stop — never corruption and never a dropped tail. Falling back to a
+        // full device close here would only make the next recording slow for no
+        // correctness gain, so we keep the stream warm.
         if let Some(stream) = self.stream.as_ref() {
             if let Err(e) = stream.pause() {
-                tracing::warn!("AudioRecorder::disarm: stream.pause() failed: {}", e);
+                tracing::debug!(
+                    "AudioRecorder::disarm: stream.pause() not supported/failed ({}); the armed \
+                     flag still guarantees no new samples are forwarded",
+                    e
+                );
             }
         }
 
@@ -493,11 +506,7 @@ mod tests {
         while sent < frames {
             let n = block_frames.min(frames - sent);
             let mut block = Vec::with_capacity(n * channels);
-            for _ in 0..n {
-                for _ in 0..channels {
-                    block.push(0.1f32);
-                }
-            }
+            block.extend(std::iter::repeat_n(0.1f32, n * channels));
             tx.send(RecordingMsg::Samples(block)).unwrap();
             sent += n;
         }

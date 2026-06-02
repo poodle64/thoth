@@ -119,6 +119,30 @@ pub fn find_input_device_by_id(id_str: &str) -> Option<cpal::Device> {
     host.device_by_id(&device_id)
 }
 
+/// The configured-device id we last warned the user about, so we emit the
+/// fallback toast only when a *different* device goes missing rather than on
+/// every recording with the same missing device.
+static LAST_FALLBACK_ID: std::sync::OnceLock<parking_lot::Mutex<Option<String>>> =
+    std::sync::OnceLock::new();
+
+/// Emit a user-facing notice that the configured input device was not found and
+/// the default is being used, deduped per distinct missing id.
+fn notify_device_fallback_once(missing_id: &str) {
+    let cell = LAST_FALLBACK_ID.get_or_init(|| parking_lot::Mutex::new(None));
+    let mut last = cell.lock();
+    if last.as_deref() == Some(missing_id) {
+        return; // Already notified for this device.
+    }
+    *last = Some(missing_id.to_string());
+    drop(last);
+
+    crate::app_handle::emit(
+        "audio-device-fallback",
+        "Your selected microphone is unavailable; recording from the system default device \
+         instead. Re-select your microphone in Settings if you want to keep using it.",
+    );
+}
+
 /// Get the input device to use for recording, based on config
 ///
 /// If a device ID is configured and found, uses that device.
@@ -147,6 +171,12 @@ pub fn get_recording_device(device_id: Option<&str>) -> Option<cpal::Device> {
             id,
             device_list.join(", ")
         );
+
+        // Surface the fallback to the user once per distinct missing device, so a
+        // mic that was unplugged or whose opaque cpal id changed (e.g. after an
+        // ALSA/PulseAudio/PipeWire switch) does not silently record from the
+        // default device. Deduped so it does not toast on every recording.
+        notify_device_fallback_once(id);
     }
 
     // When falling back to the default, check whether it is a Bluetooth device.

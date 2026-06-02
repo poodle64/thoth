@@ -4,6 +4,65 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.3] - 2026-06-02
+
+A Linux/Wayland readiness pass. The audit behind it asked, for every OS-touching
+code path, whether Linux was genuinely handled or silently degraded; these
+changes close the real gaps and make every Wayland limitation visible to the
+user rather than a silent dead feature.
+
+### Added
+
+- **Global shortcuts now work on Wayland** via the XDG Desktop Portal
+  (`GlobalShortcuts`), which KDE, wlroots-based compositors, and GNOME 48+
+  implement. Previously the Tauri global-shortcut plugin was used on every Linux
+  session, but it only works under X11, so on a Wayland session the recording
+  hotkey silently did nothing with no explanation. On a compositor without the
+  portal, Thoth now tells you (a notification) that global shortcuts are
+  unavailable and to use a function-key shortcut or an X11 session. The portal
+  assigns the actual key (the app can only request a preferred one), and the
+  assigned binding is reported back to the UI.
+- A Linux/macOS CI workflow (build, `rustfmt`, `clippy -D warnings`, tests,
+  `.desktop` validation, frontend type-check) now runs on every pull request.
+  Previously only the release workflow compiled the code, so Linux-only breakage
+  was invisible until a release was cut. The Linux job builds with the same
+  Vulkan feature set the release ships, so the Linux-only code is compiled on
+  every change.
+- A user notice when the configured microphone is unavailable and recording
+  falls back to the system default device (e.g. an unplugged USB mic), instead
+  of silently switching.
+- On Linux/Wayland without `wtype`, a one-time notice explaining that installing
+  it makes text insertion seamless (otherwise GNOME prompts for "Allow Remote
+  Interaction" each session).
+- Contributor guide for building on Linux ([docs/development/linux-setup.md](docs/development/linux-setup.md)),
+  covering build dependencies, runtime packages, the AppImage GPU caveat, and
+  display-server behaviour.
+
+### Changed
+
+- The recording indicator degrades cleanly on Wayland: it no longer tries to
+  follow the cursor (Wayland does not expose the global cursor position) and
+  uses a fixed on-screen position instead. The cursor-tracking thread no longer
+  starts on Wayland, where it would have polled indefinitely for a position it
+  can never read.
+- Modifier-only shortcuts (e.g. double-tap Right Shift) are now correctly
+  refused on Wayland from the runtime re-registration path as well as at
+  startup; previously re-registering a shortcut could start a key-polling thread
+  on Wayland that cannot work.
+- The Linux `.deb` now depends on `libvulkan1` (needed by the Vulkan GPU build
+  at runtime) and recommends `wtype`, `xdg-utils`, and the AppIndicator runtime.
+- Whisper initialisation logs the actual compiled GPU backend (Metal/CUDA/ROCm/
+  Vulkan/CPU) rather than always claiming "Metal GPU"; the CPU-only Linux build
+  now tells you how to enable GPU acceleration.
+
+### Fixed
+
+- The FluidAudio model-cache path (a macOS `~/Library/...` location) is no longer
+  constructed on Linux, where it would have produced a bogus path; storage
+  accounting and cleanup correctly treat it as not applicable off macOS.
+- Tray icon theme detection now has a KDE/Plasma fallback (reads `kdeglobals`),
+  so the icon matches dark themes on KDE, not just GNOME.
+
 ## [2026.6.2] - 2026-06-02
 
 ### Fixed

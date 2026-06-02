@@ -74,7 +74,11 @@ impl WhisperTranscriptionService {
         #[cfg(all(not(any(feature = "cuda", feature = "hipblas")), feature = "vulkan"))]
         tracing::info!("Whisper model loaded with Vulkan GPU acceleration");
         #[cfg(not(any(feature = "cuda", feature = "hipblas", feature = "vulkan")))]
-        tracing::info!("Whisper model loaded with CPU backend (no GPU feature enabled)");
+        tracing::info!(
+            "Whisper model loaded with CPU backend (no GPU feature enabled). For GPU \
+             acceleration, build with --features vulkan (vendor-neutral), cuda (NVIDIA), or \
+             hipblas (AMD). Release Linux builds ship with Vulkan."
+        );
 
         Ok(ctx)
     }
@@ -156,9 +160,9 @@ impl WhisperTranscriptionService {
             const LEADING_SILENCE: usize = 8_000; // 500 ms at 16 kHz
             const TRAILING_SILENCE: usize = 24_000; // 1.5 s at 16 kHz
             let mut padded = Vec::with_capacity(LEADING_SILENCE + samples.len() + TRAILING_SILENCE);
-            padded.extend(std::iter::repeat(0.0f32).take(LEADING_SILENCE));
+            padded.extend(std::iter::repeat_n(0.0f32, LEADING_SILENCE));
             padded.extend(samples);
-            padded.extend(std::iter::repeat(0.0f32).take(TRAILING_SILENCE));
+            padded.extend(std::iter::repeat_n(0.0f32, TRAILING_SILENCE));
             padded
         };
 
