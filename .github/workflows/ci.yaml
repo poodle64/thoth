@@ -44,21 +44,46 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
 
+    # macOS Apple Silicon runners: whisper.cpp's GGML detects the i8mm CPU
+    # feature via -march=native and emits vmmlaq_s32 intrinsics, then fails to
+    # compile because the target feature isn't enabled for the function being
+    # inlined into. GGML_NATIVE=OFF stops GGML overriding our -march, and the
+    # explicit armv8 baseline keeps the i8mm intrinsics out. Empty on Linux.
+    env:
+      GGML_NATIVE: ${{ matrix.platform == 'macos-15' && 'OFF' || '' }}
+      CFLAGS: ${{ matrix.platform == 'macos-15' && '-march=armv8-a' || '' }}
+      CXXFLAGS: ${{ matrix.platform == 'macos-15' && '-march=armv8-a' || '' }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install Vulkan SDK (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          # whisper.cpp's GGML Vulkan backend compiles compute shaders at build
+          # time; its CMake does find_package(Vulkan COMPONENTS glslc REQUIRED)
+          # and find_package(SPIRV-Headers REQUIRED). The glslc binary is NOT
+          # packaged in Ubuntu 22.04 (jammy) at all — it only appears from noble
+          # onward — so the LunarG apt repo is the supported way to get it on a
+          # jammy runner. vulkan-sdk pulls in glslc, the loader/headers, and the
+          # SPIRV headers, replacing libvulkan-dev/spirv-headers.
+          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc \
+            | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc > /dev/null
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list \
+            http://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+          sudo apt-get update
+          sudo apt-get install -y vulkan-sdk
+
       - name: Install system dependencies (Linux)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
-          sudo apt-get update
-          # GUI + audio libs Tauri needs to compile, plus the Vulkan toolchain
-          # whisper.cpp's GGML backend requires to compile its shaders (glslc +
-          # SPIRV-Headers, beyond libvulkan-dev). desktop-file-utils provides
-          # desktop-file-validate used below. Mirrors release.yaml.
+          # GUI + audio libs Tauri needs to compile. desktop-file-utils provides
+          # desktop-file-validate used below. The Vulkan toolchain is installed
+          # by the Vulkan SDK step above.
           sudo apt-get install -y \
             libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
-            patchelf libasound2-dev libvulkan-dev glslc spirv-headers desktop-file-utils
+            patchelf libasound2-dev desktop-file-utils
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

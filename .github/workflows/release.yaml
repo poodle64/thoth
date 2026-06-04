@@ -60,18 +60,30 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Vulkan SDK (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          # whisper.cpp's GGML Vulkan backend compiles its compute shaders at
+          # build time; its CMake requires the glslc compiler
+          # (find_package(Vulkan COMPONENTS glslc REQUIRED)) and SPIRV-Headers.
+          # The glslc binary is NOT packaged in Ubuntu 22.04 (jammy) — it only
+          # appears from noble onward — so the LunarG apt repo is the supported
+          # way to get it on a jammy runner. vulkan-sdk supplies glslc, the
+          # loader/headers, and the SPIRV headers. At runtime users need only
+          # libvulkan.so.1 plus a GPU Vulkan driver.
+          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc \
+            | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc > /dev/null
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list \
+            http://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+          sudo apt-get update
+          sudo apt-get install -y vulkan-sdk
+
       - name: Install system dependencies (Linux)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
-          sudo apt-get update
-          # Vulkan toolchain: whisper.cpp's GGML Vulkan backend compiles its compute
-          # shaders at build time. Its CMake requires the glslc compiler
-          # (find_package(Vulkan COMPONENTS glslc REQUIRED)) and SPIRV-Headers
-          # (find_package(SPIRV-Headers REQUIRED)), beyond the Vulkan loader/headers
-          # in libvulkan-dev. glslang-tools (glslangValidator) does NOT satisfy this.
-          # At runtime users need only libvulkan.so.1 plus a GPU Vulkan driver.
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev \
-            libvulkan-dev glslc spirv-headers
+          # GUI + audio libs Tauri needs to compile. The Vulkan toolchain is
+          # installed by the Vulkan SDK step above.
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -87,6 +99,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # GGML_NATIVE=OFF stops GGML's -march=native from re-enabling the i8mm
+          # CPU feature on Apple Silicon and overriding the armv8 baseline below;
+          # without it the -march flags alone are insufficient and the build
+          # fails on vmmlaq_s32 (i8mm) intrinsics.
+          GGML_NATIVE: ${{ matrix.platform == 'macos-15' && 'OFF' || '' }}
           CFLAGS: ${{ matrix.platform == 'macos-15' && '-march=armv8-a' || '' }}
           CXXFLAGS: ${{ matrix.platform == 'macos-15' && '-march=armv8-a' || '' }}
           RUSTFLAGS: ${{ matrix.rustflags }}
