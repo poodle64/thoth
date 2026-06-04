@@ -2,7 +2,7 @@
 name = "thoth"
 version = "2026.6.3"
 description = "Privacy-first, offline-capable voice transcription application"
-authors = ["Paul Roberts"]
+authors = ["poodle64"]
 license = "MIT"
 edition = "2021"
 
