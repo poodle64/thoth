@@ -24,14 +24,17 @@ pub mod shortcuts;
 pub mod sound;
 pub mod storage;
 pub mod text_insert;
+#[cfg(target_os = "macos")]
 mod traffic_lights;
 pub mod transcription;
 pub mod tray;
 
 /// Header height in pixels (must match CSS --header-height)
+#[cfg(target_os = "macos")]
 const HEADER_HEIGHT: f64 = 52.0;
 
 /// Traffic light X position (left margin)
+#[cfg(target_os = "macos")]
 const TRAFFIC_LIGHT_X: f64 = 13.0;
 
 /// Register a single shortcut, using keyboard_service for standalone modifiers

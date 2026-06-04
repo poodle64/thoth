@@ -3,6 +3,8 @@
 //! Positions the close/minimize/zoom buttons to be vertically centred
 //! in a custom title bar height.
 
+#![cfg(target_os = "macos")]
+
 use tauri::{Runtime, WebviewWindow};
 
 /// Position traffic lights to be vertically centred within the given header height.

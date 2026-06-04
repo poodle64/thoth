@@ -279,7 +279,7 @@ impl TextInsertService {
                 if c.is_control() {
                     continue;
                 }
-                match Command::new("wtype").arg(&c.to_string()).status() {
+                match Command::new("wtype").arg(c.to_string()).status() {
                     Ok(status) if status.success() => {}
                     _ => return false,
                 }

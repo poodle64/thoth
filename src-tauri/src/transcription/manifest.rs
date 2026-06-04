@@ -318,6 +318,7 @@ pub fn get_model_disk_size(model: &RemoteModelInfo) -> Option<u64> {
 }
 
 /// Recursively calculate directory size in bytes
+#[cfg(all(target_os = "macos", feature = "fluidaudio"))]
 fn dir_size_recursive(path: &std::path::Path) -> u64 {
     if !path.exists() {
         return 0;

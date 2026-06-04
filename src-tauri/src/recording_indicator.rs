@@ -602,6 +602,7 @@ pub fn prewarm_indicator_window(app: &AppHandle) {
             // first-show latency is preferable to a stuck floating window.
             #[cfg(target_os = "linux")]
             {
+                let _ = &window; // used only in the non-linux branch below
                 tracing::info!(
                     "Recording indicator window ready (Linux - left hidden; no show/hide pre-warm)"
                 );

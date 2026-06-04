@@ -388,6 +388,10 @@ async fn handle_get_transcribe_job(Path(id): Path<String>) -> Result<impl IntoRe
 ///
 /// Uses `ValidateRequestHeaderLayer::custom` with a closure so the JSON error
 /// body is preserved (the `accept` variant returns a bare status only).
+// The Err variant is an axum::http::Response<Body> whose size is dictated by
+// the tower ValidateRequestHeaderLayer API; boxing it would change the trait
+// bound and break the layer type.
+#[allow(clippy::result_large_err)]
 fn bearer_auth_layer(
     token: String,
 ) -> ValidateRequestHeaderLayer<
