@@ -61,6 +61,101 @@ fn get_manager() -> &'static RwLock<ShortcutManagerState> {
     MANAGER.get_or_init(|| RwLock::new(ShortcutManagerState::new()))
 }
 
+/// Run the action bound to a shortcut id (toggle recording, copy last
+/// transcription, toggle enhancement, or emit `shortcut-triggered` for the
+/// frontend to handle).
+///
+/// This is the single source of truth for what a shortcut *does*, independent
+/// of how the press was detected. The Tauri global-shortcut plugin (macOS and
+/// Linux/X11) calls it from its `on_shortcut` callback; the Wayland XDG portal
+/// activation loop calls it from its D-Bus signal stream. Both paths share this
+/// debounce, lock-screen suppression, and dispatch so behaviour cannot drift
+/// between platforms.
+pub(crate) fn dispatch_shortcut_action<R: Runtime>(app: &AppHandle<R>, shortcut_id: &str) {
+    // Discard events during capture mode. Queued OS events may fire even after
+    // unregistration; this guard prevents phantom triggers.
+    if crate::keyboard_service::is_capture_active() {
+        tracing::debug!(
+            "Discarding shortcut event for '{}' — capture mode active",
+            shortcut_id
+        );
+        return;
+    }
+
+    // Suppress shortcuts when the screen is locked or the screensaver is active.
+    // Prevents accidental recording when the user presses a key to dismiss the
+    // lock screen.
+    if crate::platform::is_screen_locked() {
+        tracing::debug!(
+            "Discarding shortcut event for '{}' — screen is locked",
+            shortcut_id
+        );
+        return;
+    }
+
+    // Debounce rapid press events (key bounce protection). Only allow one press
+    // per PRESS_DEBOUNCE_MS window per shortcut.
+    {
+        let mut manager = get_manager().write();
+        if let Some(last) = manager.last_press_times.get(shortcut_id) {
+            let elapsed = last.elapsed().as_millis();
+            if elapsed < PRESS_DEBOUNCE_MS as u128 {
+                tracing::info!(
+                    "Debounced shortcut press for '{}' ({}ms since last, threshold {}ms)",
+                    shortcut_id,
+                    elapsed,
+                    PRESS_DEBOUNCE_MS
+                );
+                return;
+            }
+        }
+        manager
+            .last_press_times
+            .insert(shortcut_id.to_string(), Instant::now());
+    }
+
+    tracing::info!("Shortcut pressed: {}", shortcut_id);
+
+    // For recording shortcuts, show indicator and play the start cue IMMEDIATELY
+    // in Rust before emitting to the frontend. This eliminates JS round-trip delay.
+    let is_toggle_recording = shortcut_id == shortcut_ids::TOGGLE_RECORDING
+        || shortcut_id == shortcut_ids::TOGGLE_RECORDING_ALT;
+    if is_toggle_recording {
+        recording_indicator::maybe_play_start_indicator(app);
+    }
+
+    // Handle copy-last-transcription directly in Rust (no frontend round-trip).
+    if shortcut_id == shortcut_ids::COPY_LAST_TRANSCRIPTION {
+        match crate::database::transcription::list_transcriptions(Some(1), Some(0)) {
+            Ok(transcriptions) => {
+                if let Some(t) = transcriptions.into_iter().next() {
+                    match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(t.text)) {
+                        Ok(()) => {
+                            tracing::info!("Copied last transcription to clipboard via shortcut")
+                        }
+                        Err(e) => tracing::error!("Failed to copy to clipboard: {}", e),
+                    }
+                } else {
+                    tracing::info!("No transcriptions to copy");
+                }
+            }
+            Err(e) => tracing::error!("Failed to get last transcription: {}", e),
+        }
+        return;
+    }
+
+    // Handle toggle-enhancement directly in Rust (no frontend round-trip).
+    if shortcut_id == shortcut_ids::TOGGLE_ENHANCEMENT {
+        crate::tray::handle_toggle_enhancement_shortcut(app);
+        return;
+    }
+
+    match app.emit("shortcut-triggered", shortcut_id.to_string()) {
+        Ok(_) => tracing::info!("Emitted shortcut-triggered event for: {}", shortcut_id),
+        Err(e) => tracing::error!("Failed to emit shortcut-triggered event: {}", e),
+    }
+}
+
 /// Get the default shortcuts for Thoth
 pub fn get_defaults() -> Vec<ShortcutInfo> {
     vec![
@@ -113,7 +208,6 @@ pub fn register<R: Runtime>(
 
     // Clone values for the closure
     let shortcut_id = id.clone();
-    let shortcut_accel = accelerator.clone();
     let app_handle = app.clone();
 
     tracing::debug!(
@@ -122,120 +216,22 @@ pub fn register<R: Runtime>(
         accelerator
     );
 
-    // Register with the global shortcut plugin
+    // Register with the global shortcut plugin. The callback only routes the
+    // press to the shared dispatcher; all debounce/suppression/action logic
+    // lives in `dispatch_shortcut_action` so the Wayland portal path behaves
+    // identically.
     global_shortcut
-        .on_shortcut(accelerator.as_str(), move |_app, shortcut, event| {
-            // Discard events during capture mode. Queued OS events may fire
-            // even after unregistration; this guard prevents phantom triggers.
-            if crate::keyboard_service::is_capture_active() {
-                tracing::debug!(
-                    "Discarding shortcut event for '{}' — capture mode active",
-                    shortcut_id
-                );
-                return;
-            }
-
-            // Suppress shortcuts when the screen is locked or the screensaver
-            // is active. Prevents accidental recording when the user presses a
-            // key to dismiss the lock screen.
-            if crate::platform::is_screen_locked() {
-                tracing::debug!(
-                    "Discarding shortcut event for '{}' — screen is locked",
-                    shortcut_id
-                );
-                return;
-            }
-
-            // Log at INFO level so it always shows
-            tracing::info!(
-                ">>> Shortcut callback fired for '{}' (accelerator: '{}', shortcut: {:?})",
-                shortcut_id,
-                shortcut_accel,
-                shortcut
-            );
-            match event.state {
+        .on_shortcut(
+            accelerator.as_str(),
+            move |_app, _shortcut, event| match event.state {
                 ShortcutState::Pressed => {
-                    // Debounce rapid press events (key bounce protection).
-                    // Only allow one press per PRESS_DEBOUNCE_MS window per shortcut.
-                    {
-                        let mut manager = get_manager().write();
-                        if let Some(last) = manager.last_press_times.get(&shortcut_id) {
-                            let elapsed = last.elapsed().as_millis();
-                            if elapsed < PRESS_DEBOUNCE_MS as u128 {
-                                tracing::info!(
-                                    "Debounced shortcut press for '{}' ({}ms since last, threshold {}ms)",
-                                    shortcut_id,
-                                    elapsed,
-                                    PRESS_DEBOUNCE_MS
-                                );
-                                return;
-                            }
-                        }
-                        manager
-                            .last_press_times
-                            .insert(shortcut_id.clone(), Instant::now());
-                    }
-
-                    tracing::info!("Shortcut pressed: {}", shortcut_id);
-
-                    // For recording shortcuts, show indicator and play bing IMMEDIATELY
-                    // in Rust before emitting to frontend. This eliminates JS round-trip delay.
-                    let is_toggle_recording = shortcut_id == shortcut_ids::TOGGLE_RECORDING
-                        || shortcut_id == shortcut_ids::TOGGLE_RECORDING_ALT;
-                    if is_toggle_recording {
-                        recording_indicator::maybe_play_start_indicator(&app_handle);
-                    }
-
-                    // Handle copy-last-transcription directly in Rust
-                    // (no frontend round-trip needed)
-                    if shortcut_id == shortcut_ids::COPY_LAST_TRANSCRIPTION {
-                        match crate::database::transcription::list_transcriptions(
-                            Some(1),
-                            Some(0),
-                        ) {
-                            Ok(transcriptions) => {
-                                if let Some(t) = transcriptions.into_iter().next() {
-                                    match arboard::Clipboard::new()
-                                        .and_then(|mut cb| cb.set_text(t.text))
-                                    {
-                                        Ok(()) => tracing::info!(
-                                            "Copied last transcription to clipboard via shortcut"
-                                        ),
-                                        Err(e) => tracing::error!(
-                                            "Failed to copy to clipboard: {}",
-                                            e
-                                        ),
-                                    }
-                                } else {
-                                    tracing::info!("No transcriptions to copy");
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to get last transcription: {}", e)
-                            }
-                        }
-                        return;
-                    }
-
-                    // Handle toggle-enhancement directly in Rust
-                    // (no frontend round-trip needed)
-                    if shortcut_id == shortcut_ids::TOGGLE_ENHANCEMENT {
-                        crate::tray::handle_toggle_enhancement_shortcut(&app_handle);
-                        return;
-                    }
-
-                    match app_handle.emit("shortcut-triggered", shortcut_id.clone()) {
-                        Ok(_) => {
-                            tracing::info!("Emitted shortcut-triggered event for: {}", shortcut_id)
-                        }
-                        Err(e) => tracing::error!("Failed to emit shortcut-triggered event: {}", e),
-                    }
+                    dispatch_shortcut_action(&app_handle, &shortcut_id);
                 }
                 ShortcutState::Released => {
                     tracing::debug!("Shortcut released: {}", shortcut_id);
                 }
-            }
-        })
+            },
+        )
         .map_err(|e| format!("Failed to register shortcut '{}': {}", accelerator, e))?;
 
     // Store in our manager state
@@ -257,6 +253,31 @@ pub fn register<R: Runtime>(
         accelerator
     );
     Ok(())
+}
+
+/// Record a shortcut in the manager state without binding it with the OS.
+///
+/// Used on Wayland, where the XDG portal owns the actual binding: the manager
+/// still needs to know the shortcut exists so listing and unregistration behave
+/// consistently with the X11/macOS paths.
+pub fn record_shortcut(id: String, accelerator: String, description: String) {
+    let info = ShortcutInfo {
+        id: id.clone(),
+        accelerator,
+        description,
+        is_enabled: true,
+    };
+    get_manager().write().shortcuts.insert(id, info);
+}
+
+/// Forget a recorded shortcut without an OS unbind call (Wayland book-keeping).
+pub fn forget_shortcut(id: &str) {
+    get_manager().write().shortcuts.remove(id);
+}
+
+/// Clear all recorded shortcuts without OS unbind calls (Wayland book-keeping).
+pub fn clear_shortcuts() {
+    get_manager().write().shortcuts.clear();
 }
 
 /// Unregister a shortcut by its ID

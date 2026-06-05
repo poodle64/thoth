@@ -206,7 +206,7 @@ pub async fn download_model(app: AppHandle, model_id: Option<String>) -> Result<
             },
         );
 
-        let result = tokio::task::spawn_blocking(|| super::init_fluidaudio_transcription())
+        let result = tokio::task::spawn_blocking(super::init_fluidaudio_transcription)
             .await
             .map_err(|e| format!("FluidAudio init task panicked: {}", e))?;
 

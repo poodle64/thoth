@@ -132,7 +132,7 @@ pub fn decode_audio_to_wav(
 
     loop {
         // Periodic cancellation check
-        if packet_count % CANCEL_CHECK_INTERVAL == 0 && cancel.load(Ordering::Relaxed) {
+        if packet_count.is_multiple_of(CANCEL_CHECK_INTERVAL) && cancel.load(Ordering::Relaxed) {
             // Clean up partial output
             drop(wav_writer);
             let _ = std::fs::remove_file(output_path);

@@ -199,10 +199,15 @@ mod tests {
         // Put loud noise (simulating speech) from 10s to 20s
         let speech_start = 10 * sample_rate as usize; // 160_000
         let speech_end = 20 * sample_rate as usize; // 320_000
-        for i in speech_start..speech_end {
+        for (i, sample) in samples
+            .iter_mut()
+            .enumerate()
+            .take(speech_end)
+            .skip(speech_start)
+        {
             // Generate a tone that VAD will detect as speech
             let t = i as f32 / sample_rate as f32;
-            samples[i] = (t * 440.0 * 2.0 * std::f32::consts::PI).sin() * 0.5;
+            *sample = (t * 440.0 * 2.0 * std::f32::consts::PI).sin() * 0.5;
         }
 
         let (start, end) = trim_silence(&samples, sample_rate);

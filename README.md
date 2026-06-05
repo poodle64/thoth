@@ -205,7 +205,7 @@ pnpm tauri build -- --features hipblas
 pnpm tauri build -- --features vulkan
 ```
 
-**NixOS users:** Use `nix develop` to enter the development environment with CUDA support pre-configured. The flake includes all necessary libraries and sets up `LD_LIBRARY_PATH` and `RUSTFLAGS` for CUDA linking.
+Building from source needs the Linux system libraries and the Vulkan toolchain; see [docs/development/linux-setup.md](docs/development/linux-setup.md) for the full dependency list, runtime packages, and display-server notes.
 
 If GPU initialisation fails, Thoth automatically falls back to CPU transcription.
 

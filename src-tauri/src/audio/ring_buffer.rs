@@ -226,7 +226,7 @@ mod tests {
 
         // Read everything
         let all = buffer.read_all();
-        assert!(all.len() > 0);
+        assert!(!all.is_empty());
     }
 
     #[test]

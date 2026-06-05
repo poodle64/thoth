@@ -1,11 +1,19 @@
-//! Linux-specific shortcut implementation
+//! Linux-specific shortcut implementation.
 //!
-//! Handles global shortcuts on Linux with support for both X11 and Wayland:
-//! - X11: Uses Tauri's GlobalShortcut plugin (works via X11 grab)
-//! - Wayland: Attempts to use Tauri's plugin (may have partial support)
+//! Global shortcuts on Linux take one of two routes depending on the display
+//! server, detected at runtime:
 //!
-//! The module automatically detects the display server at runtime and
-//! provides appropriate warnings if shortcuts may not work.
+//! - **X11**: Tauri's GlobalShortcut plugin, which grabs the key combination
+//!   directly. This works exactly as it does on macOS.
+//! - **Wayland**: the XDG Desktop Portal `GlobalShortcuts` interface (see
+//!   [`super::wayland_portal`]). Wayland has no client-side hotkey API, so the
+//!   Tauri plugin cannot bind a global shortcut there. The portal is set up
+//!   once at application start; per-shortcut `register` calls on Wayland do not
+//!   drive the binding (the portal dialog does) but still record the shortcut
+//!   so the rest of the app sees a consistent registered-shortcuts list.
+//!
+//! Where a route cannot work on the user's compositor, the failure is surfaced
+//! (logged and emitted to the frontend), never silent.
 
 use tauri::{AppHandle, Runtime};
 
@@ -76,36 +84,57 @@ pub fn get_display_server() -> DisplayServer {
     *DISPLAY_SERVER.get_or_init(detect_display_server)
 }
 
-/// Register a shortcut on Linux
+/// Set up the Wayland global-shortcut portal, once, at application start.
 ///
-/// Uses Tauri's GlobalShortcut plugin for both X11 and Wayland.
-/// On Wayland, global shortcuts may not work due to security restrictions.
+/// No-op on X11 (the Tauri plugin handles shortcuts there per-registration).
+/// On Wayland this opens the portal session; the binding result is delivered to
+/// the frontend via the `wayland-shortcuts-status` event.
+pub fn init_global_shortcuts(app: &AppHandle) {
+    if get_display_server() == DisplayServer::Wayland {
+        tracing::info!("Wayland session: setting up the XDG GlobalShortcuts portal");
+        super::wayland_portal::setup(app);
+    }
+}
+
+/// Register a shortcut on Linux.
+///
+/// On X11, binds the accelerator via Tauri's GlobalShortcut plugin. On Wayland,
+/// the actual binding is owned by the portal (set up at app start via
+/// [`init_global_shortcuts`]); here we only record the shortcut in the manager
+/// so listing and unregistration stay consistent, because the Tauri plugin
+/// cannot bind a global shortcut under Wayland.
 pub fn register<R: Runtime>(
     app: &AppHandle<R>,
     id: String,
     accelerator: String,
     description: String,
 ) -> Result<(), String> {
-    let display_server = get_display_server();
-
-    tracing::info!("Registering Linux shortcut '{}' on {}", id, display_server);
-
-    // Warn about Wayland limitations
-    if display_server == DisplayServer::Wayland {
-        tracing::warn!(
-            "Running on Wayland: global shortcuts may not work. \
-             Consider using XWayland or X11 session for full shortcut support."
-        );
+    match get_display_server() {
+        DisplayServer::Wayland => {
+            tracing::info!(
+                "Wayland session: shortcut '{}' is bound through the desktop portal, not the \
+                 Tauri plugin; recording it for listing only",
+                id
+            );
+            manager::record_shortcut(id, accelerator, description);
+            Ok(())
+        }
+        _ => {
+            // X11 (and Unknown — attempt the plugin, which works under X11/XWayland).
+            manager::register(app, id, accelerator, description)
+        }
     }
-
-    // Use Tauri's GlobalShortcut plugin for all display servers
-    // It may have partial Wayland support via XDG Desktop Portal
-    manager::register(app, id, accelerator, description)
 }
 
 /// Unregister a shortcut on Linux
 pub fn unregister<R: Runtime>(app: &AppHandle<R>, id: &str) -> Result<(), String> {
-    manager::unregister(app, id)
+    match get_display_server() {
+        DisplayServer::Wayland => {
+            manager::forget_shortcut(id);
+            Ok(())
+        }
+        _ => manager::unregister(app, id),
+    }
 }
 
 /// List all registered shortcuts on Linux
@@ -115,6 +144,10 @@ pub fn list_registered() -> Vec<ShortcutInfo> {
 
 /// Unregister all shortcuts on Linux
 pub fn unregister_all<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    if get_display_server() == DisplayServer::Wayland {
+        manager::clear_shortcuts();
+        return Ok(());
+    }
     manager::unregister_all(app)
 }
 

@@ -243,6 +243,20 @@ fn clamp_to_monitor(x: f64, y: f64, monitor: &CachedMonitor) -> (f64, f64) {
 /// The indicator window is made click-through during tracking. Calling this
 /// when already tracking is a no-op (uses atomic compare_exchange).
 pub fn start_tracking() {
+    // On Wayland the compositor does not expose the global cursor position, so
+    // `get_mouse_position()` returns `None` on every poll. Spawning the tracking
+    // thread would burn wake-ups polling for a value it can never read and the
+    // indicator would never move. Refuse to start and let the caller fall back
+    // to a fixed indicator position instead.
+    #[cfg(target_os = "linux")]
+    if is_wayland() {
+        tracing::info!(
+            "Wayland session: cursor-following indicator disabled (Wayland does not expose \
+             global cursor position); using a fixed indicator position instead"
+        );
+        return;
+    }
+
     let tracker = get_tracker();
 
     // Atomic compare_exchange to prevent double-start

@@ -250,9 +250,7 @@ async fn handle_update_dictionary(
     Ok(StatusCode::OK)
 }
 
-async fn handle_delete_dictionary(
-    Path(index): Path<usize>,
-) -> Result<impl IntoResponse, AppError> {
+async fn handle_delete_dictionary(Path(index): Path<usize>) -> Result<impl IntoResponse, AppError> {
     check_dictionary_index(index)?;
     crate::dictionary::remove_dictionary_entry(index)?;
     Ok(StatusCode::OK)
@@ -279,9 +277,7 @@ async fn handle_export_dictionary() -> Result<impl IntoResponse, AppError> {
     Ok(Json(value))
 }
 
-async fn handle_get_transcription(
-    Path(id): Path<String>,
-) -> Result<impl IntoResponse, AppError> {
+async fn handle_get_transcription(Path(id): Path<String>) -> Result<impl IntoResponse, AppError> {
     match crate::database::transcription::get_transcription_by_id(id)? {
         Some(t) => Ok(Json(t).into_response()),
         None => Err(AppError::NotFound("transcription not found".to_string())),
@@ -371,7 +367,9 @@ async fn handle_post_transcribe(
     let job_id = submit_transcribe_job(payload.path)
         .await
         .map_err(AppError::BadRequest)?;
-    Ok(Json(serde_json::json!({ "jobId": job_id, "status": "queued" })))
+    Ok(Json(
+        serde_json::json!({ "jobId": job_id, "status": "queued" }),
+    ))
 }
 
 async fn handle_get_transcribe_job(Path(id): Path<String>) -> Result<impl IntoResponse, AppError> {
@@ -390,6 +388,10 @@ async fn handle_get_transcribe_job(Path(id): Path<String>) -> Result<impl IntoRe
 ///
 /// Uses `ValidateRequestHeaderLayer::custom` with a closure so the JSON error
 /// body is preserved (the `accept` variant returns a bare status only).
+// The Err variant is an axum::http::Response<Body> whose size is dictated by
+// the tower ValidateRequestHeaderLayer API; boxing it would change the trait
+// bound and break the layer type.
+#[allow(clippy::result_large_err)]
 fn bearer_auth_layer(
     token: String,
 ) -> ValidateRequestHeaderLayer<
@@ -409,9 +411,8 @@ fn bearer_auth_layer(
         if ok {
             Ok(())
         } else {
-            let body_bytes =
-                serde_json::to_vec(&serde_json::json!({ "error": "Unauthorized" }))
-                    .unwrap_or_default();
+            let body_bytes = serde_json::to_vec(&serde_json::json!({ "error": "Unauthorized" }))
+                .unwrap_or_default();
             let body = axum::body::Body::from(body_bytes);
             let mut res = axum::http::Response::new(body);
             *res.status_mut() = StatusCode::UNAUTHORIZED;
@@ -559,10 +560,7 @@ pub async fn get_integrations_status() -> Result<IntegrationsStatus, String> {
 /// When enabling: generates a token if none exists, then starts the server.
 /// When disabling: stops the server and persists the updated flag.
 #[tauri::command]
-pub async fn set_api_enabled(
-    app: tauri::AppHandle,
-    enabled: bool,
-) -> Result<(), String> {
+pub async fn set_api_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let _ = app; // AppHandle reserved for future event emission
     let mut cfg = crate::config::get_config()?;
     cfg.integrations.api_enabled = enabled;

@@ -21,21 +21,15 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 /// Transcription backend type
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TranscriptionBackend {
     /// Whisper with Metal GPU acceleration (primary, fastest)
+    #[default]
     Whisper,
     /// Sherpa-ONNX with Parakeet models (fallback)
     Parakeet,
     /// FluidAudio with Apple Neural Engine via CoreML (fastest on Apple Silicon)
     FluidAudio,
-}
-
-impl Default for TranscriptionBackend {
-    fn default() -> Self {
-        // Whisper with Metal is the primary backend for macOS
-        Self::Whisper
-    }
 }
 
 /// Unified transcription service that can use either backend
@@ -107,8 +101,46 @@ pub fn init_whisper_transcription(model_path: String) -> Result<(), String> {
     let mut guard = get_service().lock();
     *guard = Some(service);
 
-    tracing::info!("Whisper transcription service initialised with Metal GPU");
+    tracing::info!(
+        "Whisper transcription service initialised ({} backend)",
+        whisper_backend_label()
+    );
     Ok(())
+}
+
+/// The compiled whisper acceleration backend, for accurate logging. macOS uses
+/// Metal; Linux/Windows depend on which GPU feature (if any) was built in.
+fn whisper_backend_label() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Metal GPU"
+    }
+    #[cfg(all(not(target_os = "macos"), feature = "cuda"))]
+    {
+        "CUDA GPU"
+    }
+    #[cfg(all(not(target_os = "macos"), not(feature = "cuda"), feature = "hipblas"))]
+    {
+        "ROCm/HIP GPU"
+    }
+    #[cfg(all(
+        not(target_os = "macos"),
+        not(feature = "cuda"),
+        not(feature = "hipblas"),
+        feature = "vulkan"
+    ))]
+    {
+        "Vulkan GPU"
+    }
+    #[cfg(all(
+        not(target_os = "macos"),
+        not(feature = "cuda"),
+        not(feature = "hipblas"),
+        not(feature = "vulkan")
+    ))]
+    {
+        "CPU"
+    }
 }
 
 /// Initialise the transcription service with parakeet backend (fallback)
@@ -123,7 +155,7 @@ pub fn init_parakeet_transcription(_model_dir: String) -> Result<(), String> {
         *guard = Some(service);
 
         tracing::info!("Parakeet transcription service initialised");
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(feature = "parakeet"))]
@@ -161,7 +193,7 @@ pub fn init_fluidaudio_transcription() -> Result<(), String> {
         }
 
         tracing::info!("FluidAudio transcription service initialised (Neural Engine)");
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
@@ -330,7 +362,7 @@ fn audio_has_speech(path: &std::path::Path) -> Result<bool, String> {
     let window_size = 8000; // 500 ms at 16 kHz
     let peak_window_rms = mono_samples
         .chunks(window_size)
-        .map(|chunk| crate::audio::metering::calculate_rms(chunk))
+        .map(crate::audio::metering::calculate_rms)
         .fold(0.0f32, f32::max);
 
     tracing::debug!(
@@ -368,12 +400,10 @@ pub fn warmup_transcription() {
     let should_try_fluidaudio =
         selected_model_type == Some("fluidaudio_coreml") || selected_id.is_none();
 
-    if should_try_fluidaudio {
-        if try_warmup_fluidaudio() {
-            return;
-        }
-        // FluidAudio unavailable/not cached — fall through to Whisper
+    if should_try_fluidaudio && try_warmup_fluidaudio() {
+        return;
     }
+    // FluidAudio unavailable/not cached — fall through to Whisper
 
     // ── Whisper/Parakeet path ──────────────────────────────────────────
     if selected_id.is_some() && selected_model_type != Some("fluidaudio_coreml") {
@@ -547,7 +577,7 @@ pub fn is_fluidaudio_available() -> bool {
 pub fn is_fluidaudio_cached() -> bool {
     #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
     {
-        return fluidaudio::is_cached();
+        fluidaudio::is_cached()
     }
     #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
     false

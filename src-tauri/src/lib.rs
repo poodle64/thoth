@@ -4,17 +4,18 @@
 
 use tauri::Manager;
 
+pub mod app_handle;
 pub mod audio;
 pub mod clipboard;
 pub mod commands;
 pub mod config;
 pub mod control_api;
 pub mod database;
-pub mod mcp_server;
 pub mod dictionary;
 pub mod enhancement;
 pub mod export;
 pub mod keyboard_service;
+pub mod mcp_server;
 pub mod mouse_tracker;
 pub mod pipeline;
 pub mod platform;
@@ -23,14 +24,17 @@ pub mod shortcuts;
 pub mod sound;
 pub mod storage;
 pub mod text_insert;
+#[cfg(target_os = "macos")]
 mod traffic_lights;
 pub mod transcription;
 pub mod tray;
 
 /// Header height in pixels (must match CSS --header-height)
+#[cfg(target_os = "macos")]
 const HEADER_HEIGHT: f64 = 52.0;
 
 /// Traffic light X position (left margin)
+#[cfg(target_os = "macos")]
 const TRAFFIC_LIGHT_X: f64 = 13.0;
 
 /// Register a single shortcut, using keyboard_service for standalone modifiers
@@ -86,6 +90,12 @@ fn reregister_shortcuts(app: tauri::AppHandle) -> Result<(), String> {
 /// Register shortcuts from saved configuration
 fn register_shortcuts_from_config(app: &tauri::AppHandle, cfg: &config::Config) {
     use shortcuts::manager::shortcut_ids;
+
+    // On Wayland, the actual global-shortcut binding is owned by the XDG portal,
+    // set up once here. On X11 this is a no-op and the per-shortcut registration
+    // below binds via the Tauri plugin as on macOS.
+    #[cfg(target_os = "linux")]
+    shortcuts::linux::init_global_shortcuts(app);
 
     // Collect (id, accelerator, description) tuples for all configured shortcuts
     let shortcuts: Vec<(&str, &str, &str)> = [
@@ -208,6 +218,10 @@ pub fn run() {
         .setup(|app| {
             tracing::info!("Thoth starting");
 
+            // Store the app handle for the few deep paths that emit user-facing
+            // events without a handle of their own (e.g. audio device fallback).
+            app_handle::set(app.handle().clone());
+
             // Request microphone permission BEFORE any audio enumeration.
             // cpal's device enumeration touches CoreAudio which triggers the
             // system mic prompt implicitly — but with no completion handler,
@@ -240,6 +254,11 @@ pub fn run() {
                 // Register shortcuts from config
                 let app_handle = app.handle().clone();
                 register_shortcuts_from_config(&app_handle, &cfg);
+
+                // On Linux/Wayland without `wtype`, advise the user once so text
+                // insertion does not silently fall back to a permission prompt.
+                #[cfg(target_os = "linux")]
+                text_insert::emit_linux_typing_advisory(&app_handle);
 
                 // Start the Local Control API if enabled in config. The API and
                 // MCP server default on, so a fresh config arrives here enabled

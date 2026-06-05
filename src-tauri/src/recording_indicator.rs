@@ -215,9 +215,12 @@ where
         return Ok(());
     }
 
-    if is_wayland() {
-        tracing::warn!("Running on Wayland - indicator positioning may not work correctly");
-    }
+    // On Wayland the compositor controls window placement: a client cannot read
+    // the global cursor position or set an absolute window position. The
+    // cursor-dot style therefore cannot follow the cursor; fall back to the
+    // fixed position and skip cursor tracking. The window still shows; only its
+    // placement is the compositor's choice.
+    let cursor_following_possible = !is_wayland();
 
     let indicator = get_indicator_window(app)
         .ok_or_else(|| "Recording indicator window not found".to_string())?;
@@ -236,14 +239,19 @@ where
 
     match style {
         IndicatorStyle::CursorDot => {
-            // Position at cursor or use the provided fallback
-            if let Some((x, y)) = mouse_tracker::get_initial_position() {
+            // Position at cursor where the platform allows reading it; otherwise
+            // (Wayland, or no cursor available) use the provided fallback.
+            if let Some((x, y)) =
+                mouse_tracker::get_initial_position().filter(|_| cursor_following_possible)
+            {
                 indicator
                     .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
                     .map_err(|e| e.to_string())?;
                 tracing::debug!("Cursor-dot indicator at ({}, {})", x, y);
             } else {
-                tracing::info!("No mouse position available, using fallback position");
+                tracing::info!(
+                    "Cursor position unavailable (Wayland or no pointer); using fallback position"
+                );
                 fallback_position(app, &indicator)?;
             }
         }
@@ -261,8 +269,10 @@ where
         indicator.show().map_err(|e| e.to_string())?;
     }
 
-    // Only track mouse for cursor-dot style
-    if style == IndicatorStyle::CursorDot {
+    // Only track the mouse for cursor-dot style, and only where the cursor can
+    // actually be followed (not Wayland). `start_tracking` also guards Wayland
+    // internally; this avoids the call entirely.
+    if style == IndicatorStyle::CursorDot && cursor_following_possible {
         mouse_tracker::start_tracking();
     }
 
@@ -407,9 +417,10 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
         return Ok(());
     }
 
-    if is_wayland() {
-        tracing::warn!("Running on Wayland - indicator positioning may not work correctly");
-    }
+    // On Wayland the compositor controls placement and the global cursor
+    // position is unreadable, so cursor-following is impossible; fall back to a
+    // fixed position and skip tracking.
+    let cursor_following_possible = !is_wayland();
 
     // Resize window for the current style
     let (w, h) = dimensions_for_style(style);
@@ -426,8 +437,11 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
 
     match style {
         IndicatorStyle::CursorDot => {
-            // Position at cursor or fall back to primary monitor centre-bottom
-            if let Some((x, y)) = mouse_tracker::get_initial_position() {
+            // Position at cursor where the platform allows it; otherwise fall
+            // back to primary monitor centre-bottom.
+            if let Some((x, y)) =
+                mouse_tracker::get_initial_position().filter(|_| cursor_following_possible)
+            {
                 indicator
                     .set_position(tauri::Position::Logical(LogicalPosition::new(x, y)))
                     .map_err(|e| e.to_string())?;
@@ -453,8 +467,8 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
         indicator.show().map_err(|e| e.to_string())?;
     }
 
-    // Only track mouse for cursor-dot style
-    if style == IndicatorStyle::CursorDot {
+    // Only track the mouse for cursor-dot style where the cursor can be followed.
+    if style == IndicatorStyle::CursorDot && cursor_following_possible {
         mouse_tracker::start_tracking();
     }
 
@@ -563,9 +577,11 @@ pub(crate) fn maybe_play_start_indicator<R: Runtime>(app: &AppHandle<R>) {
 /// On Linux/Wayland, we show then hide the window during pre-warm to ensure
 /// it's properly mapped with the compositor. Subsequent hide/show should work.
 pub fn prewarm_indicator_window(app: &AppHandle) {
-    // On Wayland, warn that the indicator may not work well
     if is_wayland() {
-        tracing::info!("Running on Wayland - recording indicator positioning won't work (compositor controls it). Users can disable in settings.");
+        tracing::info!(
+            "Wayland session: recording indicator uses a fixed position (the compositor controls \
+             window placement); it does not follow the cursor"
+        );
     }
 
     let app_handle = app.clone();
@@ -578,26 +594,18 @@ pub fn prewarm_indicator_window(app: &AppHandle) {
         if let Some(window) = app_handle.get_webview_window(INDICATOR_WINDOW_LABEL) {
             tracing::info!("Pre-warming recording indicator window");
 
-            // On Linux/Wayland, show then hide to map the window with compositor.
-            // This ensures subsequent show() calls will work.
+            // On Linux we deliberately do NOT show-then-hide to pre-warm. A
+            // show()/hide() cycle risks leaving a stray indicator visible if the
+            // hide() is not honoured by the compositor (a real failure mode on
+            // some Wayland compositors). The webview is created and loads its
+            // content with the window; the first real show() maps it. The minor
+            // first-show latency is preferable to a stuck floating window.
             #[cfg(target_os = "linux")]
             {
-                tracing::info!("Pre-warming indicator for Linux/Wayland - showing then hiding");
-
-                // Show the window to register it with the compositor
-                if let Err(e) = window.show() {
-                    tracing::warn!("Failed to show indicator for pre-warming: {}", e);
-                }
-
-                // Wait for compositor to acknowledge
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-                // Now hide it - since it's been mapped, show() should work later
-                if let Err(e) = window.hide() {
-                    tracing::warn!("Failed to hide indicator after pre-warming: {}", e);
-                }
-
-                tracing::info!("Recording indicator window ready (Linux - hidden until needed)");
+                let _ = &window; // used only in the non-linux branch below
+                tracing::info!(
+                    "Recording indicator window ready (Linux - left hidden; no show/hide pre-warm)"
+                );
             }
 
             // On macOS, briefly show off-screen to map the window and load the
@@ -625,7 +633,9 @@ pub fn prewarm_indicator_window(app: &AppHandle) {
                     tracing::warn!("Failed to hide indicator after pre-warming: {}", e);
                 }
 
-                tracing::info!("Recording indicator window pre-warmed and ready (hidden until needed)");
+                tracing::info!(
+                    "Recording indicator window pre-warmed and ready (hidden until needed)"
+                );
             }
         } else {
             tracing::warn!("Recording indicator window not found for pre-warming");

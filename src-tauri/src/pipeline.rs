@@ -517,7 +517,6 @@ async fn run_transcription_pipeline(
                 // (FilterOptions::default() would otherwise turn it on here and
                 // apply it a second time, ignoring config.apply_dictionary).
                 apply_dictionary: false,
-                ..Default::default()
             };
             text = transcription::filter_transcription(text, Some(filter_opts));
             tracing::debug!("Pipeline: After filtering: {} chars", text.len());

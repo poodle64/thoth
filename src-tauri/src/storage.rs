@@ -39,17 +39,29 @@ fn thoth_dir() -> PathBuf {
         .join(".thoth")
 }
 
-/// Get FluidAudio model cache directory
+/// Get the FluidAudio model cache directory, if applicable on this platform.
 ///
-/// Only targets the Models subdirectory — FluidAudio may store other
-/// data in the parent `Application Support/FluidAudio/` directory.
-fn fluidaudio_models_dir() -> PathBuf {
-    dirs::home_dir()
-        .expect("Could not determine home directory")
-        .join("Library")
-        .join("Application Support")
-        .join("FluidAudio")
-        .join("Models")
+/// FluidAudio runs only on macOS (Apple Neural Engine via CoreML) and stores its
+/// compiled models under `~/Library/Application Support/FluidAudio/Models/`. That
+/// path is macOS-specific; on Linux/Windows there is no FluidAudio cache, so this
+/// returns `None` rather than constructing a bogus `~/Library/...` path that
+/// would never exist. Only targets the Models subdirectory — FluidAudio may
+/// store other data in the parent `Application Support/FluidAudio/` directory.
+fn fluidaudio_models_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        Some(
+            dirs::home_dir()?
+                .join("Library")
+                .join("Application Support")
+                .join("FluidAudio")
+                .join("Models"),
+        )
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
 }
 
 /// Calculate total size of a directory recursively
@@ -110,7 +122,7 @@ pub fn get_storage_usage() -> Result<StorageUsage, String> {
         .map(|m| m.len())
         .unwrap_or(0);
     let config_bytes = config_file_sizes(&base);
-    let fluidaudio_bytes = dir_size(&fluidaudio_models_dir());
+    let fluidaudio_bytes = fluidaudio_models_dir().map(|d| dir_size(&d)).unwrap_or(0);
 
     let recording_count = file_count(&base.join("Recordings"));
     let log_count = file_count(&base.join("logs"));
@@ -188,7 +200,9 @@ pub fn delete_all_logs() -> Result<u64, String> {
 /// Delete the FluidAudio CoreML model cache
 #[tauri::command]
 pub fn delete_fluidaudio_cache() -> Result<(), String> {
-    let cache_dir = fluidaudio_models_dir();
+    let Some(cache_dir) = fluidaudio_models_dir() else {
+        return Ok(()); // No FluidAudio cache off macOS.
+    };
     if !cache_dir.exists() {
         return Ok(());
     }
@@ -226,19 +240,20 @@ pub fn delete_all_data() -> Result<(), String> {
         tracing::info!("Deleted Thoth data directory: {}", base.display());
     }
 
-    let fluid_dir = fluidaudio_models_dir();
-    if fluid_dir.exists() {
-        fs::remove_dir_all(&fluid_dir).map_err(|e| {
-            format!(
-                "Failed to delete FluidAudio cache at {}: {}",
-                fluid_dir.display(),
-                e
-            )
-        })?;
-        tracing::info!(
-            "Deleted FluidAudio cache directory: {}",
-            fluid_dir.display()
-        );
+    if let Some(fluid_dir) = fluidaudio_models_dir() {
+        if fluid_dir.exists() {
+            fs::remove_dir_all(&fluid_dir).map_err(|e| {
+                format!(
+                    "Failed to delete FluidAudio cache at {}: {}",
+                    fluid_dir.display(),
+                    e
+                )
+            })?;
+            tracing::info!(
+                "Deleted FluidAudio cache directory: {}",
+                fluid_dir.display()
+            );
+        }
     }
 
     Ok(())
@@ -257,7 +272,13 @@ mod tests {
     #[test]
     fn test_fluidaudio_dir_path() {
         let dir = fluidaudio_models_dir();
-        assert!(dir.to_string_lossy().contains("FluidAudio"));
+        #[cfg(target_os = "macos")]
+        assert!(dir
+            .expect("FluidAudio dir should resolve on macOS")
+            .to_string_lossy()
+            .contains("FluidAudio"));
+        #[cfg(not(target_os = "macos"))]
+        assert!(dir.is_none(), "FluidAudio dir should be None off macOS");
     }
 
     #[test]

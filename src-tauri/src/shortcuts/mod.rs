@@ -4,15 +4,20 @@
 //! for controlling recording and other application features.
 //!
 //! Platform support:
-//! - macOS: Uses Tauri's GlobalShortcut plugin
-//! - Linux X11: Uses Tauri's GlobalShortcut plugin
-//! - Linux Wayland: Uses XDG Desktop Portal GlobalShortcuts
+//! - macOS: Tauri's GlobalShortcut plugin
+//! - Linux X11: Tauri's GlobalShortcut plugin
+//! - Linux Wayland: the XDG Desktop Portal `GlobalShortcuts` interface, where
+//!   the compositor implements it (KDE, wlroots-based compositors, GNOME 48+).
+//!   On compositors without it the user is told that global shortcuts are
+//!   unavailable so they can use a function-key shortcut instead.
 
 pub mod conflict;
 pub mod manager;
 
 #[cfg(target_os = "linux")]
 pub mod linux;
+#[cfg(target_os = "linux")]
+pub mod wayland_portal;
 #[cfg(target_os = "linux")]
 pub use linux::{get_display_server, DisplayServer};
 
@@ -308,10 +313,13 @@ pub fn check_shortcut_available(app: AppHandle, accelerator: String) -> Result<b
         return Ok(false);
     }
 
-    // Check with the system if possible (X11 only - Wayland uses portal)
+    // On Wayland the compositor (and the user, via the portal dialog) decides
+    // the actual binding, so there is nothing to check ahead of time: the
+    // requested accelerator is only a preferred trigger. Report it as available
+    // and let the portal assign the real key (surfaced via the
+    // `wayland-shortcuts-status` event).
     #[cfg(target_os = "linux")]
     {
-        // On Wayland, we can't check without portal interaction
         if linux::get_display_server() == linux::DisplayServer::Wayland {
             return Ok(true);
         }

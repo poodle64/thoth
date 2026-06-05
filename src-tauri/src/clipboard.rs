@@ -457,6 +457,15 @@ pub async fn paste_transcription(
 
     // Restore original clipboard in the background after configured delay.
     // This is backend-owned; the frontend does not need to call restore_clipboard.
+    //
+    // Ordering is safe across platforms: the paste above is synchronous, so the
+    // transcription is guaranteed to be on the clipboard when the paste keystroke
+    // fires; the restore only runs after the delay that follows. On Wayland,
+    // clipboard ownership is tied to a focused client, so a delayed restore is
+    // best-effort — if Thoth has lost focus by the time it fires the compositor
+    // may refuse the write. That only affects restoring the user's *previous*
+    // clipboard, never the correctness of the paste itself, and the failure is
+    // logged.
     if let Some(original) = saved_clipboard {
         let delay = settings.restore_delay_ms;
         let app_clone = app.clone();

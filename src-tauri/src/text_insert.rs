@@ -259,8 +259,12 @@ impl TextInsertService {
             return Ok(());
         }
 
-        // Fall back to enigo (X11/XWayland)
-        debug!("wtype not available, falling back to enigo for typing");
+        // Fall back to enigo (X11/XWayland). On native Wayland this is where the
+        // user feels a missing `wtype`: enigo drives XWayland and on GNOME
+        // triggers the "Allow Remote Interaction" prompt. Logged at warn (not
+        // debug) so the cause is visible; the startup advisory toast
+        // (`emit_linux_typing_advisory`) tells the user how to fix it.
+        warn!("wtype unavailable or failed; falling back to enigo for typing (Wayland users: install wtype or grant Remote Interaction)");
         Self::type_with_enigo(text, self.config.keystroke_delay_ms)
     }
 
@@ -275,7 +279,7 @@ impl TextInsertService {
                 if c.is_control() {
                     continue;
                 }
-                match Command::new("wtype").arg(&c.to_string()).status() {
+                match Command::new("wtype").arg(c.to_string()).status() {
                     Ok(status) if status.success() => {}
                     _ => return false,
                 }
@@ -324,8 +328,9 @@ impl TextInsertService {
             return Ok(());
         }
 
-        // Fall back to enigo (X11/XWayland)
-        debug!("wtype not available, falling back to enigo");
+        // Fall back to enigo (X11/XWayland). See insert_by_typing_linux for why
+        // this is the Wayland pain point; warn so the cause is visible.
+        warn!("wtype unavailable or failed; falling back to enigo for paste (Wayland users: install wtype or grant Remote Interaction)");
         Self::paste_with_enigo()
     }
 
@@ -394,6 +399,51 @@ impl TextInsertService {
 impl Default for TextInsertService {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Whether the `wtype` binary is available on `PATH` (Linux only).
+///
+/// `wtype` is the native Wayland virtual-keyboard tool and the preferred typing
+/// backend; it is not installed by default on most desktops. Absence is not
+/// fatal (enigo via XWayland is the fallback) but on GNOME Wayland the fallback
+/// triggers a permission prompt, so it is worth telling the user.
+///
+/// Detection is by `PATH` lookup rather than executing `wtype`: `wtype` has no
+/// `--version`/`--help` flag (it would interpret the argument as text to type),
+/// so running it to probe would mis-report and could emit a keystroke.
+#[cfg(target_os = "linux")]
+pub fn wtype_available() -> bool {
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&paths).any(|dir| dir.join("wtype").is_file())
+}
+
+/// On Linux/Wayland without `wtype`, emit a one-time advisory so the user knows
+/// why text insertion may prompt for permission and how to make it seamless.
+/// Called once at startup; no-op on X11, macOS, or when `wtype` is present.
+///
+/// The frontend listens for `text-insertion-advisory` and shows a toast. The
+/// insertion path itself has no `AppHandle`, so the advice is surfaced here at
+/// startup rather than on every insertion.
+#[cfg(target_os = "linux")]
+pub fn emit_linux_typing_advisory(app: &tauri::AppHandle) {
+    use tauri::Emitter;
+
+    if crate::shortcuts::get_display_server() != crate::shortcuts::DisplayServer::Wayland {
+        return;
+    }
+    if wtype_available() {
+        return;
+    }
+
+    let message = "For seamless text insertion on Wayland, install `wtype`. Without it, Thoth \
+                   falls back to XWayland, which on GNOME asks for the \"Allow Remote \
+                   Interaction\" permission each session.";
+    tracing::info!("{message}");
+    if let Err(e) = app.emit("text-insertion-advisory", message) {
+        tracing::error!("Failed to emit text-insertion-advisory event: {e}");
     }
 }
 

@@ -231,6 +231,41 @@ function createPipelineStore() {
     });
     unlisteners.push(enhancementShortcutUnlisten);
 
+    // Surface the Wayland global-shortcut portal result. This event only fires
+    // on Linux/Wayland; on macOS and Linux/X11 it never arrives, so listening
+    // is harmless elsewhere. Without this, a compositor that cannot bind global
+    // shortcuts would leave the user pressing a hotkey that silently does
+    // nothing — the toast tells them why and what to do instead.
+    const waylandShortcutsUnlisten = await listen<{
+      available: boolean;
+      message: string;
+      bindings: [string, string][];
+    }>('wayland-shortcuts-status', (event) => {
+      const { available, message } = event.payload;
+      if (available) {
+        toast.success(message);
+      } else {
+        toast.warning(message, { duration: 10000 });
+      }
+    });
+    unlisteners.push(waylandShortcutsUnlisten);
+
+    // One-time advisory on Linux/Wayland when `wtype` is not installed, so the
+    // user understands why text insertion may prompt for permission. Only fires
+    // on Linux/Wayland without wtype; silent everywhere else.
+    const typingAdvisoryUnlisten = await listen<string>('text-insertion-advisory', (event) => {
+      toast.info(event.payload, { duration: 12000 });
+    });
+    unlisteners.push(typingAdvisoryUnlisten);
+
+    // Notify when the configured microphone is unavailable and recording fell
+    // back to the system default (e.g. an unplugged USB mic). Deduped in Rust to
+    // one toast per distinct missing device.
+    const deviceFallbackUnlisten = await listen<string>('audio-device-fallback', (event) => {
+      toast.warning(event.payload, { duration: 8000 });
+    });
+    unlisteners.push(deviceFallbackUnlisten);
+
     // Listen for shortcut events to trigger recording.
     // The start-vs-stop decision is made by the Rust pipeline_toggle_recording
     // command (which reads is_recording() — the single authority). The frontend
