@@ -39,16 +39,19 @@ symphonia = { version = "0.5", features = ["mp3", "aac", "ogg", "vorbis", "flac"
 # but NOT on Linux (archive only has binaries, no .a files). Linux CI
 # builds without parakeet feature until upstream fixes the archive.
 sherpa-rs = { version = "0.6", features = ["static", "download-binaries"], optional = true }
+# (rubato 0.15 and symphonia 0.5 intentionally held back: their 3.0/0.6 majors
+# rewrite the audio resample/decode pipeline and force Rust 2024/MSRV 1.85;
+# bumping them needs a dedicated live-audio verification pass — tracked separately.)
 # fluidaudio-rs: Apple Neural Engine backend via CoreML (macOS-only, Apple Silicon)
 # Forked with platform guards: compiles as no-op on Linux/Windows
 fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", rev = "0061017", optional = true }
 
 # AI Enhancement and Model Downloads
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.13", features = ["json", "stream"] }
 futures-util = "0.3"
-bzip2 = "0.5"
+bzip2 = "0.6"
 tar = "0.4"
-sha2 = "0.10"
+sha2 = "0.11"
 url = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -62,13 +65,13 @@ tower-http = { version = "0.6", features = ["validate-request", "cors", "trace"]
 rmcp = { version = "1.7", features = ["server", "macros", "transport-streamable-http-server"] }
 schemars = "1"
 tokio-util = "0.7"
-getrandom = "0.2"
+getrandom = "0.4"
 
 # Persistence
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 # Keyboard capture (for shortcut recording)
-device_query = "2.1"
+device_query = "4.0"
 
 # CSV export
 csv = "1"
@@ -94,14 +97,14 @@ tauri-plugin-updater = "2.10"
 # macOS-specific
 [target.'cfg(target_os = "macos")'.dependencies]
 # whisper-rs with Metal GPU acceleration on macOS
-whisper-rs = { version = "0.15", features = ["metal"] }
+whisper-rs = { version = "0.16", features = ["metal"] }
 cocoa = "0.26"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSNotification", "NSOperation", "NSString", "NSObject", "NSURL"] }
 objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "NSButton", "NSResponder", "NSControl", "NSWorkspace"] }
 block2 = "0.6"
 core-foundation = "0.10"
-core-graphics = "0.24"
+core-graphics = "0.25"
 # Recording-cue playback via AVAudioPlayer: a mixable CoreAudio client, so the
 # cue doesn't duck the user's music and isn't clipped when cpal opens the mic.
 objc2-avf-audio = { version = "0.3", features = ["AVAudioPlayer"] }
@@ -124,15 +127,15 @@ vulkan = ["whisper-rs/vulkan"]
 # Linux-specific
 [target.'cfg(target_os = "linux")'.dependencies]
 # whisper-rs - GPU features enabled via --features flag
-whisper-rs = { version = "0.15", default-features = false }
+whisper-rs = { version = "0.16", default-features = false }
 # XDG Desktop Portal for Wayland global shortcuts
-ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
+ashpd = { version = "0.13", default-features = false, features = ["tokio"] }
 # X11 support for display server detection and mouse tracking
 x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
 
 # Windows - CPU mode with optional GPU via features
 [target.'cfg(target_os = "windows")'.dependencies]
-whisper-rs = { version = "0.15", default-features = false }
+whisper-rs = { version = "0.16", default-features = false }
 [dev-dependencies]
 tempfile = "3.25"
 mockito = "1"

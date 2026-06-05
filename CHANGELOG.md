@@ -24,6 +24,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   the bundled transcription engine itself was needed — only how Thoth configures
   it.
 
+### Changed
+
+- Brought the Rust dependencies up to date. Most updates are routine, but
+  several crossed major versions: the database layer (rusqlite), the HTTP client
+  (reqwest, which now defaults to the Rustls TLS stack), the SHA-256 hasher
+  (sha2), the random-token generator (getrandom), the keyboard-state reader
+  (device_query), the Bluetooth/bzip2 and macOS graphics bindings, the
+  whisper.cpp bindings (whisper-rs), and the Linux Wayland portal client (ashpd).
+  The full test suite passes and the app was re-verified end to end (transcription,
+  history, and the tail fix above) on the updated dependencies. Two further major
+  upgrades — the audio resampler (rubato 3.0) and audio decoder (symphonia 0.6) —
+  were deliberately held back: both rewrite the audio pipeline and require the
+  newer Rust 2024 edition, and that pipeline is the same one the tail-truncation
+  fixes touched, so they need their own carefully verified pass rather than riding
+  along with this release.
+
 ## [2026.6.4] - 2026-06-05
 
 ### Fixed

@@ -327,7 +327,13 @@ fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
         hasher.update(&buffer[..bytes_read]);
     }
 
-    let hash = format!("{:x}", hasher.finalize());
+    // sha2 0.11 returns a `digest::Output` (Array) that no longer implements
+    // LowerHex, so format the digest bytes to a lowercase hex string by hand.
+    let hash = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
     if hash != expected.to_lowercase() {
         return Err(anyhow!(
             "SHA256 mismatch: expected {}, got {}",

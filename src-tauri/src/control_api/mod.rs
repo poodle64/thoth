@@ -36,7 +36,7 @@ pub fn generate_token() -> String {
     let mut secret = String::with_capacity(40);
     let mut buf = [0u8; 64];
     while secret.len() < 40 {
-        getrandom::getrandom(&mut buf).expect("OS CSPRNG unavailable");
+        getrandom::fill(&mut buf).expect("OS CSPRNG unavailable");
         for &b in buf.iter() {
             if (b as usize) < 248 {
                 // 248 = 4 * 62; keeps the distribution uniform across the 62 symbols
