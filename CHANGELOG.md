@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.5] - 2026-06-05
+
+### Fixed
+
+- Recordings could still lose their final words even after the previous fix,
+  whenever the recording contained a short pause partway through (for example,
+  drawing breath between sentences). The Parakeet (FluidAudio) engine splits
+  long audio into roughly fifteen-second pieces and transcribes them in
+  parallel, each piece starting fresh. If the last piece happened to begin in
+  the middle of a word, the engine started from a blank slate, decided the whole
+  piece was silence, and produced nothing — dropping the end of what you said
+  (for example "...waiting for the project to finish being built" became
+  "...waiting for the project"). Switched the engine to its pause-aware
+  splitting mode, which starts each piece from real audio context instead of a
+  blank slate, so those tails transcribe correctly. Verified end to end through
+  the app on the failing recording and on recordings up to nearly a minute long,
+  which now transcribe in full with no loss of accuracy elsewhere. No change to
+  the bundled transcription engine itself was needed — only how Thoth configures
+  it.
+
 ## [2026.6.4] - 2026-06-05
 
 ### Fixed
