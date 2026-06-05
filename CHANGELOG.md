@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.4] - 2026-06-05
+
+### Fixed
+
+- Recordings longer than about fifteen seconds no longer lose the end of the
+  transcription (often the final sentence). The Parakeet (FluidAudio) backend
+  decodes audio in fixed fifteen-second windows and stitches the pieces back
+  together; the tail could be dropped where those pieces were merged. Two things
+  caused it together: the bundled FluidAudio engine (0.10.0) had a faulty merge,
+  and Thoth was boosting the recording's volume before transcribing, which moved
+  the window boundaries onto speech and made the drop worse. Upgraded FluidAudio
+  to 0.15.0 (better merging) and stopped the pre-transcription volume boost,
+  which made no measurable difference to accuracy on quiet recordings. Verified
+  end to end through the app on recordings from fifteen seconds to nearly three
+  minutes, which now transcribe in full.
+
 ## [2026.6.3] - 2026-06-02
 
 A Linux/Wayland readiness pass. The audit behind it asked, for every OS-touching

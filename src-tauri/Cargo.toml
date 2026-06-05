@@ -1,6 +1,6 @@
 [package]
 name = "thoth"
-version = "2026.6.3"
+version = "2026.6.4"
 description = "Privacy-first, offline-capable voice transcription application"
 authors = ["poodle64"]
 license = "MIT"
@@ -41,7 +41,7 @@ symphonia = { version = "0.5", features = ["mp3", "aac", "ogg", "vorbis", "flac"
 sherpa-rs = { version = "0.6", features = ["static", "download-binaries"], optional = true }
 # fluidaudio-rs: Apple Neural Engine backend via CoreML (macOS-only, Apple Silicon)
 # Forked with platform guards: compiles as no-op on Linux/Windows
-fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", rev = "97aaf88", optional = true }
+fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", rev = "62e756a", optional = true }
 
 # AI Enhancement and Model Downloads
 reqwest = { version = "0.12", features = ["json", "stream"] }
