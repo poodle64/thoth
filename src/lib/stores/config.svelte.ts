@@ -530,6 +530,25 @@ function createConfigStore() {
   }
 
   /**
+   * Set or clear the enhancement API key via the dedicated backend command.
+   *
+   * This is the only correct way to change the API key. The generic save()
+   * path cannot clear the key (the backend preservation guard blocks it);
+   * this command bypasses that guard so an explicit user action takes effect.
+   */
+  async function setEnhancementApiKey(key: string | null): Promise<boolean> {
+    try {
+      await invoke('set_enhancement_api_key', { key });
+      config.enhancement.apiKey = key;
+      return true;
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to save API key';
+      console.error('Failed to set enhancement API key:', e);
+      return false;
+    }
+  }
+
+  /**
    * Clear error state
    */
   function clearError(): void {
@@ -589,6 +608,7 @@ function createConfigStore() {
     updateGeneral,
     updateRecorder,
     updateIntegrations,
+    setEnhancementApiKey,
     clearError,
   };
 }

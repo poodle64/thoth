@@ -207,13 +207,28 @@
     await checkOpenaiCompat();
   }
 
+  // Tracks whether the user actually edited the API-key field this session, so a
+  // no-op blur (e.g. focusing and leaving the field untouched, or a blur before
+  // the key has loaded) never persists an empty value and wipes a stored key.
+  let apiKeyDirty = $state(false);
+
   function handleApiKeyInput(event: Event): void {
+    // Keep local in-memory state in sync so the field reflects what the user typed,
+    // but do NOT route through updateEnhancement + generic save (that path sends
+    // api_key: null for an empty field, which the backend's preservation guard now
+    // blocks from clearing a stored key). Persistence happens in handleApiKeyBlur.
     const input = event.target as HTMLInputElement;
+    apiKeyDirty = true;
     configStore.updateEnhancement('apiKey', input.value || null);
   }
 
   async function handleApiKeyBlur(): Promise<void> {
-    await saveSettings();
+    // Only persist when the user actually edited the field. The dedicated command
+    // sets/clears unconditionally (bypassing the backend preservation guard so an
+    // intentional clear works), so we must not call it on an untouched blur.
+    if (!apiKeyDirty) return;
+    apiKeyDirty = false;
+    await configStore.setEnhancementApiKey(configStore.config.enhancement.apiKey);
   }
 
   function handleOpenaiCompatModelInput(event: Event): void {

@@ -492,6 +492,7 @@ pub fn run() {
             config::get_config,
             config::set_config,
             config::set_shortcut_config,
+            config::set_enhancement_api_key,
             config::reset_config,
             config::get_config_path_cmd,
             // Shortcuts

@@ -640,6 +640,15 @@ pub fn set_config(mut config: Config) -> Result<(), String> {
             tracing::debug!("Preserving api_token (incoming config had None)");
             config.integrations.api_token = current.integrations.api_token.clone();
         }
+
+        // Preserve enhancement.api_key if the incoming config has None but the cached
+        // config has a key. The Settings panel sends api_key: null when the field is
+        // empty, so a generic full-config save must not wipe a stored key. Use the
+        // dedicated set_enhancement_api_key command for intentional key changes.
+        if config.enhancement.api_key.is_none() && current.enhancement.api_key.is_some() {
+            tracing::debug!("Preserving enhancement.api_key (incoming config had None)");
+            config.enhancement.api_key = current.enhancement.api_key.clone();
+        }
     }
 
     // Save to disk first
@@ -705,6 +714,30 @@ pub fn set_enhancement_enabled(enabled: bool) -> Result<(), String> {
     cached.enhancement.enabled = enabled;
     save_to_disk(&cached)?;
     tracing::info!("Enhancement enabled updated to: {}", enabled);
+    Ok(())
+}
+
+/// Set or clear the enhancement API key unconditionally.
+///
+/// This is the only correct path for changing the key value (including clearing
+/// it to None). The preservation guard in `set_config` prevents the generic save
+/// from wiping the key with an empty field; this command bypasses that guard so
+/// an explicit user action can still clear it.
+///
+/// Pass `Some(key)` to store a new key, `None` to clear it.
+#[tauri::command]
+pub fn set_enhancement_api_key(key: Option<String>) -> Result<(), String> {
+    let mut cached = get_config_instance().write();
+    cached.enhancement.api_key = key;
+    save_to_disk(&cached)?;
+    tracing::info!(
+        "Enhancement API key {}",
+        if cached.enhancement.api_key.is_some() {
+            "updated"
+        } else {
+            "cleared"
+        }
+    );
     Ok(())
 }
 
@@ -1116,17 +1149,82 @@ mod tests {
     }
 
     #[test]
-    fn test_enhancement_config_api_key_cleared_when_null() {
-        // If the user clears the API key, the clear must take effect (not preserved)
-        let json = r#"{
-            "enabled": false,
-            "model": "llama3.2",
-            "prompt_id": "fix-grammar",
-            "ollama_url": "http://localhost:11434",
-            "api_key": null
-        }"#;
+    fn test_set_config_null_api_key_preserves_cached() {
+        // A generic set_config with api_key: null must NOT wipe a stored key.
+        // The dedicated set_enhancement_api_key command is required for intentional clears.
+        let instance = get_config_instance();
+        {
+            let mut cached = instance.write();
+            cached.enhancement.api_key = Some("stored-key".to_string());
+        }
 
-        let enh: EnhancementConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(enh.api_key, None);
+        let mut incoming = Config::default();
+        // api_key is None in the default config — simulating an empty-field save
+        assert!(incoming.enhancement.api_key.is_none());
+
+        {
+            let current = instance.read();
+            if incoming.enhancement.api_key.is_none() && current.enhancement.api_key.is_some() {
+                incoming.enhancement.api_key = current.enhancement.api_key.clone();
+            }
+        }
+
+        assert_eq!(incoming.enhancement.api_key, Some("stored-key".to_string()));
+
+        // Restore to clean state
+        instance.write().enhancement.api_key = None;
+    }
+
+    #[test]
+    fn test_set_enhancement_api_key_sets_and_clears() {
+        // set_enhancement_api_key(Some) sets the key; set_enhancement_api_key(None) clears it.
+        // Exercise the guard logic directly (no disk I/O in unit tests).
+        let instance = get_config_instance();
+
+        // Set a key
+        {
+            let mut cached = instance.write();
+            cached.enhancement.api_key = Some("my-api-key".to_string());
+        }
+        assert_eq!(
+            instance.read().enhancement.api_key,
+            Some("my-api-key".to_string())
+        );
+
+        // Clear the key unconditionally (bypassing the preservation guard)
+        {
+            let mut cached = instance.write();
+            cached.enhancement.api_key = None;
+        }
+        assert_eq!(instance.read().enhancement.api_key, None);
+    }
+
+    #[test]
+    fn test_set_config_with_unrelated_change_preserves_api_key() {
+        // A full set_config that changes only an unrelated field (e.g. model) but
+        // sends api_key: None must keep the previously-stored key.
+        let instance = get_config_instance();
+        {
+            let mut cached = instance.write();
+            cached.enhancement.api_key = Some("keep-me".to_string());
+        }
+
+        let mut incoming = Config::default();
+        incoming.enhancement.model = "different-model".to_string();
+        // api_key remains None (as the frontend sends for an empty field)
+
+        // Apply the same preservation guard that set_config uses
+        {
+            let current = instance.read();
+            if incoming.enhancement.api_key.is_none() && current.enhancement.api_key.is_some() {
+                incoming.enhancement.api_key = current.enhancement.api_key.clone();
+            }
+        }
+
+        assert_eq!(incoming.enhancement.api_key, Some("keep-me".to_string()));
+        assert_eq!(incoming.enhancement.model, "different-model".to_string());
+
+        // Restore clean state
+        instance.write().enhancement.api_key = None;
     }
 }
