@@ -4,6 +4,45 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.7] - 2026-06-06
+
+### Added
+
+- **Smarter correction for project and tool names.** The personal dictionary
+  needed a separate entry for every way the transcriber mangled a word —
+  "portcullis" alone had six. You can now register a term once and have its
+  acoustic and spelling variants snap to it automatically, with a per-term
+  safety setting: coined names you never actually say as ordinary words
+  (portcullis, LiteLLM, Vaultwarden) snap aggressively, while names that collide
+  with real words (for example a product called "immich" versus the word
+  "image") stay conservative so genuine words are never over-corrected. Your
+  existing dictionary is folded in on first run — one entry per term with all its
+  variants attached — and nothing changes in behaviour until you opt a term into
+  the smarter matching. Managed through the new `canonical` MCP tool. (Genuine
+  decoder-level biasing was investigated and is not currently viable on either
+  transcription backend, so this deterministic approach is the solution.)
+
+### Fixed
+
+- **transcribe_file now accepts the audio formats it advertises.** Handing it an
+  MP3, M4A, OGG, or FLAC (for example a phone voice memo) previously failed
+  immediately with a misleading "Not a valid WAV file"; these are now transcoded
+  automatically and transcribed. A genuinely unsupported or corrupt file now
+  reports an accurate error instead of the generic WAV message.
+
+### Changed
+
+- **Dependencies brought fully up to date.** Completed the remaining major
+  upgrades: the audio resampler (rubato 3.0) and audio decoder (symphonia 0.6),
+  moving the project to the Rust 2024 edition. The resampler's end-of-recording
+  drain — which preserves your final words — was re-implemented for the new API
+  and re-verified end to end, so long recordings still transcribe in full.
+- **Kept and hardened the warm-microphone optimisation.** Evaluated whether the
+  warm-stream lifecycle earns its complexity and measured a ~390 ms cold
+  device-open on the DJI MIC MINI — very noticeable on every record press — so it
+  stays. Locked in the guard that prevents an idle teardown from closing the
+  microphone stream mid-recording.
+
 ## [2026.6.6] - 2026-06-06
 
 ### Fixed
