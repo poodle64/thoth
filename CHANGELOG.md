@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Modifier-only shortcuts (e.g. double-tap Right Shift) are now correctly refused on Wayland from the runtime re-registration path as well as at startup.
 - The Linux `.deb` now depends on `libvulkan1` (needed by the Vulkan GPU build at runtime) and recommends `wtype`, `xdg-utils`, and the AppIndicator runtime.
 - Whisper initialisation logs the actual compiled GPU backend (Metal/CUDA/ROCm/Vulkan/CPU) rather than always claiming "Metal GPU"; the CPU-only Linux build now tells you how to enable GPU acceleration.
+- **Build, CI and dependency hardening.** The Rust lockfile is now committed so builds are reproducible (it was floating, which silently broke CI); the HTTP client's TLS crypto provider was switched from aws-lc to ring while staying on Rustls, so the macOS build compiles cleanly; the Linux Wayland global-shortcuts code was updated to the current XDG portal library; frontend and Rust dependencies were brought to their latest patch/minor versions; and the CI workflows were modernised. Continuous integration is green across macOS and Linux again.
 
 ### Fixed
 
