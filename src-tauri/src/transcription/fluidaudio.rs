@@ -4,6 +4,18 @@
 //! dramatically faster transcription (~210x real-time factor).
 //!
 //! Requires the `fluidaudio` Cargo feature and macOS with Apple Silicon.
+//!
+//! # NOTE — empirically load-bearing constants and invariants
+//!
+//! The segmentation constants (`SINGLE_SHOT_MAX_SECS`, `SEGMENT_TARGET_SECS`,
+//! pad lengths) and the no-normalisation invariant in `write_padded_wav` are
+//! empirically tuned to work around a non-monotonic failure mode in FluidAudio
+//! 0.15's chunked decoder: depending on recording length the decoder either
+//! drops the tail or appends a hallucinated filler token. Padding-only tuning
+//! merely moves which lengths fail. Any change to this decode path MUST be
+//! verified via a LIVE APP recording at 19 s, 52 s, 144 s, and ~5 min.
+//! Unit tests and the fork's standalone CLI example do NOT exercise the full
+//! decode path (they skip the app's pad + WAV-write step).
 
 #![cfg(all(target_os = "macos", feature = "fluidaudio"))]
 

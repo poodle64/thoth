@@ -39,8 +39,14 @@ symphonia = { version = "0.6", features = ["mp3", "aac", "ogg", "vorbis", "flac"
 # Official k2-fsa crate; static + auto-download by default; macOS Parakeet TDT fallback
 # (Linux CI builds without the parakeet feature).
 sherpa-onnx = { version = "1.13", optional = true }
-# fluidaudio-rs: Apple Neural Engine backend via CoreML (macOS-only, Apple Silicon)
-# Forked with platform guards: compiles as no-op on Linux/Windows
+# fluidaudio-rs: Apple Neural Engine backend via CoreML (macOS-only, Apple Silicon).
+# WHY fork, not crates.io: the upstream crate lacks platform compile-guards (fails to
+# build on Linux/Windows); the fork wraps the implementation in
+# `#[cfg(all(target_os = "macos", target_arch = "aarch64"))]` so CI builds pass.
+# The fork is also ahead of upstream on the FluidAudio Swift dependency (0.15.0) and
+# configures melChunkContext=false (silence-aligned chunking), which is load-bearing
+# for the tail-truncation fix — do not replace with the upstream crate until all three
+# are available and verified via the live app.
 fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", rev = "0061017", optional = true }
 
 # AI Enhancement and Model Downloads
@@ -118,7 +124,7 @@ objc2-core-foundation = { version = "0.3", features = ["CFString"] }
 [features]
 default = ["parakeet", "fluidaudio"]
 parakeet = ["dep:sherpa-onnx"]
-fluidaudio = ["fluidaudio-rs"]
+fluidaudio = ["dep:fluidaudio-rs"]
 # GPU acceleration for whisper.cpp (mutually exclusive, only use one)
 # Use: cargo build --features cuda      for NVIDIA GPUs
 # Use: cargo build --features hipblas   for AMD GPUs (ROCm/HIP)

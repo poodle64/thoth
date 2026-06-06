@@ -34,7 +34,7 @@ This rule documents project-specific practice and relies on master rules for req
 ### Technology Stack
 
 - **Framework**: Tauri 2.0
-- **Backend**: Rust (2021 edition)
+- **Backend**: Rust (2024 edition)
 - **Frontend**: Svelte 5 + SvelteKit
 - **UI**: Svelte 5 with runes ($state, $derived, $effect), Tailwind CSS
 - **Build**: pnpm + cargo via tauri CLI
@@ -57,7 +57,7 @@ This rule documents project-specific practice and relies on master rules for req
 
 ### Architecture
 
-```
+```text
 +-------------------------------------------------------------+
 |                     Thoth Application                        |
 +-------------------------------------------------------------+
@@ -95,7 +95,7 @@ This rule documents project-specific practice and relies on master rules for req
 
 ### Project Structure
 
-```
+```text
 thoth/
 +-- src/                    # Svelte frontend
 |   +-- lib/
