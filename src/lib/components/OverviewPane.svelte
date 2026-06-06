@@ -119,6 +119,11 @@
   let resetAccessibilityMessage = $state<string | null>(null);
 
   let permFixStatus = $state<{ quarantine: string; tcc: string }>({ quarantine: '', tcc: '' });
+  // Controlled open state for the reset-permissions dialog. The confirm action is
+  // async (it awaits an admin-password prompt), and bits-ui does not auto-dismiss
+  // an async AlertDialog.Action, so we close it explicitly on confirm — otherwise
+  // the dialog stays up through the password prompt and looks like it reappeared.
+  let resetTccDialogOpen = $state(false);
 
   async function handleAutostartToggle(checked: boolean) {
     autostartLoading = true;
@@ -1072,7 +1077,7 @@
       </div>
 
       <!-- Step 2: Reset all TCC -->
-      <AlertDialog.Root>
+      <AlertDialog.Root bind:open={resetTccDialogOpen}>
         <div class="bg-card border rounded-md p-2.5 mb-0">
           <div class="flex items-center gap-2.5">
             <span
@@ -1115,6 +1120,11 @@
               <AlertDialog.Action
                 variant="destructive"
                 onclick={async () => {
+                  // Dismiss the dialog immediately; the admin-password prompt then
+                  // appears over the settings page and the reset runs in the
+                  // background. Without this the dialog stays open and looks like
+                  // it reappeared after the password.
+                  resetTccDialogOpen = false;
                   try {
                     await invoke('reset_tcc_permissions', {
                       services: ['ListenEvent', 'Accessibility', 'Microphone'],
