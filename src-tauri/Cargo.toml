@@ -5,7 +5,7 @@ description = "Privacy-first, offline-capable voice transcription application"
 authors = ["poodle64"]
 license = "MIT"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.87"
 
 [lib]
 name = "thoth_lib"
@@ -44,7 +44,10 @@ sherpa-onnx = { version = "1.13", optional = true }
 fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", rev = "0061017", optional = true }
 
 # AI Enhancement and Model Downloads
-reqwest = { version = "0.13", features = ["json", "stream"] }
+# rustls-no-provider avoids aws-lc-sys (fails under -march=armv8-a in CI);
+# the ring crate (added below) provides the crypto backend instead.
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "charset", "http2", "system-proxy", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "std"] }
 futures-util = "0.3"
 bzip2 = "0.6"
 tar = "0.4"
@@ -129,7 +132,7 @@ vulkan = ["whisper-rs/vulkan"]
 # whisper-rs - GPU features enabled via --features flag
 whisper-rs = { version = "0.16", default-features = false }
 # XDG Desktop Portal for Wayland global shortcuts
-ashpd = { version = "0.13", default-features = false, features = ["tokio"] }
+ashpd = { version = "0.13", default-features = false, features = ["tokio", "global_shortcuts"] }
 # X11 support for display server detection and mouse tracking
 x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
 

@@ -35,7 +35,8 @@
 
 use std::sync::OnceLock;
 
-use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
+use ashpd::desktop::CreateSessionOptions;
+use ashpd::desktop::global_shortcuts::{BindShortcutsOptions, GlobalShortcuts, NewShortcut};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
@@ -185,20 +186,27 @@ async fn run_portal(app: AppHandle) {
 /// per-shortcut trigger descriptions the compositor assigned.
 async fn bind() -> Result<
     (
-        GlobalShortcuts<'static>,
-        ashpd::desktop::Session<'static, GlobalShortcuts<'static>>,
+        GlobalShortcuts,
+        ashpd::desktop::Session<GlobalShortcuts>,
         Vec<(String, String)>,
     ),
     ashpd::Error,
 > {
     let shortcuts = GlobalShortcuts::new().await?;
-    let session = shortcuts.create_session().await?;
+    let session = shortcuts
+        .create_session(CreateSessionOptions::default())
+        .await?;
 
     // No parent window handle: the portal dialog still works without one, and
     // wiring a Wayland `wl_surface` handle from Tauri is fragile. The dialog is
     // modal to the compositor, not to a specific Thoth window.
     let request = shortcuts
-        .bind_shortcuts(&session, &requested_shortcuts(), None)
+        .bind_shortcuts(
+            &session,
+            &requested_shortcuts(),
+            None,
+            BindShortcutsOptions::default(),
+        )
         .await?;
     let bindings: Vec<(String, String)> = request
         .response()?

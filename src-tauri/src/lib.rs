@@ -145,6 +145,13 @@ fn register_shortcuts_from_config(app: &tauri::AppHandle, cfg: &config::Config) 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // reqwest uses rustls-no-provider (avoids aws-lc-sys under -march=armv8-a);
+    // ring must be installed as the process-default crypto provider before any
+    // TLS client is built, or reqwest will panic at Client::new().
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("ring crypto provider already installed");
+
     // Set up file-based logging for debugging (local time for readability)
     use tracing_subscriber::prelude::*;
 
