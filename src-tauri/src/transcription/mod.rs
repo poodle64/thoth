@@ -269,14 +269,42 @@ const MIN_SPEECH_RMS: f32 = 0.002;
 
 /// Transcribe audio from a file path
 ///
+/// Accepts WAV, MP3, M4A, OGG (Vorbis), and FLAC. Non-WAV files and WAV files
+/// that are not already 16 kHz mono i16 are transcoded to a temporary WAV before
+/// being passed to the ASR backend. The temp file is deleted when this function
+/// returns, whether successfully or not.
+///
 /// Returns empty string if the audio is essentially silent (no speech detected),
 /// which prevents Whisper from hallucinating phrases like "Thank you" on silent input.
 #[tauri::command]
 pub fn transcribe_file(audio_path: String) -> Result<String, String> {
-    let path = PathBuf::from(&audio_path);
+    let input = PathBuf::from(&audio_path);
+
+    // Decide whether a transcode is needed.
+    // is_target_format_wav returns true only for 16kHz mono i16 WAV files.
+    // For any other input we run decode_audio_to_wav first.
+    let needs_transcode = !crate::audio::decode::is_target_format_wav(&input);
+
+    let (wav_path, _temp): (PathBuf, Option<tempfile::NamedTempFile>) = if needs_transcode {
+        let temp = tempfile::Builder::new()
+            .prefix("thoth_transcode_")
+            .suffix(".wav")
+            .tempfile()
+            .map_err(|e| format!("Failed to create temporary file: {}", e))?;
+        let temp_path = temp.path().to_path_buf();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        crate::audio::decode::decode_audio_to_wav(&input, &temp_path, &cancel)?;
+        tracing::info!(
+            "Transcoded {} to temporary 16kHz mono WAV",
+            input.display()
+        );
+        (temp_path, Some(temp))
+    } else {
+        (input.clone(), None)
+    };
 
     // Check if audio contains speech before transcribing
-    if !audio_has_speech(&path)? {
+    if !audio_has_speech(&wav_path)? {
         tracing::info!(
             "Audio file appears to be silent, skipping transcription: {}",
             audio_path
@@ -289,7 +317,8 @@ pub fn transcribe_file(audio_path: String) -> Result<String, String> {
         .as_mut()
         .ok_or_else(|| "Transcription service not initialised".to_string())?;
 
-    service.transcribe(&path).map_err(|e| e.to_string())
+    service.transcribe(&wav_path).map_err(|e| e.to_string())
+    // _temp drops here, deleting the temp file (if any) on both Ok and Err paths.
 }
 
 /// Check if a WAV file contains speech (has sufficient audio energy)

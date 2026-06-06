@@ -222,7 +222,7 @@ pub fn decode_audio_to_wav(
 }
 
 /// Check if a WAV file is already in 16kHz mono i16 format (fast path).
-fn is_target_format_wav(path: &Path) -> bool {
+pub fn is_target_format_wav(path: &Path) -> bool {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if !ext.eq_ignore_ascii_case("wav") {
         return false;
