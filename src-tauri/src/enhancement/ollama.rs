@@ -3,7 +3,7 @@
 //! Provides local AI enhancement via the Ollama API running at localhost:11434.
 //! Supports retry with exponential backoff and configurable timeout.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::sleep;

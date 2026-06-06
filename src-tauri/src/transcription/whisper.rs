@@ -3,7 +3,7 @@
 //! This is the primary transcription backend for maximum performance.
 //! Uses Metal GPU on macOS and Vulkan on Linux for "snappy as fuck" transcription.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::path::{Path, PathBuf};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 

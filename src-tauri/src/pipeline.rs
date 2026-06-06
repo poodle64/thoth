@@ -184,7 +184,10 @@ fn discard_silent_wav(result: &Result<PipelineResult, String>, audio_path: &str)
     if !is_no_speech_error(e) {
         return false;
     }
-    tracing::info!("Pipeline: Silent recording, deleting orphan WAV: {}", audio_path);
+    tracing::info!(
+        "Pipeline: Silent recording, deleting orphan WAV: {}",
+        audio_path
+    );
     if let Err(del_err) = std::fs::remove_file(audio_path) {
         tracing::warn!(
             "Pipeline: Failed to delete silent WAV {}: {}",
@@ -1307,7 +1310,10 @@ mod tests {
         let result: Result<PipelineResult, String> = Err(NO_SPEECH_ERROR.to_string());
         let discarded = discard_silent_wav(&result, wav_path.to_str().unwrap());
 
-        assert!(discarded, "helper must return true for the no-speech sentinel");
+        assert!(
+            discarded,
+            "helper must return true for the no-speech sentinel"
+        );
         assert!(
             !wav_path.exists(),
             "WAV file must be gone after silent-recording discard"
@@ -1323,8 +1329,7 @@ mod tests {
         let wav_path = tmp_dir.path().join("thoth_recording_real_error.wav");
         std::fs::write(&wav_path, b"RIFF").expect("failed to write temp file");
 
-        let result: Result<PipelineResult, String> =
-            Err("Transcription model crashed".to_string());
+        let result: Result<PipelineResult, String> = Err("Transcription model crashed".to_string());
         let discarded = discard_silent_wav(&result, wav_path.to_str().unwrap());
 
         assert!(!discarded, "helper must return false for a genuine error");

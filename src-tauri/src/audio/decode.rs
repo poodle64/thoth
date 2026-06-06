@@ -271,7 +271,7 @@ mod tests {
     #[test]
     fn test_cancellation() {
         let cancel = AtomicBool::new(true); // Pre-cancelled
-                                            // Use a file that exists but will be cancelled immediately
+        // Use a file that exists but will be cancelled immediately
         let input = tempfile::NamedTempFile::new().unwrap();
         let output = tempfile::NamedTempFile::new().unwrap();
 

@@ -5,13 +5,13 @@
 
 use rusqlite::Connection;
 
+use crate::database::DatabaseError;
 use crate::database::schema::{
     ALTER_ADD_ENHANCEMENT_DURATION, ALTER_ADD_ENHANCEMENT_MODEL_NAME,
     ALTER_ADD_TRANSCRIPTION_DURATION, ALTER_ADD_TRANSCRIPTION_MODEL_NAME, CREATE_MIGRATIONS_TABLE,
     CREATE_TRANSCRIPTIONS_CREATED_AT_INDEX, CREATE_TRANSCRIPTIONS_IS_ENHANCED_INDEX,
     CREATE_TRANSCRIPTIONS_TABLE,
 };
-use crate::database::DatabaseError;
 
 /// A database migration with a version number, name, and SQL statements.
 struct Migration {

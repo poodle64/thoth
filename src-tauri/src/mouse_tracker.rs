@@ -12,8 +12,8 @@
 //! origin at the top-left of the primary display, matching Tauri's
 //! `LogicalPosition` directly.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 

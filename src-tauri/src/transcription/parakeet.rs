@@ -5,7 +5,7 @@
 //!
 //! Requires the `parakeet` Cargo feature to be enabled.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig, OfflineTransducerModelConfig};
 use std::path::{Path, PathBuf};
 

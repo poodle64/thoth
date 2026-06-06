@@ -1,7 +1,7 @@
 //! Audio device enumeration using cpal
 
-use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::DeviceId;
+use cpal::traits::{DeviceTrait, HostTrait};
 use serde::Serialize;
 use std::str::FromStr;
 

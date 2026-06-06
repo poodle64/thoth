@@ -41,8 +41,12 @@ impl SoundEvent {
     /// Other events use standard system sounds from /System/Library/Sounds/.
     fn sound_path(&self) -> &'static str {
         match self {
-            SoundEvent::RecordingStart => "/System/Library/PrivateFrameworks/AssistantServices.framework/Versions/A/Resources/dt-begin.caf",
-            SoundEvent::RecordingStop => "/System/Library/PrivateFrameworks/AssistantServices.framework/Versions/A/Resources/dt-confirm.caf",
+            SoundEvent::RecordingStart => {
+                "/System/Library/PrivateFrameworks/AssistantServices.framework/Versions/A/Resources/dt-begin.caf"
+            }
+            SoundEvent::RecordingStop => {
+                "/System/Library/PrivateFrameworks/AssistantServices.framework/Versions/A/Resources/dt-confirm.caf"
+            }
             SoundEvent::TranscriptionComplete => "/System/Library/Sounds/Glass.aiff",
             SoundEvent::Error => "/System/Library/Sounds/Basso.aiff",
         }
@@ -173,12 +177,16 @@ mod tests {
     #[test]
     fn test_sound_event_paths() {
         assert!(SoundEvent::RecordingStart.sound_path().contains("dt-begin"));
-        assert!(SoundEvent::RecordingStop
-            .sound_path()
-            .contains("dt-confirm"));
-        assert!(SoundEvent::TranscriptionComplete
-            .sound_path()
-            .contains("Glass"));
+        assert!(
+            SoundEvent::RecordingStop
+                .sound_path()
+                .contains("dt-confirm")
+        );
+        assert!(
+            SoundEvent::TranscriptionComplete
+                .sound_path()
+                .contains("Glass")
+        );
         assert!(SoundEvent::Error.sound_path().contains("Basso"));
     }
 

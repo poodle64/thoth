@@ -517,11 +517,7 @@ pub fn spoken_numbers_to_digits(text: &str) -> String {
             .find(|(_, c)| c.is_alphabetic())
             .map(|(i, c)| i + c.len_utf8())
             .unwrap_or(0);
-        if start < end {
-            &word[start..end]
-        } else {
-            ""
-        }
+        if start < end { &word[start..end] } else { "" }
     }
 
     // Expand hyphenated number compounds into individual sub-tokens so the

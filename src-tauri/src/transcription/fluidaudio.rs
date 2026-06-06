@@ -7,7 +7,7 @@
 
 #![cfg(all(target_os = "macos", feature = "fluidaudio"))]
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use fluidaudio_rs::FluidAudio;
 use std::path::{Path, PathBuf};
 

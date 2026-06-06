@@ -303,14 +303,18 @@ fn determine_recommended_backend(gpus: &[GpuInfo], compiled: GpuBackend) -> GpuB
         GpuBackend::Cuda => {
             // CUDA build but no NVIDIA GPU - check for Vulkan fallback
             if gpus.iter().any(|gpu| gpu.backend == GpuBackend::Vulkan) {
-                tracing::warn!("CUDA build detected but no NVIDIA GPU found. Vulkan available but requires rebuild with --features vulkan");
+                tracing::warn!(
+                    "CUDA build detected but no NVIDIA GPU found. Vulkan available but requires rebuild with --features vulkan"
+                );
             }
             GpuBackend::Cpu
         }
         GpuBackend::Hipblas => {
             // HIP build but no AMD GPU
             if gpus.iter().any(|gpu| gpu.backend == GpuBackend::Vulkan) {
-                tracing::warn!("HIP/ROCm build detected but no AMD GPU found. Vulkan available but requires rebuild with --features vulkan");
+                tracing::warn!(
+                    "HIP/ROCm build detected but no AMD GPU found. Vulkan available but requires rebuild with --features vulkan"
+                );
             }
             GpuBackend::Cpu
         }

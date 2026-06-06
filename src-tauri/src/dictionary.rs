@@ -272,7 +272,10 @@ fn replace_whole_word(text: &str, from: &str, to: &str, case_sensitive: bool) ->
     match regex {
         Ok(re) => whole_word_replace_all(&re, text, to),
         Err(e) => {
-            tracing::warn!("Dictionary entry '{}' failed to compile as regex ({e}); falling back to substring replace", from);
+            tracing::warn!(
+                "Dictionary entry '{}' failed to compile as regex ({e}); falling back to substring replace",
+                from
+            );
             if case_sensitive {
                 text.replace(from, to)
             } else {

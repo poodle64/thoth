@@ -16,7 +16,7 @@ pub fn position_traffic_lights<R: Runtime>(window: &WebviewWindow<R>, x: f64, he
     {
         use objc2::rc::Retained;
         use objc2::runtime::AnyObject;
-        use objc2::{msg_send, Encode, Encoding, RefEncode};
+        use objc2::{Encode, Encoding, RefEncode, msg_send};
         use objc2_foundation::NSPoint;
 
         // Traffic light buttons are approximately 14px tall

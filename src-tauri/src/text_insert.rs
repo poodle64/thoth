@@ -264,7 +264,9 @@ impl TextInsertService {
         // triggers the "Allow Remote Interaction" prompt. Logged at warn (not
         // debug) so the cause is visible; the startup advisory toast
         // (`emit_linux_typing_advisory`) tells the user how to fix it.
-        warn!("wtype unavailable or failed; falling back to enigo for typing (Wayland users: install wtype or grant Remote Interaction)");
+        warn!(
+            "wtype unavailable or failed; falling back to enigo for typing (Wayland users: install wtype or grant Remote Interaction)"
+        );
         Self::type_with_enigo(text, self.config.keystroke_delay_ms)
     }
 
@@ -330,7 +332,9 @@ impl TextInsertService {
 
         // Fall back to enigo (X11/XWayland). See insert_by_typing_linux for why
         // this is the Wayland pain point; warn so the cause is visible.
-        warn!("wtype unavailable or failed; falling back to enigo for paste (Wayland users: install wtype or grant Remote Interaction)");
+        warn!(
+            "wtype unavailable or failed; falling back to enigo for paste (Wayland users: install wtype or grant Remote Interaction)"
+        );
         Self::paste_with_enigo()
     }
 

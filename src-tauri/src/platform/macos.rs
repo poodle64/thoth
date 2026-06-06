@@ -688,8 +688,8 @@ fn read_audio_property_u32(device_id: u32, selector: u32, scope: u32) -> Option<
     use core::ffi::c_void;
     use core::ptr::NonNull;
     use objc2_core_audio::{
-        kAudioHardwareNoError, kAudioObjectPropertyElementMain, AudioObjectGetPropertyData,
-        AudioObjectGetPropertyDataSize, AudioObjectPropertyAddress,
+        AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectPropertyAddress,
+        kAudioHardwareNoError, kAudioObjectPropertyElementMain,
     };
 
     let address = AudioObjectPropertyAddress {
@@ -754,9 +754,9 @@ pub fn default_input_transport_is_bluetooth() -> bool {
     use core::ffi::c_void;
     use core::ptr::NonNull;
     use objc2_core_audio::{
+        AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectPropertyAddress,
         kAudioHardwareNoError, kAudioHardwarePropertyDefaultInputDevice,
         kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
-        AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectPropertyAddress,
     };
 
     let address = AudioObjectPropertyAddress {
@@ -779,7 +779,10 @@ pub fn default_input_transport_is_bluetooth() -> bool {
         )
     };
     if status != kAudioHardwareNoError {
-        tracing::warn!("CoreAudio: AudioObjectGetPropertyDataSize for default input failed ({}); assuming non-Bluetooth", status);
+        tracing::warn!(
+            "CoreAudio: AudioObjectGetPropertyDataSize for default input failed ({}); assuming non-Bluetooth",
+            status
+        );
         return false;
     }
 
@@ -796,14 +799,19 @@ pub fn default_input_transport_is_bluetooth() -> bool {
         )
     };
     if status != kAudioHardwareNoError {
-        tracing::warn!("CoreAudio: AudioObjectGetPropertyData for default input failed ({}); assuming non-Bluetooth", status);
+        tracing::warn!(
+            "CoreAudio: AudioObjectGetPropertyData for default input failed ({}); assuming non-Bluetooth",
+            status
+        );
         return false;
     }
 
     let transport = match device_transport_type(default_device_id) {
         Some(t) => t,
         None => {
-            tracing::warn!("CoreAudio: could not read transport type of default input device; assuming non-Bluetooth");
+            tracing::warn!(
+                "CoreAudio: could not read transport type of default input device; assuming non-Bluetooth"
+            );
             return false;
         }
     };
@@ -832,13 +840,13 @@ pub fn builtin_input_device_name() -> Option<String> {
     use core::ffi::c_void;
     use core::ptr::NonNull;
     use objc2_core_audio::{
-        kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyName,
-        kAudioObjectPropertyScopeInput,
+        AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectPropertyAddress,
+        kAudioHardwareNoError, kAudioHardwarePropertyDevices, kAudioObjectPropertyElementMain,
+        kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
     };
     use objc2_core_audio::{
-        kAudioHardwareNoError, kAudioHardwarePropertyDevices, kAudioObjectPropertyElementMain,
-        kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, AudioObjectGetPropertyData,
-        AudioObjectGetPropertyDataSize, AudioObjectPropertyAddress,
+        kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyName,
+        kAudioObjectPropertyScopeInput,
     };
     use objc2_core_foundation::{CFRetained, CFString, CFStringBuiltInEncodings};
 
@@ -1009,8 +1017,8 @@ fn read_device_name(dev_id: u32) -> Option<String> {
     use core::ffi::c_void;
     use core::ptr::NonNull;
     use objc2_core_audio::{
-        kAudioHardwareNoError, kAudioObjectPropertyElementMain, kAudioObjectPropertyName,
-        kAudioObjectPropertyScopeGlobal, AudioObjectGetPropertyData, AudioObjectPropertyAddress,
+        AudioObjectGetPropertyData, AudioObjectPropertyAddress, kAudioHardwareNoError,
+        kAudioObjectPropertyElementMain, kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal,
     };
     use objc2_core_foundation::{CFRetained, CFString, CFStringBuiltInEncodings};
 
@@ -1072,9 +1080,9 @@ pub fn device_name_is_bluetooth(target_name: &str) -> bool {
     use core::ffi::c_void;
     use core::ptr::NonNull;
     use objc2_core_audio::{
+        AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectPropertyAddress,
         kAudioHardwareNoError, kAudioHardwarePropertyDevices, kAudioObjectPropertyElementMain,
-        kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, AudioObjectGetPropertyData,
-        AudioObjectGetPropertyDataSize, AudioObjectPropertyAddress,
+        kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
     };
 
     let sys_obj = kAudioObjectSystemObject as u32;

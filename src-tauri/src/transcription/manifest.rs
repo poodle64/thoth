@@ -3,7 +3,7 @@
 //! Fetches model information from a remote JSON manifest to keep
 //! the model list up-to-date without requiring app updates.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -512,12 +512,16 @@ mod tests {
             .filter(|m| m.model_type == "nemo_transducer")
             .collect();
         assert_eq!(parakeet_models.len(), 2);
-        assert!(parakeet_models
-            .iter()
-            .any(|m| m.id == "parakeet-tdt-0.6b-v2-int8"));
-        assert!(parakeet_models
-            .iter()
-            .any(|m| m.id == "parakeet-tdt-0.6b-v3-int8"));
+        assert!(
+            parakeet_models
+                .iter()
+                .any(|m| m.id == "parakeet-tdt-0.6b-v2-int8")
+        );
+        assert!(
+            parakeet_models
+                .iter()
+                .any(|m| m.id == "parakeet-tdt-0.6b-v3-int8")
+        );
     }
 
     #[test]

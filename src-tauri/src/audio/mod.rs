@@ -12,7 +12,7 @@ pub mod ring_buffer;
 pub mod vad;
 
 pub use capture::AudioRecorder;
-pub use device::{get_device_display_name, get_recording_device, list_input_devices, AudioDevice};
+pub use device::{AudioDevice, get_device_display_name, get_recording_device, list_input_devices};
 pub use format::AudioConverter;
 pub use metering::{AudioLevel, AudioMeter};
 pub use preview::{start_recording_metering, stop_recording_metering};
@@ -266,7 +266,9 @@ pub fn stop_recording() -> Result<String, String> {
         if recording_is_bluetooth {
             // Never hold a Bluetooth input stream warm — that pins the
             // device in HFP call mode and degrades the user's audio.
-            tracing::info!("Audio: recording device is Bluetooth — closing stream immediately instead of warming");
+            tracing::info!(
+                "Audio: recording device is Bluetooth — closing stream immediately instead of warming"
+            );
             recorder.cool_down();
             *get_metering_buffer().lock() = None;
             // Bump generation so any pre-existing teardown timer aborts.

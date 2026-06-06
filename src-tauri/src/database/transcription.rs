@@ -4,11 +4,11 @@
 //! in the SQLite database.
 
 use chrono::Utc;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::database::{open_connection, DatabaseError};
+use crate::database::{DatabaseError, open_connection};
 
 /// A transcription record stored in the database.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -347,7 +347,7 @@ pub fn reconcile_orphaned_recordings() -> Result<ReconcileResult, DatabaseError>
             return Ok(ReconcileResult {
                 removed_count: 0,
                 bytes_freed: 0,
-            })
+            });
         }
     };
     reconcile_orphaned_recordings_with_conn(&conn, &dir)

@@ -273,10 +273,11 @@ mod tests {
     fn test_fluidaudio_dir_path() {
         let dir = fluidaudio_models_dir();
         #[cfg(target_os = "macos")]
-        assert!(dir
-            .expect("FluidAudio dir should resolve on macOS")
-            .to_string_lossy()
-            .contains("FluidAudio"));
+        assert!(
+            dir.expect("FluidAudio dir should resolve on macOS")
+                .to_string_lossy()
+                .contains("FluidAudio")
+        );
         #[cfg(not(target_os = "macos"))]
         assert!(dir.is_none(), "FluidAudio dir should be None off macOS");
     }

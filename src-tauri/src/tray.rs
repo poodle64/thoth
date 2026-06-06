@@ -10,10 +10,10 @@
 use parking_lot::RwLock;
 use std::sync::OnceLock;
 use tauri::{
+    AppHandle, Emitter, Manager,
     image::Image,
     menu::{Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
     tray::{TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager,
 };
 
 use crate::audio;

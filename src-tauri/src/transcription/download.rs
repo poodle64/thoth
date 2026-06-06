@@ -4,8 +4,8 @@
 //! - Direct file downloads (whisper.cpp ggml models)
 //! - Archive downloads with extraction (sherpa-onnx models)
 
-use super::manifest::{get_fallback_manifest, get_model_directory, RemoteModelInfo};
-use anyhow::{anyhow, Result};
+use super::manifest::{RemoteModelInfo, get_fallback_manifest, get_model_directory};
+use anyhow::{Result, anyhow};
 use parking_lot::Mutex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};

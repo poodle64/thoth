@@ -8,8 +8,8 @@ use super::metering::AudioMeter;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use parking_lot::Mutex;
 use serde::Serialize;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Audio level event emitted to the frontend

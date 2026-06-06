@@ -19,10 +19,10 @@ pub mod linux;
 #[cfg(target_os = "linux")]
 pub mod wayland_portal;
 #[cfg(target_os = "linux")]
-pub use linux::{get_display_server, DisplayServer};
+pub use linux::{DisplayServer, get_display_server};
 
 pub use conflict::{RegistrationResult, ShortcutConflict};
-pub use manager::{shortcut_ids, ShortcutInfo};
+pub use manager::{ShortcutInfo, shortcut_ids};
 
 use crate::keyboard_service;
 use tauri::AppHandle;

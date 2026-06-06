@@ -14,7 +14,7 @@ pub mod parakeet;
 pub mod whisper;
 
 pub use filter::{FilterOptions, OutputFilter};
-pub use manifest::{fetch_model_manifest, get_manifest_update_time, ModelInfo};
+pub use manifest::{ModelInfo, fetch_model_manifest, get_manifest_update_time};
 
 use parking_lot::Mutex;
 use std::path::PathBuf;
@@ -294,10 +294,7 @@ pub fn transcribe_file(audio_path: String) -> Result<String, String> {
         let temp_path = temp.path().to_path_buf();
         let cancel = std::sync::atomic::AtomicBool::new(false);
         crate::audio::decode::decode_audio_to_wav(&input, &temp_path, &cancel)?;
-        tracing::info!(
-            "Transcoded {} to temporary 16kHz mono WAV",
-            input.display()
-        );
+        tracing::info!("Transcoded {} to temporary 16kHz mono WAV", input.display());
         (temp_path, Some(temp))
     } else {
         (input.clone(), None)

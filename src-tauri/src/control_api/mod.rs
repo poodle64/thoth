@@ -4,11 +4,11 @@
 //! Off by default; opt-in via `integrations.apiEnabled` config.
 
 use axum::{
+    Json, Router,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{delete, get, patch, post, put},
-    Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -396,9 +396,9 @@ fn bearer_auth_layer(
     token: String,
 ) -> ValidateRequestHeaderLayer<
     impl tower_http::validate_request::ValidateRequest<
-            axum::body::Body,
-            ResponseBody = axum::body::Body,
-        > + Clone,
+        axum::body::Body,
+        ResponseBody = axum::body::Body,
+    > + Clone,
 > {
     ValidateRequestHeaderLayer::custom(move |req: &mut axum::http::Request<axum::body::Body>| {
         let ok = req

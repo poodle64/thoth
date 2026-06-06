@@ -10,13 +10,13 @@ pub mod openai_compat;
 pub mod prompts;
 
 pub use context::{
-    build_context, build_enhancement_context, get_clipboard_context, ContextCapture,
+    ContextCapture, build_context, build_enhancement_context, get_clipboard_context,
 };
 pub use ollama::OllamaClient;
 pub use openai_compat::OpenAiCompatClient;
 pub use prompts::{
-    delete_custom_prompt_cmd, get_all_prompts, get_builtin_prompts_cmd, get_custom_prompts_cmd,
-    get_prompt_by_id, save_custom_prompt_cmd, PromptTemplate,
+    PromptTemplate, delete_custom_prompt_cmd, get_all_prompts, get_builtin_prompts_cmd,
+    get_custom_prompts_cmd, get_prompt_by_id, save_custom_prompt_cmd,
 };
 
 use parking_lot::Mutex;

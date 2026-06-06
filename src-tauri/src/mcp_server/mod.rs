@@ -13,9 +13,10 @@
 //! - `get_state`, `get_system`, `list_prompts`
 
 use rmcp::{
+    ErrorData as McpError, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
-    schemars, tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler,
+    schemars, tool, tool_handler, tool_router,
 };
 
 /// The MCP server state. Cloned per session by the transport's service factory.
@@ -126,9 +127,7 @@ fn core_err(msg: String) -> McpError {
 }
 
 /// Parse an optional policy string into a `SnapPolicy`.  `None` defaults to `AliasOnly`.
-fn parse_snap_policy(
-    policy: Option<&str>,
-) -> Result<crate::canonical::SnapPolicy, McpError> {
+fn parse_snap_policy(policy: Option<&str>) -> Result<crate::canonical::SnapPolicy, McpError> {
     match policy {
         None | Some("aliasOnly") => Ok(crate::canonical::SnapPolicy::AliasOnly),
         Some("phonetic") => Ok(crate::canonical::SnapPolicy::Phonetic),
@@ -407,7 +406,7 @@ impl ServerHandler for ThothMcp {
 // ---------------------------------------------------------------------------
 
 use rmcp::transport::streamable_http_server::{
-    session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
+    StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
 };
 
 /// Build the streamable-HTTP MCP service for mounting on the loopback axum router.

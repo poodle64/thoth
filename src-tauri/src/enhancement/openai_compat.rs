@@ -4,7 +4,7 @@
 //! LM Studio, llama.cpp server, vLLM, Ollama (OpenAI mode), etc.
 //! Works fully offline against local endpoints.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::time::sleep;
