@@ -160,6 +160,41 @@ static PROCESSING_COUNT: AtomicUsize = AtomicUsize::new(0);
 /// Cancellation signal for file import operations
 static IMPORT_CANCELLED: AtomicBool = AtomicBool::new(false);
 
+/// Error message emitted when transcription produces no text (silent recording).
+///
+/// Used as a typed sentinel: callers that need to distinguish "nothing was said"
+/// from a genuine failure check via [`is_no_speech_error`]. Centralised here so
+/// the comparison is never a fragile inline string match.
+const NO_SPEECH_ERROR: &str = "Transcription produced no text";
+
+/// Returns true when the pipeline error string indicates a silent recording rather
+/// than a genuine failure. Used to suppress error UI and silently delete orphan WAVs.
+fn is_no_speech_error(e: &str) -> bool {
+    e == NO_SPEECH_ERROR
+}
+
+/// Deletes `audio_path` when `result` is the no-speech sentinel.
+///
+/// Returns `true` if the file was discarded (caller should suppress error UI),
+/// `false` if the result was either success or a genuine error (caller handles
+/// normally). Both the recording-path arm and the import-path arm delegate here
+/// so the discard decision is tested once in one place.
+fn discard_silent_wav(result: &Result<PipelineResult, String>, audio_path: &str) -> bool {
+    let Err(e) = result else { return false };
+    if !is_no_speech_error(e) {
+        return false;
+    }
+    tracing::info!("Pipeline: Silent recording, deleting orphan WAV: {}", audio_path);
+    if let Err(del_err) = std::fs::remove_file(audio_path) {
+        tracing::warn!(
+            "Pipeline: Failed to delete silent WAV {}: {}",
+            audio_path,
+            del_err
+        );
+    }
+    true
+}
+
 /// Serialises clipboard-save → paste → clipboard-restore across concurrent
 /// detached process_audio tasks. Without this, two jobs could race the system
 /// clipboard and corrupt the restored content.
@@ -347,16 +382,19 @@ pub async fn pipeline_stop_and_process(
             let _processing_guard = ProcessingGuard::new();
             process_audio(&app, &audio_path, &config).await
         };
-        match result {
+        match &result {
             Ok(r) => {
                 tracing::info!("Pipeline: Emitting pipeline-complete event");
-                if let Err(e) = app.emit("pipeline-complete", &r) {
+                if let Err(e) = app.emit("pipeline-complete", r) {
                     tracing::error!("Pipeline: Failed to emit pipeline-complete: {}", e);
                 }
             }
+            Err(_) if discard_silent_wav(&result, &audio_path) => {
+                // Silent recording suppressed — discard_silent_wav already deleted the WAV.
+            }
             Err(e) => {
                 tracing::error!("Pipeline: Processing failed: {}", e);
-                emit_progress(&app, PipelineState::Failed, &e);
+                emit_progress(&app, PipelineState::Failed, e);
             }
         }
         // Emit authoritative state after the guard has dropped. get_pipeline_state()
@@ -484,7 +522,7 @@ async fn run_transcription_pipeline(
 
     if raw_text.trim().is_empty() {
         tracing::warn!("Pipeline: Transcription produced no text");
-        return Err("Transcription produced no text".to_string());
+        return Err(NO_SPEECH_ERROR.to_string());
     }
 
     tracing::info!(
@@ -920,6 +958,9 @@ pub async fn pipeline_transcribe_file(
                 tracing::error!("Pipeline: Failed to emit pipeline-complete: {}", e);
             }
         }
+        Err(_) if discard_silent_wav(&result, &wav_path) => {
+            // Silent import suppressed — discard_silent_wav already deleted the WAV.
+        }
         Err(e) => {
             tracing::error!("Pipeline: File transcription failed: {}", e);
             emit_progress(&app, PipelineState::Failed, e);
@@ -1227,5 +1268,69 @@ mod tests {
         }
         // _g1 dropped
         assert_eq!(PROCESSING_COUNT.load(Ordering::SeqCst), before);
+    }
+
+    // ── No-speech / silent-recording tests ─────────────────────────────────
+
+    /// `is_no_speech_error` must return true only for the exact sentinel string.
+    /// Any other message — including a prefix-match — must return false so we
+    /// never suppress a genuine failure.
+    #[test]
+    fn test_is_no_speech_error_exact_match_only() {
+        assert!(
+            is_no_speech_error(NO_SPEECH_ERROR),
+            "sentinel should match itself"
+        );
+        assert!(
+            !is_no_speech_error(""),
+            "empty string must not match sentinel"
+        );
+        assert!(
+            !is_no_speech_error("Transcription failed"),
+            "unrelated error must not match"
+        );
+        assert!(
+            !is_no_speech_error("Transcription produced no text: extra detail"),
+            "a message that merely starts with the sentinel must not match"
+        );
+    }
+
+    /// `discard_silent_wav` must delete the file and return `true` when given the
+    /// no-speech sentinel, exercising the real helper that both dispatch arms call.
+    #[test]
+    fn test_no_speech_discard_deletes_wav_file() {
+        let tmp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let wav_path = tmp_dir.path().join("thoth_recording_test.wav");
+        std::fs::write(&wav_path, b"RIFF").expect("failed to write temp file");
+        assert!(wav_path.exists(), "temp WAV must exist before discard");
+
+        let result: Result<PipelineResult, String> = Err(NO_SPEECH_ERROR.to_string());
+        let discarded = discard_silent_wav(&result, wav_path.to_str().unwrap());
+
+        assert!(discarded, "helper must return true for the no-speech sentinel");
+        assert!(
+            !wav_path.exists(),
+            "WAV file must be gone after silent-recording discard"
+        );
+    }
+
+    /// `discard_silent_wav` must return `false` and leave the file intact when
+    /// given a genuine error — both the recording-path and import-path arms rely
+    /// on this to preserve diagnostic artefacts.
+    #[test]
+    fn test_genuine_error_retains_wav_file() {
+        let tmp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let wav_path = tmp_dir.path().join("thoth_recording_real_error.wav");
+        std::fs::write(&wav_path, b"RIFF").expect("failed to write temp file");
+
+        let result: Result<PipelineResult, String> =
+            Err("Transcription model crashed".to_string());
+        let discarded = discard_silent_wav(&result, wav_path.to_str().unwrap());
+
+        assert!(!discarded, "helper must return false for a genuine error");
+        assert!(
+            wav_path.exists(),
+            "WAV file must be retained after a genuine pipeline error"
+        );
     }
 }

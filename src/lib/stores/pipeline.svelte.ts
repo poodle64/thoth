@@ -92,6 +92,13 @@ interface PipelineProgress {
   message: string;
 }
 
+/**
+ * Sentinel error message emitted by the Rust backend when transcription produces no
+ * text (silent recording). Must match pipeline.rs `NO_SPEECH_ERROR` exactly.
+ * Used to suppress error UI on both the import path and the retranscribe path.
+ */
+export const NO_SPEECH_SENTINEL = 'Transcription produced no text';
+
 /** Default enhancement prompt */
 const DEFAULT_ENHANCEMENT_PROMPT = `Fix grammar and punctuation in the following text.
 Keep the original meaning and tone. Output only the corrected text, nothing else.
@@ -474,6 +481,12 @@ function createPipelineStore() {
       }
     } catch (e) {
       const errorMsg = `${e}`;
+      if (errorMsg.includes(NO_SPEECH_SENTINEL)) {
+        // Silent import: not an error from the user's perspective.
+        state = 'idle';
+        toast.info('No speech detected');
+        return { success: false, error: errorMsg };
+      }
       console.error('[Pipeline] Exception in transcribeFile:', errorMsg);
       error = errorMsg;
       state = 'failed';

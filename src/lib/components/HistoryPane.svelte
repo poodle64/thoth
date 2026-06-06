@@ -16,6 +16,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import type { TranscriptionRecord } from '../stores/history.svelte';
   import { historyStore } from '../stores/history.svelte';
+  import { NO_SPEECH_SENTINEL } from '../stores/pipeline.svelte';
   import { toast } from 'svelte-sonner';
   import { Button } from '$components/ui/button';
   import { Input } from '$components/ui/input';
@@ -229,7 +230,12 @@
         toast.error(result.error ?? 'Retranscription failed');
       }
     } catch (e) {
-      toast.error(`${e}`);
+      const msg = `${e}`;
+      if (msg.includes(NO_SPEECH_SENTINEL)) {
+        toast.info('No speech detected');
+      } else {
+        toast.error(msg);
+      }
     } finally {
       retranscribingId = null;
     }
