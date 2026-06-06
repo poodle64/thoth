@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.10] - 2026-06-06
+
+### Fixed
+
+- **The "Reset System Permissions" dialogue now closes after you confirm.** It was
+  staying open through the admin-password prompt and looked like it had
+  reappeared (the reset itself was working). It's now dismissed as soon as you
+  confirm.
+
 ## [2026.6.9] - 2026-06-06
 
 ### Fixed
