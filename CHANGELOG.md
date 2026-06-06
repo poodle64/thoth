@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.9] - 2026-06-06
+
+### Fixed
+
+- **Your AI-enhancement API key no longer gets wiped when you open Settings
+  after an app update.** The key is stored in ~/.thoth/config.json and always
+  survived reinstalls, but it was the one setting with no "don't overwrite with
+  a blank" protection, so opening Settings after an update could save an empty
+  value over it. It's now guarded like every other sensitive setting, and
+  changing or clearing the key goes through a dedicated path — so an empty or
+  untouched field can never clear a stored key again.
+
 ## [2026.6.8] - 2026-06-06
 
 ### Changed
