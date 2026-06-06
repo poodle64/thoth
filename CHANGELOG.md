@@ -4,215 +4,40 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [2026.6.10] - 2026-06-06
-
-### Fixed
-
-- **The "Reset System Permissions" dialogue now closes after you confirm.** It was
-  staying open through the admin-password prompt and looked like it had
-  reappeared (the reset itself was working). It's now dismissed as soon as you
-  confirm.
-
-## [2026.6.9] - 2026-06-06
-
-### Fixed
-
-- **Your AI-enhancement API key no longer gets wiped when you open Settings
-  after an app update.** The key is stored in ~/.thoth/config.json and always
-  survived reinstalls, but it was the one setting with no "don't overwrite with
-  a blank" protection, so opening Settings after an update could save an empty
-  value over it. It's now guarded like every other sensitive setting, and
-  changing or clearing the key goes through a dedicated path — so an empty or
-  untouched field can never clear a stored key again.
-
-## [2026.6.8] - 2026-06-06
-
-### Changed
-
-- **Parakeet fallback backend moved to the official sherpa-onnx crate.** The
-  third-party `sherpa-rs` binding it relied on is now deprecated upstream;
-  migrated to the official k2-fsa `sherpa-onnx` 1.13 crate, which also bundles a
-  newer native engine (1.13.2 vs 1.12.9). No user-facing change — the Apple
-  Neural Engine (FluidAudio) path remains the default; this keeps the fallback
-  engine current and off a dead dependency.
-
-## [2026.6.7] - 2026-06-06
+## [2026.6.2] - 2026-06-07
 
 ### Added
 
-- **Smarter correction for project and tool names.** The personal dictionary
-  needed a separate entry for every way the transcriber mangled a word —
-  "portcullis" alone had six. You can now register a term once and have its
-  acoustic and spelling variants snap to it automatically, with a per-term
-  safety setting: coined names you never actually say as ordinary words
-  (portcullis, LiteLLM, Vaultwarden) snap aggressively, while names that collide
-  with real words (for example a product called "immich" versus the word
-  "image") stay conservative so genuine words are never over-corrected. Your
-  existing dictionary is folded in on first run — one entry per term with all its
-  variants attached — and nothing changes in behaviour until you opt a term into
-  the smarter matching. Managed through the new `canonical` MCP tool. (Genuine
-  decoder-level biasing was investigated and is not currently viable on either
-  transcription backend, so this deterministic approach is the solution.)
-
-### Fixed
-
-- **transcribe_file now accepts the audio formats it advertises.** Handing it an
-  MP3, M4A, OGG, or FLAC (for example a phone voice memo) previously failed
-  immediately with a misleading "Not a valid WAV file"; these are now transcoded
-  automatically and transcribed. A genuinely unsupported or corrupt file now
-  reports an accurate error instead of the generic WAV message.
+- **Smarter correction for project and tool names.** The personal dictionary needed a separate entry for every way the transcriber mangled a word — "portcullis" alone had six. You can now register a term once and have its acoustic and spelling variants snap to it automatically, with a per-term safety setting: coined names you never actually say as ordinary words (portcullis, LiteLLM, Vaultwarden) snap aggressively, while names that collide with real words (for example a product called "immich" versus the word "image") stay conservative so genuine words are never over-corrected. Your existing dictionary is folded in on first run — one entry per term with all its variants attached — and nothing changes in behaviour until you opt a term into the smarter matching. Managed through the new `canonical` MCP tool. (Genuine decoder-level biasing was investigated and is not currently viable on either transcription backend, so this deterministic approach is the solution.)
+- **Global shortcuts now work on Wayland** via the XDG Desktop Portal (`GlobalShortcuts`), which KDE, wlroots-based compositors, and GNOME 48+ implement. Previously the Tauri global-shortcut plugin was used on every Linux session, but it only works under X11, so on a Wayland session the recording hotkey silently did nothing with no explanation. On a compositor without the portal, Thoth now tells you (a notification) that global shortcuts are unavailable and to use a function-key shortcut or an X11 session. The portal assigns the actual key (the app can only request a preferred one), and the assigned binding is reported back to the UI.
+- A Linux/macOS CI workflow (build, `rustfmt`, `clippy -D warnings`, tests, `.desktop` validation, frontend type-check) now runs on every pull request. Previously only the release workflow compiled the code, so Linux-only breakage was invisible until a release was cut. The Linux job builds with the same Vulkan feature set the release ships, so the Linux-only code is compiled on every change.
+- A user notice when the configured microphone is unavailable and recording falls back to the system default device (e.g. an unplugged USB mic), instead of silently switching.
+- On Linux/Wayland without `wtype`, a one-time notice explaining that installing it makes text insertion seamless (otherwise GNOME prompts for "Allow Remote Interaction" each session).
+- Contributor guide for building on Linux ([docs/development/linux-setup.md](docs/development/linux-setup.md)), covering build dependencies, runtime packages, the AppImage GPU caveat, and display-server behaviour.
 
 ### Changed
 
-- **Dependencies brought fully up to date.** Completed the remaining major
-  upgrades: the audio resampler (rubato 3.0) and audio decoder (symphonia 0.6),
-  moving the project to the Rust 2024 edition. The resampler's end-of-recording
-  drain — which preserves your final words — was re-implemented for the new API
-  and re-verified end to end, so long recordings still transcribe in full.
-- **Kept and hardened the warm-microphone optimisation.** Evaluated whether the
-  warm-stream lifecycle earns its complexity and measured a ~390 ms cold
-  device-open on the DJI MIC MINI — very noticeable on every record press — so it
-  stays. Locked in the guard that prevents an idle teardown from closing the
-  microphone stream mid-recording.
-
-## [2026.6.6] - 2026-06-06
+- **Parakeet fallback backend moved to the official sherpa-onnx crate.** The third-party `sherpa-rs` binding it relied on is now deprecated upstream; migrated to the official k2-fsa `sherpa-onnx` 1.13 crate, which also bundles a newer native engine (1.13.2 vs 1.12.9). No user-facing change — the Apple Neural Engine (FluidAudio) path remains the default; this keeps the fallback engine current and off a dead dependency.
+- **Dependencies brought fully up to date**, including major upgrades across the database (rusqlite), HTTP (reqwest, now on the Rustls TLS stack), audio-resampler (rubato 3.0) and decoder (symphonia 0.6) layers, the whisper.cpp bindings, and the Wayland portal client, moving the project to the Rust 2024 edition. The end-of-recording resampler drain that preserves your final words was re-implemented for the new API and re-verified end to end.
+- **Kept and hardened the warm-microphone optimisation.** Evaluated whether the warm-stream lifecycle earns its complexity and measured a ~390 ms cold device-open on the DJI MIC MINI — very noticeable on every record press — so it stays. Locked in the guard that prevents an idle teardown from closing the microphone stream mid-recording.
+- The recording indicator degrades cleanly on Wayland: it no longer tries to follow the cursor (Wayland does not expose the global cursor position) and uses a fixed on-screen position instead.
+- Modifier-only shortcuts (e.g. double-tap Right Shift) are now correctly refused on Wayland from the runtime re-registration path as well as at startup.
+- The Linux `.deb` now depends on `libvulkan1` (needed by the Vulkan GPU build at runtime) and recommends `wtype`, `xdg-utils`, and the AppIndicator runtime.
+- Whisper initialisation logs the actual compiled GPU backend (Metal/CUDA/ROCm/Vulkan/CPU) rather than always claiming "Metal GPU"; the CPU-only Linux build now tells you how to enable GPU acceleration.
 
 ### Fixed
 
-- Long dictations could still lose their final words, and short ones could gain
-  a phantom word at the end (a stray "Okay" you never said). Both turned out to
-  be the same underlying problem. The Parakeet (FluidAudio) engine transcribes
-  audio longer than about fifteen seconds by splitting it into roughly
-  fifteen-second pieces internally, and on the bundled engine version that final
-  piece is decoded unreliably: depending on exactly where its boundary happens
-  to fall it either drops the closing words or invents a filler word on the
-  trailing silence. Adjusting the silence padding (the previous approach) only
-  changed which recording lengths happened to land badly, which is why the
-  problem kept coming back. Thoth now does the splitting itself — it keeps every
-  piece handed to the engine within the size it decodes reliably in a single
-  pass, cuts only at natural pauses so no word is ever split, and joins the
-  results. Short recordings are unchanged (still one pass); long ones are split
-  at silences. Verified end to end on the failing recordings: a two-and-a-half
-  minute dictation now transcribes in full, and a clip that produced a spurious
-  "Okay" no longer does.
-
-## [2026.6.5] - 2026-06-05
-
-### Fixed
-
-- Recordings could still lose their final words even after the previous fix,
-  whenever the recording contained a short pause partway through (for example,
-  drawing breath between sentences). The Parakeet (FluidAudio) engine splits
-  long audio into roughly fifteen-second pieces and transcribes them in
-  parallel, each piece starting fresh. If the last piece happened to begin in
-  the middle of a word, the engine started from a blank slate, decided the whole
-  piece was silence, and produced nothing — dropping the end of what you said
-  (for example "...waiting for the project to finish being built" became
-  "...waiting for the project"). Switched the engine to its pause-aware
-  splitting mode, which starts each piece from real audio context instead of a
-  blank slate, so those tails transcribe correctly. Verified end to end through
-  the app on the failing recording and on recordings up to nearly a minute long,
-  which now transcribe in full with no loss of accuracy elsewhere. No change to
-  the bundled transcription engine itself was needed — only how Thoth configures
-  it.
-
-### Changed
-
-- Brought the Rust dependencies up to date. Most updates are routine, but
-  several crossed major versions: the database layer (rusqlite), the HTTP client
-  (reqwest, which now defaults to the Rustls TLS stack), the SHA-256 hasher
-  (sha2), the random-token generator (getrandom), the keyboard-state reader
-  (device_query), the Bluetooth/bzip2 and macOS graphics bindings, the
-  whisper.cpp bindings (whisper-rs), and the Linux Wayland portal client (ashpd).
-  The full test suite passes and the app was re-verified end to end (transcription,
-  history, and the tail fix above) on the updated dependencies. Two further major
-  upgrades — the audio resampler (rubato 3.0) and audio decoder (symphonia 0.6) —
-  were deliberately held back: both rewrite the audio pipeline and require the
-  newer Rust 2024 edition, and that pipeline is the same one the tail-truncation
-  fixes touched, so they need their own carefully verified pass rather than riding
-  along with this release.
-
-## [2026.6.4] - 2026-06-05
-
-### Fixed
-
-- Recordings longer than about fifteen seconds no longer lose the end of the
-  transcription (often the final sentence). The Parakeet (FluidAudio) backend
-  decodes audio in fixed fifteen-second windows and stitches the pieces back
-  together; the tail could be dropped where those pieces were merged. Two things
-  caused it together: the bundled FluidAudio engine (0.10.0) had a faulty merge,
-  and Thoth was boosting the recording's volume before transcribing, which moved
-  the window boundaries onto speech and made the drop worse. Upgraded FluidAudio
-  to 0.15.0 (better merging) and stopped the pre-transcription volume boost,
-  which made no measurable difference to accuracy on quiet recordings. Verified
-  end to end through the app on recordings from fifteen seconds to nearly three
-  minutes, which now transcribe in full.
-
-## [2026.6.3] - 2026-06-02
-
-A Linux/Wayland readiness pass. The audit behind it asked, for every OS-touching
-code path, whether Linux was genuinely handled or silently degraded; these
-changes close the real gaps and make every Wayland limitation visible to the
-user rather than a silent dead feature.
-
-### Added
-
-- **Global shortcuts now work on Wayland** via the XDG Desktop Portal
-  (`GlobalShortcuts`), which KDE, wlroots-based compositors, and GNOME 48+
-  implement. Previously the Tauri global-shortcut plugin was used on every Linux
-  session, but it only works under X11, so on a Wayland session the recording
-  hotkey silently did nothing with no explanation. On a compositor without the
-  portal, Thoth now tells you (a notification) that global shortcuts are
-  unavailable and to use a function-key shortcut or an X11 session. The portal
-  assigns the actual key (the app can only request a preferred one), and the
-  assigned binding is reported back to the UI.
-- A Linux/macOS CI workflow (build, `rustfmt`, `clippy -D warnings`, tests,
-  `.desktop` validation, frontend type-check) now runs on every pull request.
-  Previously only the release workflow compiled the code, so Linux-only breakage
-  was invisible until a release was cut. The Linux job builds with the same
-  Vulkan feature set the release ships, so the Linux-only code is compiled on
-  every change.
-- A user notice when the configured microphone is unavailable and recording
-  falls back to the system default device (e.g. an unplugged USB mic), instead
-  of silently switching.
-- On Linux/Wayland without `wtype`, a one-time notice explaining that installing
-  it makes text insertion seamless (otherwise GNOME prompts for "Allow Remote
-  Interaction" each session).
-- Contributor guide for building on Linux ([docs/development/linux-setup.md](docs/development/linux-setup.md)),
-  covering build dependencies, runtime packages, the AppImage GPU caveat, and
-  display-server behaviour.
-
-### Changed
-
-- The recording indicator degrades cleanly on Wayland: it no longer tries to
-  follow the cursor (Wayland does not expose the global cursor position) and
-  uses a fixed on-screen position instead. The cursor-tracking thread no longer
-  starts on Wayland, where it would have polled indefinitely for a position it
-  can never read.
-- Modifier-only shortcuts (e.g. double-tap Right Shift) are now correctly
-  refused on Wayland from the runtime re-registration path as well as at
-  startup; previously re-registering a shortcut could start a key-polling thread
-  on Wayland that cannot work.
-- The Linux `.deb` now depends on `libvulkan1` (needed by the Vulkan GPU build
-  at runtime) and recommends `wtype`, `xdg-utils`, and the AppIndicator runtime.
-- Whisper initialisation logs the actual compiled GPU backend (Metal/CUDA/ROCm/
-  Vulkan/CPU) rather than always claiming "Metal GPU"; the CPU-only Linux build
-  now tells you how to enable GPU acceleration.
-
-### Fixed
-
-- The FluidAudio model-cache path (a macOS `~/Library/...` location) is no longer
-  constructed on Linux, where it would have produced a bogus path; storage
-  accounting and cleanup correctly treat it as not applicable off macOS.
-- Tray icon theme detection now has a KDE/Plasma fallback (reads `kdeglobals`),
-  so the icon matches dark themes on KDE, not just GNOME.
-
-## [2026.6.2] - 2026-06-02
-
-### Fixed
-
-- Long recordings no longer occasionally lose the back half of the transcription (#46). Audio was captured into a small fixed buffer (about 0.7 seconds at a typical microphone's rate) that was resampled in place by the same thread; whenever that thread briefly fell behind — for example while a previous transcription was still running on the GPU — the buffer filled and silently discarded incoming audio, clipping whatever was being said at that moment. On a long recording there were many more chances for this to happen, so the loss tended to land near the end. Capture is now fully decoupled from resampling: the microphone callback does nothing but hand raw samples to an unbounded queue, and a separate thread resamples and writes the file at its own pace. A slow moment can now only delay the file, never shorten it, so no spoken audio can be dropped regardless of recording length or system load.
-- The last fraction of a second of every recording (and of imported audio files) is no longer lost. The resampler holds a short internal delay that was never drained at end of stream, so the true tail never reached the file; it is now flushed properly on finalise.
+- **"folder" (and words like "filter") is no longer auto-corrected to "Vaultwarden" (#74).** The smarter term-matching above could snap a spoken word to a registered name on a phonetic match alone, and the phonetic code it uses is coarse enough that several common words ("folder", "filter", "falter") collide with "Vaultwarden" — so they were being silently rewritten. Matching now requires genuine spelling similarity in addition to the phonetic match, so unrelated everyday words are left alone while real mishearings of a registered term still snap.
+- **Deleting a recording from history now also deletes its audio file (#75).** Removing a transcription left its WAV on disk, so the recordings folder grew without bound (hundreds of orphaned files had accumulated). Deletion now removes the audio too — keeping a file only while another history entry still references it — and a new reconcile action sweeps up orphans left by earlier versions.
+- **A silent recording is discarded instead of saved (#76).** Pressing record, saying nothing, and pressing stop used to leave an orphaned audio file on disk; the silent recording is now removed and treated as a no-op rather than an error. A silent imported or re-transcribed clip shows a neutral "No speech detected" notice instead of an error.
+- **The "Reset System Permissions" dialogue now closes after you confirm.** It was staying open through the admin-password prompt and looked like it had reappeared (the reset itself was working). It's now dismissed as soon as you confirm.
+- **Your AI-enhancement API key no longer gets wiped when you open Settings after an app update.** The key is stored in ~/.thoth/config.json and always survived reinstalls, but it was the one setting with no "don't overwrite with a blank" protection, so opening Settings after an update could save an empty value over it. It's now guarded like every other sensitive setting, and changing or clearing the key goes through a dedicated path.
+- **transcribe_file now accepts the audio formats it advertises.** Handing it an MP3, M4A, OGG, or FLAC (for example a phone voice memo) previously failed immediately with a misleading "Not a valid WAV file"; these are now transcoded automatically and transcribed. A genuinely unsupported or corrupt file now reports an accurate error instead of the generic WAV message.
+- **Tail truncation on long recordings is fixed for good (#46).** Long dictations could lose their final words, and short ones could gain a phantom word at the end (a stray "Okay" you never said) — these turned out to be the same problem. The Parakeet (FluidAudio) engine transcribes audio longer than ~15 seconds by splitting it into ~15-second pieces internally, and the bundled engine decoded that final piece unreliably: depending on where its boundary fell it either dropped the closing words or invented a filler word on the trailing silence. Adjusting the silence padding only changed which recording lengths happened to land badly, which is why the problem kept coming back. Thoth now does the splitting itself — keeping every piece within the size the engine decodes reliably in a single pass, cutting only at natural pauses so no word is ever split, and joining the results. Short recordings are unchanged; long ones are split at silences.
+- The last fraction of a second of every recording (and of imported audio files) is no longer lost. The resampler held a short internal delay that was never drained at end of stream, so the true tail never reached the file; it is now flushed properly on finalise.
+- Long recordings no longer occasionally lose the back half of the transcription (#46). Audio was captured into a small fixed buffer (about 0.7 seconds at a typical microphone's rate) that was resampled in place by the same thread; whenever that thread briefly fell behind — for example while a previous transcription was still running on the GPU — the buffer filled and silently discarded incoming audio. Capture is now fully decoupled from resampling: the microphone callback hands raw samples to an unbounded queue and a separate thread resamples and writes the file at its own pace, so a slow moment can only delay the file, never shorten it.
+- The FluidAudio model-cache path (a macOS `~/Library/...` location) is no longer constructed on Linux, where it would have produced a bogus path; storage accounting treats it as not applicable off macOS.
+- Tray icon theme detection now has a KDE/Plasma fallback (reads `kdeglobals`), so the icon matches dark themes on KDE, not just GNOME.
 
 ## [2026.6.1] - 2026-06-01
 
