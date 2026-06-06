@@ -788,6 +788,13 @@ pub fn get_config_path_cmd() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex as StdMutex;
+
+    /// Serialises tests that mutate the shared CONFIG singleton so they cannot
+    /// interleave under parallel test execution. Every test that calls
+    /// `get_config_instance()` and writes to it must hold this guard for its
+    /// full lifetime.
+    static CONFIG_TEST_LOCK: StdMutex<()> = StdMutex::new(());
 
     #[test]
     fn test_default_config_has_current_version() {
@@ -1152,6 +1159,7 @@ mod tests {
     fn test_set_config_null_api_key_preserves_cached() {
         // A generic set_config with api_key: null must NOT wipe a stored key.
         // The dedicated set_enhancement_api_key command is required for intentional clears.
+        let _guard = CONFIG_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let instance = get_config_instance();
         {
             let mut cached = instance.write();
@@ -1179,6 +1187,7 @@ mod tests {
     fn test_set_enhancement_api_key_sets_and_clears() {
         // set_enhancement_api_key(Some) sets the key; set_enhancement_api_key(None) clears it.
         // Exercise the guard logic directly (no disk I/O in unit tests).
+        let _guard = CONFIG_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let instance = get_config_instance();
 
         // Set a key
@@ -1203,6 +1212,7 @@ mod tests {
     fn test_set_config_with_unrelated_change_preserves_api_key() {
         // A full set_config that changes only an unrelated field (e.g. model) but
         // sends api_key: None must keep the previously-stored key.
+        let _guard = CONFIG_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let instance = get_config_instance();
         {
             let mut cached = instance.write();
