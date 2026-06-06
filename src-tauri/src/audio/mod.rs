@@ -112,6 +112,18 @@ pub fn warm_up_recording() -> Result<(), String> {
     Ok(())
 }
 
+/// Whether an idle-teardown scheduled for `scheduled` has been superseded by a
+/// newer recording (the live counter has moved past it).
+///
+/// `start_recording` and `stop_recording` each bump [`IDLE_GENERATION`], so a
+/// teardown scheduled by an earlier stop must not run once a newer press has
+/// occurred — otherwise it could close the warm stream mid-capture and silently
+/// drop the recording (data loss). This is the primary half of that guard; the
+/// `is_recording()` check in [`spawn_idle_teardown`] is the hard safety net.
+fn idle_teardown_superseded(scheduled: u64, current: u64) -> bool {
+    scheduled != current
+}
+
 /// Spawn the idle-teardown timer.
 ///
 /// After IDLE_TEARDOWN_SECS of inactivity the warm stream is closed. Both
@@ -119,11 +131,19 @@ pub fn warm_up_recording() -> Result<(), String> {
 /// supersedes a pending teardown. As a hard safety net the timer also refuses
 /// to tear down while a recording is actually armed — tearing down mid-capture
 /// would silently kill the recording (data loss).
+///
+/// Keeping this warm-stream lifecycle is a deliberate, evaluated decision
+/// (#68): the first cold `cpal` device resolution measured ~390 ms on a DJI MIC
+/// MINI (`measure_cold_device_open` in the tests below), well past the
+/// imperceptible threshold and very noticeable on every record press for
+/// high-frequency dictation. The latency saving earns the generation-counter
+/// complexity; the data-loss risk it introduces is contained by the two guards
+/// below.
 fn spawn_idle_teardown(generation: u64) {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(IDLE_TEARDOWN_SECS));
         // If the generation has changed, a newer recording started/stopped — do nothing.
-        if IDLE_GENERATION.load(Ordering::Relaxed) != generation {
+        if idle_teardown_superseded(generation, IDLE_GENERATION.load(Ordering::Relaxed)) {
             tracing::debug!("Idle teardown superseded (generation mismatch), skipping");
             return;
         }
@@ -269,6 +289,45 @@ pub fn stop_recording() -> Result<String, String> {
     // stop_recording_metering() is called by the pipeline.
 
     Ok(path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Data-loss guard (#68): a teardown scheduled for an older generation must
+    /// not fire once a newer record press has bumped the counter — otherwise it
+    /// could close the warm stream mid-capture and drop the recording.
+    #[test]
+    fn idle_teardown_superseded_by_newer_recording() {
+        // A newer start/stop has moved the counter past the scheduled generation.
+        assert!(idle_teardown_superseded(3, 4));
+        assert!(idle_teardown_superseded(0, 9));
+        // No newer activity since scheduling — the teardown is free to proceed
+        // (the is_recording() hard net still applies at runtime).
+        assert!(!idle_teardown_superseded(5, 5));
+        assert!(!idle_teardown_superseded(0, 0));
+    }
+
+    /// Re-checkable measurement (#68) of the cold device-resolution cost the warm
+    /// path avoids: `default_input_device()` + `default_input_config()`. Ignored
+    /// in CI (needs an audio device); run manually with
+    /// `cargo test --features fluidaudio -- --ignored measure_cold_device_open --nocapture`.
+    #[test]
+    #[ignore]
+    fn measure_cold_device_open() {
+        use cpal::traits::{DeviceTrait, HostTrait};
+        for _ in 0..3 {
+            let start = std::time::Instant::now();
+            let host = cpal::default_host();
+            let device = host.default_input_device().expect("no input device");
+            let _cfg = device.default_input_config().expect("no input config");
+            println!(
+                "cold device resolution: {:.1} ms",
+                start.elapsed().as_secs_f64() * 1000.0,
+            );
+        }
+    }
 }
 
 /// Check if recording is in progress
