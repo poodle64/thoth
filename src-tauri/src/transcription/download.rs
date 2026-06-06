@@ -441,6 +441,7 @@ const MAX_DOWNLOAD_RETRIES: u32 = 3;
 
 /// Build a reqwest client with appropriate timeouts for large file downloads
 fn build_download_client() -> Result<Client> {
+    crate::ensure_crypto_provider();
     Client::builder()
         .user_agent("Thoth/1.0")
         .connect_timeout(std::time::Duration::from_secs(30))

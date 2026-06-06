@@ -178,6 +178,7 @@ pub async fn fetch_manifest(force_refresh: bool) -> Result<ModelManifest> {
 
     tracing::info!("Fetching model manifest from {}", MANIFEST_URL);
 
+    crate::ensure_crypto_provider();
     let client = reqwest::Client::builder()
         .user_agent("Thoth/1.0")
         .timeout(std::time::Duration::from_secs(30))

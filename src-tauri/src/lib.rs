@@ -143,14 +143,24 @@ fn register_shortcuts_from_config(app: &tauri::AppHandle, cfg: &config::Config) 
     keyboard_service::start_monitoring(app.clone());
 }
 
+/// Installs the `ring` crypto provider as the process-wide rustls default,
+/// exactly once. reqwest is configured with `rustls-no-provider` (to avoid
+/// aws-lc-sys, whose C build fails under the -march=armv8-a baseline the macOS
+/// build sets for whisper.cpp), so a provider must be installed before any
+/// reqwest `Client` is built or reqwest panics. Idempotent and safe to call
+/// from every client-construction site, including unit tests that never run
+/// `run()`.
+pub(crate) fn ensure_crypto_provider() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // reqwest uses rustls-no-provider (avoids aws-lc-sys under -march=armv8-a);
-    // ring must be installed as the process-default crypto provider before any
-    // TLS client is built, or reqwest will panic at Client::new().
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .expect("ring crypto provider already installed");
+    ensure_crypto_provider();
 
     // Set up file-based logging for debugging (local time for readability)
     use tracing_subscriber::prelude::*;

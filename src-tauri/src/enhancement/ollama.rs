@@ -110,6 +110,7 @@ impl OllamaClient {
     /// * `default_model` - Optional default model to use if not specified per-request
     pub fn with_config(base_url: &str, timeout_secs: u64, default_model: Option<String>) -> Self {
         let timeout = Duration::from_secs(timeout_secs);
+        crate::ensure_crypto_provider();
         let client = reqwest::Client::builder()
             .timeout(timeout)
             .build()

@@ -141,6 +141,7 @@ impl OpenAiCompatClient {
         }
 
         let timeout = Duration::from_secs(timeout_secs);
+        crate::ensure_crypto_provider();
         let client = reqwest::Client::builder()
             .timeout(timeout)
             .build()
