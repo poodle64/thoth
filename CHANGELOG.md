@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.8] - 2026-06-06
+
+### Changed
+
+- **Parakeet fallback backend moved to the official sherpa-onnx crate.** The
+  third-party `sherpa-rs` binding it relied on is now deprecated upstream;
+  migrated to the official k2-fsa `sherpa-onnx` 1.13 crate, which also bundles a
+  newer native engine (1.13.2 vs 1.12.9). No user-facing change — the Apple
+  Neural Engine (FluidAudio) path remains the default; this keeps the fallback
+  engine current and off a dead dependency.
+
 ## [2026.6.7] - 2026-06-06
 
 ### Added
