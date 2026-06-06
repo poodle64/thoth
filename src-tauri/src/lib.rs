@@ -479,6 +479,7 @@ pub fn run() {
             database::transcription::list_all_transcriptions,
             database::transcription::delete_transcription_by_id,
             database::transcription::delete_all_transcriptions_cmd,
+            database::transcription::reconcile_orphaned_recordings_cmd,
             database::transcription::search_transcriptions_text,
             database::transcription::count_transcriptions_filtered,
             database::transcription::get_transcription_stats_cmd,

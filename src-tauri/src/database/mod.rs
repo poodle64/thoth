@@ -20,13 +20,22 @@ static DATABASE_PATH: OnceLock<PathBuf> = OnceLock::new();
 #[derive(Debug, thiserror::Error)]
 pub enum DatabaseError {
     #[error("Failed to create database directory: {0}")]
-    DirectoryCreation(#[from] std::io::Error),
+    DirectoryCreation(std::io::Error),
+
+    #[error("Failed to read recordings directory: {0}")]
+    DirectoryRead(std::io::Error),
 
     #[error("SQLite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 
     #[error("Migration failed: {0}")]
     Migration(String),
+}
+
+impl From<std::io::Error> for DatabaseError {
+    fn from(e: std::io::Error) -> Self {
+        DatabaseError::DirectoryCreation(e)
+    }
 }
 
 /// Returns the path to the Thoth database directory (~/.thoth).
@@ -136,8 +145,8 @@ pub use transcription::{
 // Re-export transcription Tauri commands
 pub use transcription::{
     count_transcriptions_filtered, delete_transcription_by_id, get_transcription_by_id,
-    get_transcription_stats_cmd, list_all_transcriptions, save_transcription,
-    search_transcriptions_text,
+    get_transcription_stats_cmd, list_all_transcriptions, reconcile_orphaned_recordings_cmd,
+    save_transcription, search_transcriptions_text,
 };
 
 #[cfg(test)]

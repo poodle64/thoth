@@ -4,7 +4,7 @@
 //! in the SQLite database.
 
 use chrono::Utc;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -211,29 +211,237 @@ pub fn update_transcription(transcription: &Transcription) -> Result<(), Databas
     Ok(())
 }
 
-/// Deletes a transcription by its ID.
+/// Deletes a transcription by its ID, removing its audio file when it is the
+/// sole DB reference to that path.
 pub fn delete_transcription(id: &str) -> Result<bool, DatabaseError> {
-    let conn = open_connection()?;
-
-    let rows_affected = conn.execute("DELETE FROM transcriptions WHERE id = ?1", params![id])?;
-
-    if rows_affected > 0 {
-        tracing::debug!("Deleted transcription: {}", id);
-        Ok(true)
-    } else {
-        tracing::warn!("No transcription found with id: {}", id);
-        Ok(false)
-    }
+    let mut conn = open_connection()?;
+    delete_transcription_with_conn(&mut conn, id)
 }
 
-/// Deletes all transcriptions from the database.
-pub fn delete_all_transcriptions() -> Result<usize, DatabaseError> {
-    let conn = open_connection()?;
+/// Inner implementation that accepts an existing connection (enables testing
+/// against an in-memory DB without touching the global DATABASE_PATH).
+fn delete_transcription_with_conn(
+    conn: &mut rusqlite::Connection,
+    id: &str,
+) -> Result<bool, DatabaseError> {
+    // IMMEDIATE locks the DB writer slot up-front, closing the TOCTOU window
+    // between the audio_path read, the DELETE, and the post-delete ref count.
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
-    let rows_affected = conn.execute("DELETE FROM transcriptions", [])?;
+    // Read the audio_path before deletion.
+    let audio_path: Option<String> = tx
+        .query_row(
+            "SELECT audio_path FROM transcriptions WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+
+    let rows_affected = tx.execute("DELETE FROM transcriptions WHERE id = ?1", params![id])?;
+
+    // Count remaining references AFTER the delete, inside the same transaction,
+    // so the file-removal decision is race-free.
+    let remaining_refs: i64 = if let Some(ref path) = audio_path {
+        tx.query_row(
+            "SELECT COUNT(*) FROM transcriptions WHERE audio_path = ?1",
+            params![path],
+            |row| row.get(0),
+        )?
+    } else {
+        0
+    };
+
+    tx.commit()?;
+
+    if rows_affected == 0 {
+        tracing::warn!("No transcription found with id: {}", id);
+        return Ok(false);
+    }
+
+    tracing::debug!("Deleted transcription: {}", id);
+
+    // Remove the audio file only when no DB row still references it.
+    // Removal is best-effort; any file left behind is recovered by
+    // reconcile_orphaned_recordings on the next explicit sweep.
+    if let Some(path) = audio_path {
+        if remaining_refs == 0 {
+            match std::fs::remove_file(&path) {
+                Ok(()) => tracing::debug!("Removed audio file: {}", path),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    tracing::warn!("Audio file already gone: {}", path);
+                }
+                Err(e) => tracing::warn!("Failed to remove audio file {}: {}", path, e),
+            }
+        } else {
+            tracing::debug!(
+                "Audio file still referenced by {} other rows; not removing: {}",
+                remaining_refs,
+                path
+            );
+        }
+    }
+
+    Ok(true)
+}
+
+/// Deletes all transcriptions from the database and removes their audio files.
+pub fn delete_all_transcriptions() -> Result<usize, DatabaseError> {
+    let mut conn = open_connection()?;
+    delete_all_transcriptions_with_conn(&mut conn)
+}
+
+/// Inner implementation that accepts an existing connection (enables testing
+/// against an in-memory DB without touching the global DATABASE_PATH).
+fn delete_all_transcriptions_with_conn(
+    conn: &mut rusqlite::Connection,
+) -> Result<usize, DatabaseError> {
+    // IMMEDIATE transaction: collect paths and delete rows atomically.
+    let audio_paths: Vec<String>;
+    let rows_affected: usize;
+
+    {
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+        let mut stmt = tx.prepare(
+            "SELECT DISTINCT audio_path FROM transcriptions WHERE audio_path IS NOT NULL",
+        )?;
+        audio_paths = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+
+        rows_affected = tx.execute("DELETE FROM transcriptions", [])?;
+        tx.commit()?;
+    }
+
     tracing::info!("Deleted all transcriptions ({} rows)", rows_affected);
 
+    // Filesystem removal is best-effort after commit; any file that survives
+    // a crash here will be cleaned up by reconcile_orphaned_recordings.
+    for path in &audio_paths {
+        match std::fs::remove_file(path) {
+            Ok(()) => tracing::debug!("Removed audio file: {}", path),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                tracing::warn!("Audio file already gone: {}", path);
+            }
+            Err(e) => tracing::warn!("Failed to remove audio file {}: {}", path, e),
+        }
+    }
+
     Ok(rows_affected)
+}
+
+/// Returns the recordings directory (~/.thoth/Recordings/).
+fn recordings_dir() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|h| h.join(".thoth").join("Recordings"))
+}
+
+/// Scans ~/.thoth/Recordings/ for WAV files that are not referenced by any
+/// DB row and removes them, returning a count and bytes freed.
+pub fn reconcile_orphaned_recordings() -> Result<ReconcileResult, DatabaseError> {
+    let conn = open_connection()?;
+    let dir = match recordings_dir() {
+        Some(d) => d,
+        None => {
+            return Ok(ReconcileResult {
+                removed_count: 0,
+                bytes_freed: 0,
+            })
+        }
+    };
+    reconcile_orphaned_recordings_with_conn(&conn, &dir)
+}
+
+/// Inner implementation used by tests.
+///
+/// `dir` is the recordings directory to scan. Passing it explicitly avoids the
+/// footgun where a test or in-memory connection would scan (and potentially
+/// delete files from) the real ~/.thoth/Recordings/ directory.
+fn reconcile_orphaned_recordings_with_conn(
+    conn: &rusqlite::Connection,
+    dir: &std::path::Path,
+) -> Result<ReconcileResult, DatabaseError> {
+    if !dir.exists() {
+        return Ok(ReconcileResult {
+            removed_count: 0,
+            bytes_freed: 0,
+        });
+    }
+
+    // Build canonicalised set of DB-referenced audio paths.
+    // Canonicalisation normalises trailing slashes, symlinks, and
+    // home-directory representations so a referenced file is never
+    // mistakenly identified as an orphan due to path format differences.
+    let mut stmt = conn
+        .prepare("SELECT DISTINCT audio_path FROM transcriptions WHERE audio_path IS NOT NULL")?;
+    let referenced: std::collections::HashSet<std::path::PathBuf> = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .filter_map(|r| r.ok())
+        .filter_map(|s| std::fs::canonicalize(&s).ok())
+        .collect();
+
+    let mut removed_count: u32 = 0;
+    let mut bytes_freed: u64 = 0;
+
+    let entries = std::fs::read_dir(dir).map_err(DatabaseError::DirectoryRead)?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_wav = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("wav"))
+            .unwrap_or(false);
+        if !is_wav || !path.is_file() {
+            continue;
+        }
+
+        // Canonicalise the disk path before comparing. If canonicalisation
+        // fails (e.g. a broken symlink), skip the entry — never delete on doubt.
+        let canon = match std::fs::canonicalize(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(
+                    "Skipping unresolvable path during reconcile ({}): {}",
+                    path.display(),
+                    e
+                );
+                continue;
+            }
+        };
+
+        if referenced.contains(&canon) {
+            continue;
+        }
+
+        let path_str = path.to_string_lossy().to_string();
+        let size = path.metadata().map(|m| m.len()).unwrap_or(0);
+        // Removal is best-effort; a crash here leaves the file as an orphan
+        // that will be cleaned on the next reconcile call.
+        match std::fs::remove_file(&path) {
+            Ok(()) => {
+                tracing::info!("Orphan removed: {}", path_str);
+                removed_count += 1;
+                bytes_freed += size;
+            }
+            Err(e) => tracing::warn!("Failed to remove orphan {}: {}", path_str, e),
+        }
+    }
+
+    Ok(ReconcileResult {
+        removed_count,
+        bytes_freed,
+    })
+}
+
+/// Result returned by `reconcile_orphaned_recordings`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconcileResult {
+    /// Number of orphaned WAV files removed.
+    pub removed_count: u32,
+    /// Total bytes freed.
+    pub bytes_freed: u64,
 }
 
 /// Lists all transcriptions, ordered by creation date (newest first).
@@ -532,6 +740,16 @@ pub fn delete_all_transcriptions_cmd() -> Result<usize, String> {
     })
 }
 
+/// Scans ~/.thoth/Recordings/ for WAV files not referenced by any DB row and
+/// removes them. Returns the number of files removed and bytes freed.
+#[tauri::command]
+pub fn reconcile_orphaned_recordings_cmd() -> Result<ReconcileResult, String> {
+    reconcile_orphaned_recordings().map_err(|e| {
+        tracing::error!("Failed to reconcile orphaned recordings: {}", e);
+        format!("Failed to reconcile orphaned recordings: {}", e)
+    })
+}
+
 /// Searches transcriptions by text content.
 #[tauri::command]
 pub fn search_transcriptions_text(
@@ -556,6 +774,30 @@ pub fn count_transcriptions_filtered(query: Option<String>) -> Result<usize, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::migrations::run_migrations;
+    use rusqlite::Connection;
+
+    /// Open an in-memory SQLite DB and apply all migrations so the schema is ready.
+    fn make_test_db() -> Connection {
+        let mut conn = Connection::open_in_memory().expect("in-memory DB");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("pragmas");
+        run_migrations(&mut conn).expect("migrations");
+        conn
+    }
+
+    /// Insert a minimal transcription row with the given audio_path.
+    fn insert_row(conn: &Connection, id: &str, audio_path: Option<&str>) {
+        conn.execute(
+            "INSERT INTO transcriptions (id, text, created_at, audio_path, is_enhanced) VALUES (?1, ?2, ?3, ?4, 0)",
+            rusqlite::params![id, "test", "2024-01-01T00:00:00Z", audio_path],
+        )
+        .expect("insert row");
+    }
+
+    // -------------------------------------------------------------------------
+    // Struct construction (unchanged from before)
+    // -------------------------------------------------------------------------
 
     #[test]
     fn test_transcription_new() {
@@ -593,5 +835,143 @@ mod tests {
         assert_eq!(t.transcription_duration_seconds, Some(1.2));
         assert_eq!(t.enhancement_model_name, Some("llama3.2:3b".to_string()));
         assert_eq!(t.enhancement_duration_seconds, Some(0.8));
+    }
+
+    // -------------------------------------------------------------------------
+    // delete_transcription: audio file cleanup
+    // -------------------------------------------------------------------------
+
+    /// Single row with a real WAV file: deleting the row removes the file.
+    #[test]
+    fn test_delete_transcription_removes_audio_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let wav = dir.path().join("rec.wav");
+        std::fs::write(&wav, b"RIFF....").expect("write wav");
+
+        let mut conn = make_test_db();
+        insert_row(&conn, "id-1", Some(wav.to_str().unwrap()));
+
+        let deleted = delete_transcription_with_conn(&mut conn, "id-1").expect("delete");
+        assert!(deleted);
+        assert!(!wav.exists(), "WAV file should have been removed");
+    }
+
+    /// Two rows share one WAV: deleting the first row leaves the file; deleting
+    /// the second removes it.
+    #[test]
+    fn test_delete_shared_audio_path_only_removes_on_last_reference() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let wav = dir.path().join("shared.wav");
+        std::fs::write(&wav, b"RIFF....").expect("write wav");
+
+        let mut conn = make_test_db();
+        insert_row(&conn, "id-a", Some(wav.to_str().unwrap()));
+        insert_row(&conn, "id-b", Some(wav.to_str().unwrap()));
+
+        // Delete first row — file must survive.
+        let deleted = delete_transcription_with_conn(&mut conn, "id-a").expect("delete a");
+        assert!(deleted);
+        assert!(
+            wav.exists(),
+            "WAV should still exist while second row references it"
+        );
+
+        // Delete second row — file must be removed now.
+        let deleted = delete_transcription_with_conn(&mut conn, "id-b").expect("delete b");
+        assert!(deleted);
+        assert!(
+            !wav.exists(),
+            "WAV should be removed after last reference deleted"
+        );
+    }
+
+    /// Deleting a row whose WAV is already missing must not return an error.
+    #[test]
+    fn test_delete_transcription_wav_already_gone_no_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let wav = dir.path().join("gone.wav");
+        // Deliberately do NOT create the file.
+
+        let mut conn = make_test_db();
+        insert_row(&conn, "id-gone", Some(wav.to_str().unwrap()));
+
+        let result = delete_transcription_with_conn(&mut conn, "id-gone");
+        assert!(result.is_ok(), "Should succeed even when file is missing");
+        assert!(result.unwrap());
+    }
+
+    // -------------------------------------------------------------------------
+    // delete_all_transcriptions: bulk file cleanup
+    // -------------------------------------------------------------------------
+
+    /// delete_all cleans up all referenced WAV files.
+    #[test]
+    fn test_delete_all_removes_audio_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let wav1 = dir.path().join("a.wav");
+        let wav2 = dir.path().join("b.wav");
+        std::fs::write(&wav1, b"RIFF").expect("write a");
+        std::fs::write(&wav2, b"RIFF").expect("write b");
+
+        let mut conn = make_test_db();
+        insert_row(&conn, "id-1", Some(wav1.to_str().unwrap()));
+        insert_row(&conn, "id-2", Some(wav2.to_str().unwrap()));
+
+        let count = delete_all_transcriptions_with_conn(&mut conn).expect("delete all");
+        assert_eq!(count, 2);
+        assert!(!wav1.exists());
+        assert!(!wav2.exists());
+    }
+
+    // -------------------------------------------------------------------------
+    // reconcile_orphaned_recordings
+    // -------------------------------------------------------------------------
+
+    /// Files not referenced by any row are removed; referenced files are kept.
+    #[test]
+    fn test_reconcile_removes_orphans_keeps_referenced() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let orphan = dir.path().join("orphan.wav");
+        let referenced = dir.path().join("referenced.wav");
+        std::fs::write(&orphan, b"RIFF").expect("write orphan");
+        std::fs::write(&referenced, b"RIFF").expect("write referenced");
+
+        let conn = make_test_db();
+        insert_row(&conn, "id-ref", Some(referenced.to_str().unwrap()));
+
+        let result = reconcile_orphaned_recordings_with_conn(&conn, dir.path()).expect("reconcile");
+
+        assert_eq!(result.removed_count, 1, "one orphan should be removed");
+        assert!(!orphan.exists(), "orphan should be gone");
+        assert!(referenced.exists(), "referenced file should survive");
+        assert!(result.bytes_freed > 0);
+    }
+
+    /// A referenced file stored with a path that differs only in representation
+    /// (e.g. via a symlink to the same tempdir) must NOT be deleted.
+    #[test]
+    fn test_reconcile_keeps_referenced_via_symlink_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let real_file = dir.path().join("rec.wav");
+        std::fs::write(&real_file, b"RIFF").expect("write wav");
+
+        // Create a symlink directory that resolves to the same tempdir.
+        let link_dir = tempfile::tempdir().expect("link tempdir");
+        let link_path = link_dir.path().join("rec_link.wav");
+        std::os::unix::fs::symlink(&real_file, &link_path).expect("symlink");
+
+        let conn = make_test_db();
+        // Store the path via the symlink; the file on disk is in `dir`.
+        insert_row(&conn, "id-via-link", Some(link_path.to_str().unwrap()));
+
+        // Reconcile against the real directory; the file must not be deleted
+        // because its canonicalised path matches the DB entry's canonical path.
+        let result = reconcile_orphaned_recordings_with_conn(&conn, dir.path()).expect("reconcile");
+
+        assert_eq!(
+            result.removed_count, 0,
+            "file referenced via symlink path must not be removed"
+        );
+        assert!(real_file.exists(), "real file must survive");
     }
 }
