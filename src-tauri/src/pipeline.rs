@@ -8,6 +8,7 @@
 //! 5. Output (clipboard copy and/or paste at cursor)
 //! 6. History (save to database)
 
+use crate::canonical;
 use crate::clipboard;
 use crate::database;
 use crate::dictionary;
@@ -525,6 +526,8 @@ async fn run_transcription_pipeline(
         if config.apply_dictionary {
             text = dictionary::apply_dictionary(&text);
             tracing::debug!("Pipeline: After dictionary: {} chars", text.len());
+            text = canonical::apply_canonical(&text);
+            tracing::debug!("Pipeline: After canonical: {} chars", text.len());
         }
 
         tracing::info!("Pipeline: Filtered text to {} characters", text.len());

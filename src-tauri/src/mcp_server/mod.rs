@@ -61,6 +61,24 @@ pub struct DictionaryParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CanonicalParams {
+    /// The operation: `list`, `add`, `update`, or `remove`.
+    pub action: String,
+    /// For `add`/`update`: the canonical term string (e.g. "portcullis", "LiteLLM").
+    #[serde(default)]
+    pub term: Option<String>,
+    /// For `add`/`update`: explicit spelling aliases (case-insensitive exact matches).
+    #[serde(default)]
+    pub aliases: Option<Vec<String>>,
+    /// For `add`/`update`: matching policy — `aliasOnly` (default), `phonetic`, or `conservative`.
+    #[serde(default)]
+    pub policy: Option<String>,
+    /// For `update`/`remove`: the zero-based index of the term (from `list`).
+    #[serde(default)]
+    pub index: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SettingParams {
     /// The operation: `get` (read all settings) or `update`.
     pub action: String,
@@ -105,6 +123,21 @@ fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, McpErro
 /// Map a `Result<_, String>` core call into an MCP tool error on failure.
 fn core_err(msg: String) -> McpError {
     McpError::internal_error(msg, None)
+}
+
+/// Parse an optional policy string into a `SnapPolicy`.  `None` defaults to `AliasOnly`.
+fn parse_snap_policy(
+    policy: Option<&str>,
+) -> Result<crate::canonical::SnapPolicy, McpError> {
+    match policy {
+        None | Some("aliasOnly") => Ok(crate::canonical::SnapPolicy::AliasOnly),
+        Some("phonetic") => Ok(crate::canonical::SnapPolicy::Phonetic),
+        Some("conservative") => Ok(crate::canonical::SnapPolicy::Conservative),
+        Some(other) => Err(core_err(format!(
+            "unknown policy '{}'; must be aliasOnly | phonetic | conservative",
+            other
+        ))),
+    }
 }
 
 #[tool_router]
@@ -177,6 +210,65 @@ impl ThothMcp {
             "export" => {
                 let json = crate::dictionary::export_dictionary().map_err(core_err)?;
                 Ok(CallToolResult::success(vec![Content::text(json)]))
+            }
+            other => Err(core_err(format!("unknown action: {}", other))),
+        }
+    }
+
+    #[tool(
+        description = "Manage Thoth's canonical-term registry (phonetic/fuzzy snapping of acoustic variants to a registered spelling). Register a term ONCE and all acoustic/spelling variants auto-snap to it. Action: list | add | update | remove. add/update require term (+ optional aliases, policy, index for update/remove). policy: aliasOnly (default, exact aliases only), phonetic (OR gate: phonetic key OR edit-distance), conservative (AND gate: both). Returns: the term list."
+    )]
+    async fn canonical(
+        &self,
+        Parameters(p): Parameters<CanonicalParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match p.action.as_str() {
+            "list" => {
+                let terms = crate::canonical::get_canonical_terms().map_err(core_err)?;
+                json_result(&terms)
+            }
+            "add" => {
+                let term_str = p
+                    .term
+                    .ok_or_else(|| core_err("`term` required for add".into()))?;
+                let policy = parse_snap_policy(p.policy.as_deref())?;
+                let ct = crate::canonical::CanonicalTerm {
+                    term: term_str,
+                    aliases: p.aliases.unwrap_or_default(),
+                    policy,
+                    max_words: 3,
+                    threshold: None,
+                };
+                crate::canonical::add_canonical_term(ct).map_err(core_err)?;
+                let terms = crate::canonical::get_canonical_terms().map_err(core_err)?;
+                json_result(&terms)
+            }
+            "update" => {
+                let index = p
+                    .index
+                    .ok_or_else(|| core_err("`index` required for update".into()))?;
+                let term_str = p
+                    .term
+                    .ok_or_else(|| core_err("`term` required for update".into()))?;
+                let policy = parse_snap_policy(p.policy.as_deref())?;
+                let ct = crate::canonical::CanonicalTerm {
+                    term: term_str,
+                    aliases: p.aliases.unwrap_or_default(),
+                    policy,
+                    max_words: 3,
+                    threshold: None,
+                };
+                crate::canonical::update_canonical_term(index, ct).map_err(core_err)?;
+                let terms = crate::canonical::get_canonical_terms().map_err(core_err)?;
+                json_result(&terms)
+            }
+            "remove" => {
+                let index = p
+                    .index
+                    .ok_or_else(|| core_err("`index` required for remove".into()))?;
+                crate::canonical::remove_canonical_term(index).map_err(core_err)?;
+                let terms = crate::canonical::get_canonical_terms().map_err(core_err)?;
+                json_result(&terms)
             }
             other => Err(core_err(format!("unknown action: {}", other))),
         }

@@ -6,6 +6,7 @@ use tauri::Manager;
 
 pub mod app_handle;
 pub mod audio;
+pub mod canonical;
 pub mod clipboard;
 pub mod commands;
 pub mod config;
@@ -514,6 +515,11 @@ pub fn run() {
             dictionary::export_dictionary,
             dictionary::apply_dictionary_to_text,
             dictionary::get_vocabulary_for_context,
+            // Canonical terms
+            canonical::get_canonical_terms,
+            canonical::add_canonical_term,
+            canonical::update_canonical_term,
+            canonical::remove_canonical_term,
             // Text insertion
             text_insert::insert_text,
             text_insert::insert_text_by_typing,
