@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.6] - 2026-06-06
+
+### Fixed
+
+- Long dictations could still lose their final words, and short ones could gain
+  a phantom word at the end (a stray "Okay" you never said). Both turned out to
+  be the same underlying problem. The Parakeet (FluidAudio) engine transcribes
+  audio longer than about fifteen seconds by splitting it into roughly
+  fifteen-second pieces internally, and on the bundled engine version that final
+  piece is decoded unreliably: depending on exactly where its boundary happens
+  to fall it either drops the closing words or invents a filler word on the
+  trailing silence. Adjusting the silence padding (the previous approach) only
+  changed which recording lengths happened to land badly, which is why the
+  problem kept coming back. Thoth now does the splitting itself — it keeps every
+  piece handed to the engine within the size it decodes reliably in a single
+  pass, cuts only at natural pauses so no word is ever split, and joins the
+  results. Short recordings are unchanged (still one pass); long ones are split
+  at silences. Verified end to end on the failing recordings: a two-and-a-half
+  minute dictation now transcribes in full, and a clip that produced a spurious
+  "Okay" no longer does.
+
 ## [2026.6.5] - 2026-06-05
 
 ### Fixed
