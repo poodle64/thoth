@@ -33,11 +33,15 @@ pub enum SnapPolicy {
     /// flat dictionary.
     #[default]
     AliasOnly,
-    /// Snap when either the Double-Metaphone keys match OR the
-    /// normalised Damerau–Levenshtein distance >= threshold.
+    /// Snap when BOTH the Double-Metaphone keys match AND the normalised
+    /// Damerau–Levenshtein distance >= threshold (default 0.55).  The AND
+    /// gate prevents phonetic collisions on short 4-char codes (e.g. FLTR
+    /// matches both "folder" and "Vaultwarden") from firing without also
+    /// requiring meaningful string similarity.
     Phonetic,
-    /// Snap only when BOTH the phonetic key matches AND the edit distance >=
-    /// threshold.  More precise — fewer false positives.
+    /// Same AND gate as Phonetic (Double-Metaphone key match AND normalised
+    /// Damerau–Levenshtein distance >= threshold), but with a higher default
+    /// threshold (0.85) for terms that share a phonetic code with common words.
     Conservative,
 }
 
@@ -58,7 +62,7 @@ pub struct CanonicalTerm {
     #[serde(default = "default_max_words")]
     pub max_words: u8,
     /// Per-term override for the edit-distance threshold.  When absent, the
-    /// policy defaults apply (0.72 for Phonetic, 0.85 for Conservative).
+    /// policy defaults apply (0.55 for Phonetic, 0.85 for Conservative).
     #[serde(default)]
     pub threshold: Option<f64>,
 }
@@ -294,35 +298,34 @@ fn matches_term(candidate: &str, ct: &CanonicalTerm) -> bool {
     match ct.policy {
         SnapPolicy::AliasOnly => false,
         SnapPolicy::Phonetic => {
-            let threshold = ct.threshold.unwrap_or(0.72);
-            fuzzy_matches_any(&cand_lc, &term_lc, &ct.aliases, threshold, false)
+            let threshold = ct.threshold.unwrap_or(0.55);
+            fuzzy_matches_any(&cand_lc, &term_lc, &ct.aliases, threshold)
         }
         SnapPolicy::Conservative => {
             let threshold = ct.threshold.unwrap_or(0.85);
-            fuzzy_matches_any(&cand_lc, &term_lc, &ct.aliases, threshold, true)
+            fuzzy_matches_any(&cand_lc, &term_lc, &ct.aliases, threshold)
         }
     }
 }
 
 /// Check whether `cand_lc` fuzzy-matches `term_lc` or any same-word-count alias.
 ///
-/// Single-word candidates: OR gate for Phonetic (phonetic key match OR ndl >=
-/// threshold); AND gate for Conservative.
+/// Single-word candidates: AND gate for both Phonetic and Conservative —
+/// phonetic key match AND ndl >= threshold must both hold.  The Phonetic
+/// default threshold (0.55) is lower than Conservative (0.85) to catch
+/// genuine acoustic variants while still blocking collisions on coarse
+/// 4-char Double-Metaphone codes (e.g. FLTR matches both "folder" and
+/// "Vaultwarden"; NDL 0.27 blocks the false positive).
 ///
 /// Multi-word candidates: DoubleMetaphone drops stop words so phrase-level
 /// phonetic keys are too coarse for an OR gate (e.g. "portcolours is" encodes
 /// identically to "portcolours").  Multi-word matching therefore always uses
-/// AND gate with a lower hard-coded floor (0.60) to distinguish genuine acoustic
-/// variants ("port colours" / "port cullis" NDL ≈ 0.67) from incidental
-/// phonetic collisions with extra words ("portcolours is" / "port cullis"
-/// NDL ≈ 0.50).  The caller's `threshold` is still respected when it is higher.
-fn fuzzy_matches_any(
-    cand_lc: &str,
-    term_lc: &str,
-    aliases: &[String],
-    threshold: f64,
-    conservative: bool,
-) -> bool {
+/// AND gate with a floor of `max(threshold, 0.60)` — the floor distinguishes
+/// genuine acoustic variants ("port colours" / "port cullis" NDL ≈ 0.67) from
+/// incidental phonetic collisions ("portcolours is" / "port cullis" NDL ≈ 0.50),
+/// and the caller's threshold governs when it is above the floor (so Conservative
+/// 0.85 is honoured on phrases as well as single-word candidates).
+fn fuzzy_matches_any(cand_lc: &str, term_lc: &str, aliases: &[String], threshold: f64) -> bool {
     let cand_word_count = cand_lc.split_whitespace().count();
     let multi_word = cand_word_count > 1;
 
@@ -347,14 +350,16 @@ fn fuzzy_matches_any(
         let ndl = strsim::normalized_damerau_levenshtein(cand_lc, reference.as_str());
         if multi_word {
             // AND gate for multi-word: phonetic key match anchors the comparison,
-            // NDL >= 0.60 screens out stop-word collisions.  The single-word
-            // threshold (0.72/0.85) is intentionally not used here — phrase NDL
-            // scores run lower than single-word scores for genuine variants.
-            phon && ndl >= 0.60_f64
-        } else if conservative {
-            phon && ndl >= threshold
+            // NDL >= max(threshold, 0.60) screens out stop-word collisions.
+            // The 0.60 floor applies when the caller's threshold is lower; when
+            // the caller passes a higher threshold (e.g. Conservative 0.85) it
+            // still governs (so Conservative is stricter even on phrases).
+            phon && ndl >= threshold.max(0.60_f64)
         } else {
-            phon || ndl >= threshold
+            // Both Phonetic and Conservative use AND gate for single-word candidates.
+            // Phonetic uses a lower default threshold (0.55) to allow genuine acoustic
+            // variants through while blocking coarse phonetic-code collisions.
+            phon && ndl >= threshold
         }
     })
 }
@@ -810,6 +815,69 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
+    // Phonetic AND-gate regression (folder/filter false-positive)
+    // -------------------------------------------------------------------------
+
+    fn vaultwarden_term() -> CanonicalTerm {
+        CanonicalTerm {
+            term: "Vaultwarden".to_string(),
+            aliases: vec![],
+            policy: SnapPolicy::Phonetic,
+            max_words: 1,
+            threshold: None,
+        }
+    }
+
+    #[test]
+    fn test_phonetic_folder_does_not_snap_to_vaultwarden() {
+        // "folder" and "Vaultwarden" share Double-Metaphone code FLTR (4-char truncation),
+        // but NDL("folder", "vaultwarden") ≈ 0.27, which is below the 0.55 threshold.
+        // The AND gate must block this false positive.
+        let terms = vec![vaultwarden_term()];
+        assert_eq!(
+            run_with_registry(terms.clone(), "open the folder"),
+            "open the folder",
+            "folder must NOT snap to Vaultwarden"
+        );
+        assert_eq!(
+            run_with_registry(terms.clone(), "folder"),
+            "folder",
+            "standalone folder must NOT snap to Vaultwarden"
+        );
+    }
+
+    #[test]
+    fn test_phonetic_filter_does_not_snap_to_vaultwarden() {
+        // "filter" also reduces to FLTR — same coarse-code false-positive class.
+        let terms = vec![vaultwarden_term()];
+        assert_eq!(
+            run_with_registry(terms.clone(), "apply the filter"),
+            "apply the filter",
+            "filter must NOT snap to Vaultwarden"
+        );
+    }
+
+    #[test]
+    fn test_phonetic_genuine_variants_still_snap() {
+        // Verify that the stricter AND gate does not block legitimate mishearings.
+        // "portcolours" → portcullis: phonetic match (both PRTK) + NDL ≈ 0.64 >= 0.55.
+        let portcullis = portcullis_term(SnapPolicy::Phonetic);
+        assert_eq!(
+            run_with_registry(vec![portcullis], "lower the portcolours"),
+            "lower the portcullis",
+            "portcolours should still snap to portcullis (NDL >= 0.55)"
+        );
+
+        // "port colours" → portcullis via the two-word alias path (multi-word AND gate).
+        let portcullis2 = portcullis_term(SnapPolicy::Phonetic);
+        assert_eq!(
+            run_with_registry(vec![portcullis2], "lower the port colours"),
+            "lower the portcullis",
+            "port colours should still snap to portcullis"
+        );
+    }
+
+    // -------------------------------------------------------------------------
     // Threshold boundary
     // -------------------------------------------------------------------------
 
@@ -836,8 +904,8 @@ mod tests {
             "portklezm should not snap (phonetic match but ndl ~0.5 < 0.85)"
         );
 
-        // Phonetic (OR gate): phonetic key match alone is sufficient.
-        // "portculis" snaps even without an NDL threshold check.
+        // Phonetic (AND gate, explicit threshold 0.85): phonetic key matches AND
+        // ndl ~0.9 >= 0.85, so "portculis" snaps.
         let phonetic_terms = vec![CanonicalTerm {
             term: "portcullis".to_string(),
             aliases: vec![],
@@ -848,7 +916,7 @@ mod tests {
         assert_eq!(
             run_with_registry(phonetic_terms, "portculis"),
             "portcullis",
-            "portculis should snap under phonetic policy"
+            "portculis should snap under phonetic policy (phon match + ndl ~0.9 >= 0.85)"
         );
     }
 
