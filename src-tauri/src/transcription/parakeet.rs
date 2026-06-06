@@ -6,12 +6,12 @@
 //! Requires the `parakeet` Cargo feature to be enabled.
 
 use anyhow::{anyhow, Result};
-use sherpa_rs::transducer::{TransducerConfig, TransducerRecognizer};
+use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig, OfflineTransducerModelConfig};
 use std::path::{Path, PathBuf};
 
 /// Transcription service using Parakeet TDT model
 pub struct TranscriptionService {
-    recognizer: TransducerRecognizer,
+    recognizer: OfflineRecognizer,
 }
 
 impl TranscriptionService {
@@ -50,32 +50,37 @@ impl TranscriptionService {
         let tokens_str = tokens.to_string_lossy().to_string();
         let num_threads = num_cpus::get().min(8) as i32;
 
-        let build_config = |provider: Option<String>| TransducerConfig {
-            encoder: encoder_str.clone(),
-            decoder: decoder_str.clone(),
-            joiner: joiner_str.clone(),
-            tokens: tokens_str.clone(),
-            num_threads,
-            sample_rate: 16000,
-            feature_dim: 80,
-            model_type: "nemo_transducer".to_string(),
-            provider,
-            ..Default::default()
+        let build_config = |provider: Option<String>| {
+            let mut config = OfflineRecognizerConfig::default();
+            config.model_config.transducer = OfflineTransducerModelConfig {
+                encoder: Some(encoder_str.clone()),
+                decoder: Some(decoder_str.clone()),
+                joiner: Some(joiner_str.clone()),
+            };
+            config.model_config.tokens = Some(tokens_str.clone());
+            config.model_config.model_type = Some("nemo_transducer".into());
+            config.model_config.num_threads = num_threads;
+            config.model_config.debug = false;
+            config.model_config.provider = provider;
+            config.decoding_method = Some("greedy_search".into());
+            config
         };
 
-        // Try CoreML on macOS for GPU acceleration, fall back to CPU if it fails
+        // Try CoreML on macOS for GPU acceleration, fall back to CPU if it fails.
+        // OfflineRecognizer::create returns Option — None means init failed.
         #[cfg(target_os = "macos")]
         let recognizer = {
             tracing::info!("Attempting CoreML provider for GPU acceleration");
-            match TransducerRecognizer::new(build_config(Some("coreml".to_string()))) {
-                Ok(r) => {
+            match OfflineRecognizer::create(&build_config(Some("coreml".into()))) {
+                Some(r) => {
                     tracing::info!("CoreML provider initialised successfully");
                     r
                 }
-                Err(e) => {
-                    tracing::warn!("CoreML provider failed ({}), falling back to CPU", e);
-                    TransducerRecognizer::new(build_config(None))
-                        .map_err(|e| anyhow!("Failed to create recognizer with CPU: {}", e))?
+                None => {
+                    tracing::warn!("CoreML provider failed, falling back to CPU");
+                    OfflineRecognizer::create(&build_config(Some("cpu".into()))).ok_or_else(
+                        || anyhow!("Failed to create Parakeet recognizer with CPU provider"),
+                    )?
                 }
             }
         };
@@ -83,8 +88,8 @@ impl TranscriptionService {
         #[cfg(not(target_os = "macos"))]
         let recognizer = {
             tracing::info!("Using CPU provider");
-            TransducerRecognizer::new(build_config(None))
-                .map_err(|e| anyhow!("Failed to create recognizer: {}", e))?
+            OfflineRecognizer::create(&build_config(Some("cpu".into())))
+                .ok_or_else(|| anyhow!("Failed to create Parakeet recognizer"))?
         };
 
         tracing::info!("Parakeet model loaded successfully");
@@ -147,7 +152,7 @@ impl TranscriptionService {
         };
 
         let start = std::time::Instant::now();
-        let text = self.recognizer.transcribe(sample_rate, &samples);
+        let text = self.transcribe_samples(&samples);
         let duration = start.elapsed();
 
         let audio_duration = samples.len() as f32 / sample_rate as f32;
@@ -169,7 +174,10 @@ impl TranscriptionService {
     ///
     /// Samples should be 16kHz f32 mono audio.
     pub fn transcribe_samples(&mut self, samples: &[f32]) -> String {
-        self.recognizer.transcribe(16000, samples)
+        let stream = self.recognizer.create_stream();
+        stream.accept_waveform(16000, samples);
+        self.recognizer.decode(&stream);
+        stream.get_result().map(|r| r.text).unwrap_or_default()
     }
 }
 

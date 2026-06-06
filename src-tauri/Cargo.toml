@@ -36,11 +36,9 @@ webrtc-vad = "0.4"
 symphonia = { version = "0.6", features = ["mp3", "aac", "ogg", "vorbis", "flac", "wav", "pcm", "isomp4"] }
 
 # Transcription
-# sherpa-rs: Parakeet TDT models via Sherpa-ONNX (statically linked)
-# NOTE: static + download-binaries works on macOS (archive has .a files)
-# but NOT on Linux (archive only has binaries, no .a files). Linux CI
-# builds without parakeet feature until upstream fixes the archive.
-sherpa-rs = { version = "0.6", features = ["static", "download-binaries"], optional = true }
+# Official k2-fsa crate; static + auto-download by default; macOS Parakeet TDT fallback
+# (Linux CI builds without the parakeet feature).
+sherpa-onnx = { version = "1.13", optional = true }
 # fluidaudio-rs: Apple Neural Engine backend via CoreML (macOS-only, Apple Silicon)
 # Forked with platform guards: compiles as no-op on Linux/Windows
 fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", rev = "0061017", optional = true }
@@ -116,7 +114,7 @@ objc2-core-foundation = { version = "0.3", features = ["CFString"] }
 
 [features]
 default = ["parakeet", "fluidaudio"]
-parakeet = ["sherpa-rs"]
+parakeet = ["dep:sherpa-onnx"]
 fluidaudio = ["fluidaudio-rs"]
 # GPU acceleration for whisper.cpp (mutually exclusive, only use one)
 # Use: cargo build --features cuda      for NVIDIA GPUs
