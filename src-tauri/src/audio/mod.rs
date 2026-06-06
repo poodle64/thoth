@@ -253,8 +253,8 @@ pub fn stop_recording() -> Result<String, String> {
             IDLE_GENERATION.fetch_add(1, Ordering::Relaxed);
         } else {
             // Built-in or USB device: keep warm for IDLE_TEARDOWN_SECS.
-            let gen = IDLE_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
-            spawn_idle_teardown(gen);
+            let idle_gen = IDLE_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+            spawn_idle_teardown(idle_gen);
         }
         p
     } else {

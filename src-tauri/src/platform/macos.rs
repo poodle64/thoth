@@ -12,7 +12,7 @@ use std::process::Command;
 pub fn check_input_monitoring_permission() -> bool {
     unsafe {
         #[link(name = "IOKit", kind = "framework")]
-        extern "C" {
+        unsafe extern "C" {
             fn IOHIDCheckAccess(request: u32) -> u32;
         }
 
@@ -47,7 +47,7 @@ pub fn open_input_monitoring_settings() {
 pub fn check_accessibility_permission() -> bool {
     unsafe {
         #[link(name = "ApplicationServices", kind = "framework")]
-        extern "C" {
+        unsafe extern "C" {
             fn AXIsProcessTrusted() -> bool;
         }
 
@@ -113,7 +113,7 @@ impl std::fmt::Display for MicrophoneStatus {
 pub fn check_microphone_permission() -> MicrophoneStatus {
     unsafe {
         #[link(name = "AVFoundation", kind = "framework")]
-        extern "C" {}
+        unsafe extern "C" {}
 
         let cls: &AnyClass = class!(AVCaptureDevice);
         let media_type = NSString::from_str("soun");
@@ -136,7 +136,7 @@ pub fn check_microphone_permission() -> MicrophoneStatus {
 pub fn request_microphone_permission(app: tauri::AppHandle) {
     unsafe {
         #[link(name = "AVFoundation", kind = "framework")]
-        extern "C" {}
+        unsafe extern "C" {}
 
         let cls: &AnyClass = class!(AVCaptureDevice);
         let media_type = NSString::from_str("soun");
@@ -194,7 +194,7 @@ pub fn verify_accessibility_functional() -> bool {
 
     unsafe {
         #[link(name = "ApplicationServices", kind = "framework")]
-        extern "C" {
+        unsafe extern "C" {
             fn AXUIElementCreateSystemWide() -> *mut std::ffi::c_void;
             fn AXUIElementCopyAttributeValue(
                 element: *mut std::ffi::c_void,
@@ -348,7 +348,7 @@ pub fn get_caret_position() -> Option<CaretPosition> {
 
     unsafe {
         #[link(name = "ApplicationServices", kind = "framework")]
-        extern "C" {
+        unsafe extern "C" {
             fn AXUIElementCreateSystemWide() -> *mut std::ffi::c_void;
             fn AXUIElementCopyAttributeValue(
                 element: *mut std::ffi::c_void,
@@ -528,7 +528,7 @@ pub fn get_caret_position() -> Option<CaretPosition> {
 pub fn is_screen_locked() -> bool {
     unsafe {
         #[link(name = "ApplicationServices", kind = "framework")]
-        extern "C" {
+        unsafe extern "C" {
             fn CGSessionCopyCurrentDictionary() -> *const std::ffi::c_void;
         }
 

@@ -4,7 +4,8 @@ version = "2026.6.6"
 description = "Privacy-first, offline-capable voice transcription application"
 authors = ["poodle64"]
 license = "MIT"
-edition = "2021"
+edition = "2024"
+rust-version = "1.85"
 
 [lib]
 name = "thoth_lib"
@@ -28,10 +29,11 @@ tauri-plugin-single-instance = "2"
 # Audio
 cpal = "0.17"
 hound = "3.5"
-rubato = "0.15"
+rubato = "3.0"
+audioadapter-buffers = "3.0"
 crossbeam-channel = "0.5"
 webrtc-vad = "0.4"
-symphonia = { version = "0.5", features = ["mp3", "aac", "ogg", "vorbis", "flac", "wav", "pcm", "isomp4"] }
+symphonia = { version = "0.6", features = ["mp3", "aac", "ogg", "vorbis", "flac", "wav", "pcm", "isomp4"] }
 
 # Transcription
 # sherpa-rs: Parakeet TDT models via Sherpa-ONNX (statically linked)
@@ -39,9 +41,6 @@ symphonia = { version = "0.5", features = ["mp3", "aac", "ogg", "vorbis", "flac"
 # but NOT on Linux (archive only has binaries, no .a files). Linux CI
 # builds without parakeet feature until upstream fixes the archive.
 sherpa-rs = { version = "0.6", features = ["static", "download-binaries"], optional = true }
-# (rubato 0.15 and symphonia 0.5 intentionally held back: their 3.0/0.6 majors
-# rewrite the audio resample/decode pipeline and force Rust 2024/MSRV 1.85;
-# bumping them needs a dedicated live-audio verification pass — tracked separately.)
 # fluidaudio-rs: Apple Neural Engine backend via CoreML (macOS-only, Apple Silicon)
 # Forked with platform guards: compiles as no-op on Linux/Windows
 fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", rev = "0061017", optional = true }

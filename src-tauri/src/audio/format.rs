@@ -3,13 +3,15 @@
 //! Provides high-quality resampling from device sample rate (typically 48kHz)
 //! to 16kHz for transcription, including stereo to mono conversion.
 
+use audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{
-    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+    Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType,
+    WindowFunction,
 };
 
 /// Audio format converter for resampling and channel conversion
 pub struct AudioConverter {
-    resampler: SincFixedIn<f32>,
+    resampler: Async<f32>,
     source_channels: usize,
 }
 
@@ -35,12 +37,13 @@ impl AudioConverter {
             window: WindowFunction::BlackmanHarris2,
         };
 
-        let resampler = SincFixedIn::new(
+        let resampler = Async::<f32>::new_sinc(
             target_rate as f64 / source_rate as f64,
             2.0, // max_resample_ratio_relative
-            params,
+            &params,
             chunk_size,
-            1, // mono output
+            1, // mono output (downmix happens before resampler)
+            FixedAsync::Input,
         )?;
 
         Ok(Self {
@@ -54,9 +57,31 @@ impl AudioConverter {
     /// Converts stereo to mono, resamples to target rate, and returns f32 samples.
     pub fn process(&mut self, input: &[f32]) -> Result<Vec<f32>, rubato::ResampleError> {
         let mono = self.to_mono(input);
-        let waves_in = [mono];
-        let waves_out = self.resampler.process(&waves_in, None)?;
-        Ok(waves_out.into_iter().next().unwrap_or_default())
+        let frames = mono.len();
+
+        let input_adapter = InterleavedSlice::new(&mono, 1, frames)
+            .expect("input adapter: sizes are internally consistent");
+
+        let max_out = self.resampler.output_frames_max();
+        let mut out_data = vec![0.0f32; max_out];
+        let mut output_adapter = InterleavedSlice::new_mut(&mut out_data, 1, max_out)
+            .expect("output adapter: sizes are internally consistent");
+
+        let indexing = Indexing {
+            input_offset: 0,
+            output_offset: 0,
+            active_channels_mask: None,
+            partial_len: None,
+        };
+
+        let (_in_frames, out_frames) = self.resampler.process_into_buffer(
+            &input_adapter,
+            &mut output_adapter,
+            Some(&indexing),
+        )?;
+
+        out_data.truncate(out_frames);
+        Ok(out_data)
     }
 
     /// Process and convert to i16
@@ -71,32 +96,64 @@ impl AudioConverter {
     /// Finalise the stream: resample a trailing partial chunk (fewer than
     /// `chunk_size` frames) and then drain the resampler's internal delay line.
     ///
-    /// `SincFixedIn` buffers `sinc_len` samples of state, so the final output
-    /// frames sit inside the resampler after the last full chunk is fed. Without
-    /// this drain the tail of every recording — up to that delay — is silently
-    /// lost, which on a long recording can clip a final word. Call this exactly
-    /// once at end of stream, after all full chunks have gone through
+    /// `Async<f32>` with `FixedAsync::Input` buffers `sinc_len/2` samples of
+    /// lookahead state in its delay line, so the final output frames sit inside
+    /// the resampler after the last full chunk is fed. Without this drain the
+    /// tail of every recording — up to that delay — is silently lost. Call this
+    /// exactly once at end of stream, after all full chunks have gone through
     /// [`process_to_i16`].
+    ///
+    /// In rubato 3.0 the drain is expressed by calling `process_into_buffer` with
+    /// `partial_len = Some(n)` where `n` is the number of leftover input frames
+    /// (0 if the accumulator was empty). When `partial_len < chunk_size`, rubato
+    /// zero-pads the input to fill one chunk and emits only the output frames
+    /// that correspond to real input — including the samples stored in the delay
+    /// line — so all trailing samples are recovered.
     ///
     /// `leftover` is the remaining interleaved source samples that did not fill a
     /// whole `chunk_size` chunk (may be empty).
     pub fn finish_to_i16(&mut self, leftover: &[f32]) -> Result<Vec<i16>, rubato::ResampleError> {
         let mono = self.to_mono(leftover);
-        // `process_partial` emits the resampler's buffered delay-line tail. With a
-        // short final block it also resamples that block; with `None` it drains
-        // delay only. We must pass `None` (not `Some(&[])`) when there is no
-        // leftover: rubato's partial path clears its internal zero-padding for an
-        // empty channel, which then fails the fixed-input-size check. An empty
-        // leftover is common — the accumulator empties whenever a full chunk is
-        // drained, so a recording can stop on an exact chunk boundary.
-        let waves_out = if mono.is_empty() {
-            self.resampler.process_partial::<Vec<f32>>(None, None)?
-        } else {
-            let waves_in = [mono];
-            self.resampler.process_partial(Some(&waves_in), None)?
+        let leftover_frames = mono.len();
+
+        // Pad the mono buffer to the resampler's expected input size so that
+        // InterleavedSlice can wrap it. The extra zeros are excluded from the
+        // resampled output because partial_len tells the resampler how many
+        // real frames were present.
+        let input_frames_next = self.resampler.input_frames_next();
+        let padded_len = leftover_frames.max(input_frames_next);
+        let mut padded = mono;
+        padded.resize(padded_len, 0.0);
+
+        let input_adapter = InterleavedSlice::new(&padded, 1, padded_len)
+            .expect("input adapter: sizes are internally consistent");
+
+        // output_delay() is the number of output frames the resampler will still
+        // emit when draining. Allocate that plus whatever the partial input
+        // produces; add a safety margin.
+        let delay_frames = self.resampler.output_delay();
+        let out_capacity = delay_frames + input_frames_next + 64;
+        let mut out_data = vec![0.0f32; out_capacity];
+        let mut output_adapter = InterleavedSlice::new_mut(&mut out_data, 1, out_capacity)
+            .expect("output adapter: sizes are internally consistent");
+
+        let indexing = Indexing {
+            input_offset: 0,
+            output_offset: 0,
+            active_channels_mask: None,
+            // partial_len = Some(n) triggers the flush: rubato processes exactly
+            // n real frames (zero = drain only) then emits the delay line tail.
+            partial_len: Some(leftover_frames),
         };
-        let resampled = waves_out.into_iter().next().unwrap_or_default();
-        Ok(f32_to_i16(&resampled))
+
+        let (_in_frames, out_frames) = self.resampler.process_into_buffer(
+            &input_adapter,
+            &mut output_adapter,
+            Some(&indexing),
+        )?;
+
+        out_data.truncate(out_frames);
+        Ok(f32_to_i16(&out_data))
     }
 
     /// Downmix interleaved source frames to mono.
@@ -149,8 +206,7 @@ mod tests {
     #[test]
     fn test_finish_to_i16_empty_leftover_does_not_error() {
         // A recording that stops on an exact chunk boundary leaves an empty
-        // leftover. finish_to_i16 must drain the resampler delay via `None`, not
-        // pass an empty `Some` (which rubato rejects with InsufficientInputBufferSize).
+        // leftover. finish_to_i16 must drain the resampler delay via partial_len=Some(0).
         let mut converter = AudioConverter::new(48000, 16000, 1, 1024).unwrap();
         // Prime the resampler with a full chunk so it has delay-line state to drain.
         let chunk: Vec<f32> = (0..1024).map(|i| (i as f32 * 0.01).sin() * 0.3).collect();
@@ -178,6 +234,50 @@ mod tests {
             .finish_to_i16(&leftover)
             .expect("partial-leftover finalise must not error");
         assert!(!tail.is_empty());
+    }
+
+    /// Assert that resampling `input_len` 48kHz frames produces at least the
+    /// expected number of 16kHz output samples (ratio 1/3) with no tail truncation.
+    ///
+    /// This test feeds N full chunks plus a partial leftover, then calls
+    /// finish_to_i16. The total output (mid-stream + tail) must be >= the
+    /// expected conversion result, ensuring no samples are silently dropped.
+    #[test]
+    fn test_no_tail_truncation_full_sample_count() {
+        let source_rate = 48_000u32;
+        let target_rate = 16_000u32;
+        let chunk_size = 1024usize;
+        let num_full_chunks = 5usize;
+        let leftover_size = 300usize;
+
+        let total_input_frames = num_full_chunks * chunk_size + leftover_size;
+        // Expected output frames = input * (target/source), rounded down.
+        let expected_min_output =
+            (total_input_frames as f64 * target_rate as f64 / source_rate as f64) as usize;
+
+        let mut converter = AudioConverter::new(source_rate, target_rate, 1, chunk_size).unwrap();
+
+        let all_input: Vec<f32> = (0..total_input_frames)
+            .map(|i| (i as f32 * 0.01).sin() * 0.3)
+            .collect();
+
+        let mut total_output_samples = 0usize;
+
+        for chunk in all_input[..num_full_chunks * chunk_size].chunks(chunk_size) {
+            let out = converter.process_to_i16(chunk).unwrap();
+            total_output_samples += out.len();
+        }
+
+        let leftover = &all_input[num_full_chunks * chunk_size..];
+        let tail = converter.finish_to_i16(leftover).unwrap();
+        total_output_samples += tail.len();
+
+        assert!(
+            total_output_samples >= expected_min_output,
+            "expected >= {} output samples (no truncation), got {}",
+            expected_min_output,
+            total_output_samples
+        );
     }
 
     #[test]
@@ -244,7 +344,7 @@ mod tests {
 
         // The conversion must succeed; the `unwrap` is the assertion. rubato may
         // legitimately buffer and return an empty chunk, so output length is not
-        // asserted (the previous `!is_empty() || true` was a tautology).
+        // asserted.
         let _output = converter.process_to_i16(&input).unwrap();
     }
 

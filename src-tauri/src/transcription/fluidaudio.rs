@@ -223,8 +223,7 @@ fn plan_segments(samples: &[f32], rate: u32) -> Vec<(usize, usize)> {
         let cut = cuts
             .iter()
             .copied()
-            .filter(|&c| c > window_lo && c <= window_hi)
-            .next_back()
+            .rfind(|&c| c > window_lo && c <= window_hi)
             .unwrap_or(window_hi);
         segments.push((pos, cut));
         pos = cut;
@@ -416,12 +415,10 @@ mod tests {
         // 60 s alternating 2 s speech / 0.5 s silence so there are real pauses.
         let mut samples = Vec::new();
         while samples.len() < (60.0 * rate as f32) as usize {
-            for _ in 0..(2.0 * rate as f32) as usize {
-                samples.push(0.3);
-            }
-            for _ in 0..(0.5 * rate as f32) as usize {
-                samples.push(0.0);
-            }
+            let speech_frames = (2.0 * rate as f32) as usize;
+            let silence_frames = (0.5 * rate as f32) as usize;
+            samples.extend(std::iter::repeat_n(0.3f32, speech_frames));
+            samples.extend(std::iter::repeat_n(0.0f32, silence_frames));
         }
         let segs = plan_segments(&samples, rate);
         assert!(segs.len() > 1, "long recording should split");

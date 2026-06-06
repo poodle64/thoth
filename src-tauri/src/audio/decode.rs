@@ -6,13 +6,12 @@
 use crate::audio::format::AudioConverter;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::probe::Hint;
+use symphonia::core::formats::{FormatOptions, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
 
 /// Maximum file size for import (500 MB)
 const MAX_FILE_SIZE: u64 = 500 * 1024 * 1024;
@@ -65,32 +64,39 @@ pub fn decode_audio_to_wav(
         hint.with_extension(ext);
     }
 
-    // Probe the format
-    let probed = symphonia::default::get_probe()
-        .format(
+    // Probe the format (symphonia 0.6: probe() replaces format())
+    let mut format = symphonia::default::get_probe()
+        .probe(
             &hint,
             mss,
-            &FormatOptions::default(),
-            &MetadataOptions::default(),
+            FormatOptions::default(),
+            MetadataOptions::default(),
         )
         .map_err(|e| format!("Unsupported audio format: {}", e))?;
 
-    let mut format = probed.format;
-
-    // Find the first audio track with a decodeable codec
+    // Find the first audio track (symphonia 0.6: default_track(TrackType::Audio))
     let track = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+        .default_track(TrackType::Audio)
         .ok_or_else(|| "No supported audio track found in file".to_string())?;
 
     let track_id = track.id;
-    let codec_params = track.codec_params.clone();
 
-    let source_rate = codec_params
+    // codec_params is now Option<CodecParameters (enum)>; .audio() extracts audio params
+    let audio_params = track
+        .codec_params
+        .as_ref()
+        .and_then(|p| p.audio())
+        .ok_or_else(|| "No audio codec parameters found".to_string())?
+        .clone();
+
+    let source_rate = audio_params
         .sample_rate
         .ok_or_else(|| "Cannot determine sample rate from audio file".to_string())?;
-    let source_channels = codec_params.channels.map(|c| c.count()).unwrap_or(1);
+    let source_channels = audio_params
+        .channels
+        .as_ref()
+        .map(|c| c.count())
+        .unwrap_or(1);
 
     tracing::info!(
         "Decoding: {}Hz, {} channels -> {}Hz mono",
@@ -99,9 +105,9 @@ pub fn decode_audio_to_wav(
         TARGET_SAMPLE_RATE
     );
 
-    // Create the decoder
+    // Create the decoder (symphonia 0.6: make_audio_decoder() replaces make())
     let mut decoder = symphonia::default::get_codecs()
-        .make(&codec_params, &DecoderOptions::default())
+        .make_audio_decoder(&audio_params, &AudioDecoderOptions::default())
         .map_err(|e| format!("Unsupported audio codec: {}", e))?;
 
     // Create the resampler (handles arbitrary sample rate ratios)
@@ -124,7 +130,6 @@ pub fn decode_audio_to_wav(
         .map_err(|e| format!("Failed to create output WAV file: {}", e))?;
 
     // Decode loop with chunk buffering for rubato
-    let mut sample_buf: Option<SampleBuffer<f32>> = None;
     let mut resample_buffer: Vec<f32> = Vec::new();
     let mut total_source_frames: u64 = 0;
     let mut packet_count: u32 = 0;
@@ -132,7 +137,7 @@ pub fn decode_audio_to_wav(
 
     loop {
         // Periodic cancellation check
-        if packet_count.is_multiple_of(CANCEL_CHECK_INTERVAL) && cancel.load(Ordering::Relaxed) {
+        if packet_count % CANCEL_CHECK_INTERVAL == 0 && cancel.load(Ordering::Relaxed) {
             // Clean up partial output
             drop(wav_writer);
             let _ = std::fs::remove_file(output_path);
@@ -140,49 +145,36 @@ pub fn decode_audio_to_wav(
         }
         packet_count += 1;
 
-        // Get next packet
+        // Get next packet (symphonia 0.6: Ok(None) signals EOF instead of UnexpectedEof)
         let packet = match format.next_packet() {
-            Ok(packet) => packet,
-            Err(SymphoniaError::IoError(ref e))
-                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
-            {
-                break; // End of stream
-            }
+            Ok(Some(packet)) => packet,
+            Ok(None) => break, // End of stream
             Err(SymphoniaError::ResetRequired) => break,
             Err(e) => return Err(format!("Error reading audio: {}", e)),
         };
 
         // Skip packets from other tracks
-        if packet.track_id() != track_id {
+        if packet.track_id != track_id {
             continue;
         }
 
-        // Decode the packet
+        // Decode the packet into audio samples
         let decoded = match decoder.decode(&packet) {
             Ok(decoded) => decoded,
             Err(SymphoniaError::IoError(_)) | Err(SymphoniaError::DecodeError(_)) => continue,
             Err(e) => return Err(format!("Decode error: {}", e)),
         };
 
-        // Convert to interleaved f32 via SampleBuffer
-        let spec = *decoded.spec();
-        let num_frames = decoded.capacity();
+        // Collect decoded samples as interleaved f32 (SampleBuffer removed in 0.6;
+        // copy_to_vec_interleaved is the replacement on GenericAudioBufferRef)
+        let mut samples: Vec<f32> = Vec::new();
+        decoded.copy_to_vec_interleaved(&mut samples);
 
-        let sbuf =
-            sample_buf.get_or_insert_with(|| SampleBuffer::<f32>::new(num_frames as u64, spec));
-
-        // Recreate if capacity changed
-        if sbuf.capacity() < num_frames {
-            *sbuf = SampleBuffer::<f32>::new(num_frames as u64, spec);
-        }
-
-        sbuf.copy_interleaved_ref(decoded);
-        let samples = sbuf.samples();
         let frame_count = samples.len() / source_channels.max(1);
         total_source_frames += frame_count as u64;
 
         // Accumulate in resample buffer
-        resample_buffer.extend_from_slice(samples);
+        resample_buffer.extend_from_slice(&samples);
 
         // Drain in exact chunk sizes for rubato
         while resample_buffer.len() >= frames_per_chunk {
