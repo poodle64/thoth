@@ -215,7 +215,7 @@ impl ThothMcp {
     }
 
     #[tool(
-        description = "Manage Thoth's canonical-term registry (phonetic/fuzzy snapping of acoustic variants to a registered spelling). Register a term ONCE and all acoustic/spelling variants auto-snap to it. Action: list | add | update | remove. add/update require term (+ optional aliases, policy, index for update/remove). policy: aliasOnly (default, exact aliases only), phonetic (OR gate: phonetic key OR edit-distance), conservative (AND gate: both). Returns: the term list."
+        description = "Manage Thoth's canonical-term registry (phonetic/fuzzy snapping of acoustic variants to a registered spelling). Register a term ONCE and all acoustic/spelling variants auto-snap to it. Action: list | add | update | remove. add/update require term (+ optional aliases, policy, index for update/remove). policy: aliasOnly (default, exact aliases only), phonetic (AND gate: Double-Metaphone key match AND edit-distance >= 0.55), conservative (same AND gate, higher 0.85 threshold for terms that collide with common words). Returns: the term list."
     )]
     async fn canonical(
         &self,
