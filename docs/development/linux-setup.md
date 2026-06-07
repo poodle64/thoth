@@ -19,7 +19,7 @@ sudo apt-get install -y \
 - `libasound2-dev` — ALSA, for cpal audio capture.
 - `libvulkan-dev`, `glslc`, `spirv-headers` — the Vulkan GPU backend. whisper.cpp's GGML Vulkan backend compiles its shaders at build time via CMake (`find_package(Vulkan COMPONENTS glslc REQUIRED)` and `find_package(SPIRV-Headers REQUIRED)`); `glslang-tools` does **not** satisfy this. Omit these only if you build CPU-only without `--features vulkan`.
 
-The toolchain otherwise is the standard one: a recent stable Rust (via `rustup`), Node.js LTS, and `pnpm`. `direnv` loads the project environment from `.envrc` (run `direnv allow` once). This project does not use a Nix flake; install the system packages above through your distribution's package manager.
+The toolchain otherwise is the standard one: a recent stable Rust (via `rustup`), Node.js LTS, and `pnpm`. `direnv` loads the project environment from `.envrc` (run `direnv allow` once), and on Debian/Ubuntu you install the system packages above through apt. On NixOS — or any machine with Nix — the committed `flake.nix` provides the entire toolchain and every build dependency (Rust, Node, pnpm, GTK/WebKit, the Vulkan toolchain, CUDA); run `nix develop` and build inside that shell instead of installing the apt packages.
 
 ## Building
 
@@ -39,7 +39,7 @@ pnpm tauri build -- --no-default-features --features cuda
 pnpm tauri build -- --no-default-features --features hipblas
 ```
 
-`--no-default-features` is required on Linux: the default features include Parakeet (sherpa-rs) and FluidAudio, which are macOS-only on this project (sherpa-rs has no Linux static archive — see [#53](https://github.com/poodle64/thoth/issues/53); FluidAudio is Apple Neural Engine). The Linux transcription backend is Whisper (whisper.cpp).
+`--no-default-features` is required on Linux: the default features (Parakeet + FluidAudio) are off here. FluidAudio is Apple-Neural-Engine only (macOS/Apple Silicon). Parakeet — now the official k2-fsa `sherpa-onnx` crate — **does** build and link on Linux, and it links **statically** (no extra runtime library to ship); this was previously blocked when the backend used `sherpa-rs`, whose Linux package shipped no static archive (see [#53](https://github.com/poodle64/thoth/issues/53)). It is still left out of the default Linux build pending runtime verification of a Linux transcription; to try it, add `--features parakeet`. The default Linux transcription backend is Whisper (whisper.cpp).
 
 Pick exactly one GPU feature; they are mutually exclusive. If GPU initialisation fails at runtime, Thoth falls back to CPU automatically.
 
