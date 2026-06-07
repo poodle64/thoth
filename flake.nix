@@ -133,6 +133,18 @@
             echo "  --features cuda     - NVIDIA GPUs (requires CUDA drivers)"
             echo "  --features hipblas  - AMD GPUs (requires ROCm)"
             echo "  --features vulkan   - Cross-platform (experimental)"
+          '' + pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+
+            # whisper-rs-sys runs bindgen over ggml-vulkan.h. bindgen invokes
+            # libclang directly, bypassing the nix cc-wrapper, so it cannot find
+            # the libc headers (stdio.h) or clang's own builtin headers
+            # (stddef.h). bindgen then errors and whisper-rs-sys SILENTLY falls
+            # back to its bundled no-Vulkan bindings, so the ggml_backend_vk_*
+            # symbols go missing and whisper-rs fails to compile its Vulkan
+            # module (issue #64). Feed bindgen the cc-wrapper's libc flags plus
+            # clang's resource dir. A standard apt system finds these in
+            # /usr/include and lib/clang, so CI does not need this.
+            export BINDGEN_EXTRA_CLANG_ARGS="$(< ${pkgs.stdenv.cc}/nix-support/libc-cflags) -idirafter ${pkgs.llvmPackages.libclang.lib}/lib/clang/${pkgs.lib.versions.major pkgs.llvmPackages.libclang.version}/include"
           '';
         };
       });
