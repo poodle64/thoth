@@ -394,7 +394,7 @@ pub fn enter_capture_mode(app: AppHandle) -> Result<String, String> {
 
     #[cfg(target_os = "linux")]
     {
-        if is_wayland() {
+        if crate::shortcuts::is_wayland() {
             tracing::info!("Running on Wayland - using webview keyboard capture");
             // Still set Capturing mode so GlobalShortcut callbacks are suppressed
             MODE.store(KeyboardMode::Capturing as u8, Ordering::Release);
@@ -762,17 +762,6 @@ fn process_capture(app: &AppHandle, keys: &HashSet<Keycode>) -> bool {
 // ---------------------------------------------------------------------------
 // Webview capture (Wayland fallback, ported from keyboard_capture.rs)
 // ---------------------------------------------------------------------------
-
-/// Check if we're running on Wayland
-#[cfg(target_os = "linux")]
-fn is_wayland() -> bool {
-    if let Ok(session_type) = std::env::var("XDG_SESSION_TYPE") {
-        if session_type.to_lowercase() == "wayland" {
-            return true;
-        }
-    }
-    std::env::var("WAYLAND_DISPLAY").is_ok()
-}
 
 /// Process a webview keydown event (Wayland fallback)
 fn process_webview_keydown(

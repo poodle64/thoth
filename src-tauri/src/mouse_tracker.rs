@@ -137,7 +137,7 @@ fn get_mouse_position() -> Option<(f64, f64)> {
 #[cfg(target_os = "linux")]
 fn get_mouse_position() -> Option<(f64, f64)> {
     // Check if we're on Wayland - X11 won't work there
-    if is_wayland() {
+    if crate::shortcuts::is_wayland() {
         return None;
     }
 
@@ -159,19 +159,6 @@ fn get_mouse_position() -> Option<(f64, f64)> {
 
     // root_x and root_y are relative to the root window (entire screen)
     Some((pointer.root_x as f64, pointer.root_y as f64))
-}
-
-/// Check if we're running on Wayland (where X11 won't work)
-#[cfg(target_os = "linux")]
-fn is_wayland() -> bool {
-    // Check XDG_SESSION_TYPE first (most reliable)
-    if let Ok(session_type) = std::env::var("XDG_SESSION_TYPE") {
-        if session_type.to_lowercase() == "wayland" {
-            return true;
-        }
-    }
-    // Also check WAYLAND_DISPLAY
-    std::env::var("WAYLAND_DISPLAY").is_ok()
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
@@ -249,7 +236,7 @@ pub fn start_tracking() {
     // indicator would never move. Refuse to start and let the caller fall back
     // to a fixed indicator position instead.
     #[cfg(target_os = "linux")]
-    if is_wayland() {
+    if crate::shortcuts::is_wayland() {
         tracing::info!(
             "Wayland session: cursor-following indicator disabled (Wayland does not expose \
              global cursor position); using a fixed indicator position instead"

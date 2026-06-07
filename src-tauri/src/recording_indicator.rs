@@ -36,24 +36,6 @@ const BOTTOM_PADDING: f64 = 120.0;
 /// Padding from screen edge for pill style
 const PILL_EDGE_PADDING: f64 = 12.0;
 
-/// Check if we're running on Wayland (where indicator positioning won't work well)
-#[cfg(target_os = "linux")]
-fn is_wayland() -> bool {
-    // Check XDG_SESSION_TYPE first (most reliable)
-    if let Ok(session_type) = std::env::var("XDG_SESSION_TYPE") {
-        if session_type.to_lowercase() == "wayland" {
-            return true;
-        }
-    }
-    // Also check WAYLAND_DISPLAY
-    std::env::var("WAYLAND_DISPLAY").is_ok()
-}
-
-#[cfg(not(target_os = "linux"))]
-fn is_wayland() -> bool {
-    false
-}
-
 /// Get the recording indicator window
 fn get_indicator_window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(INDICATOR_WINDOW_LABEL)
@@ -220,7 +202,7 @@ where
     // cursor-dot style therefore cannot follow the cursor; fall back to the
     // fixed position and skip cursor tracking. The window still shows; only its
     // placement is the compositor's choice.
-    let cursor_following_possible = !is_wayland();
+    let cursor_following_possible = !crate::shortcuts::is_wayland();
 
     let indicator = get_indicator_window(app)
         .ok_or_else(|| "Recording indicator window not found".to_string())?;
@@ -420,7 +402,7 @@ pub fn show_indicator_instant<R: Runtime>(app: &AppHandle<R>) -> Result<(), Stri
     // On Wayland the compositor controls placement and the global cursor
     // position is unreadable, so cursor-following is impossible; fall back to a
     // fixed position and skip tracking.
-    let cursor_following_possible = !is_wayland();
+    let cursor_following_possible = !crate::shortcuts::is_wayland();
 
     // Resize window for the current style
     let (w, h) = dimensions_for_style(style);
@@ -577,7 +559,7 @@ pub(crate) fn maybe_play_start_indicator<R: Runtime>(app: &AppHandle<R>) {
 /// On Linux/Wayland, we show then hide the window during pre-warm to ensure
 /// it's properly mapped with the compositor. Subsequent hide/show should work.
 pub fn prewarm_indicator_window(app: &AppHandle) {
-    if is_wayland() {
+    if crate::shortcuts::is_wayland() {
         tracing::info!(
             "Wayland session: recording indicator uses a fixed position (the compositor controls \
              window placement); it does not follow the cursor"

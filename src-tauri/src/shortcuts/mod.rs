@@ -27,6 +27,22 @@ pub use manager::{ShortcutInfo, shortcut_ids};
 use crate::keyboard_service;
 use tauri::AppHandle;
 
+/// Whether the current session uses the Wayland display server.
+///
+/// Always `false` off Linux. On Linux it consults the cached
+/// [`get_display_server`] detector, so every caller shares one source of truth
+/// instead of re-reading the environment.
+pub fn is_wayland() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        get_display_server() == DisplayServer::Wayland
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
 /// Register a global shortcut
 ///
 /// # Arguments

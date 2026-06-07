@@ -43,32 +43,10 @@ pub fn open_url(url: &str) -> Result<(), String> {
         return Err("Only http:// and https:// URLs are allowed".to_string());
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(url)
-            .spawn()
-            .map_err(|e| format!("Failed to open URL: {}", e))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(url)
-            .spawn()
-            .map_err(|e| format!("Failed to open URL: {}", e))?;
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        // Empty title ("") prevents cmd from treating URLs with special chars as commands
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "", url])
-            .spawn()
-            .map_err(|e| format!("Failed to open URL: {}", e))?;
-    }
-
-    Ok(())
+    // `open` selects the platform launcher (open / xdg-open / cmd start); the
+    // detached variant returns without waiting on the spawned browser process,
+    // matching the previous fire-and-forget behaviour.
+    open::that_detached(url).map_err(|e| format!("Failed to open URL: {}", e))
 }
 
 /// Set dock icon visibility (macOS) and persist to config
