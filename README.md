@@ -11,20 +11,98 @@
 **[Download for macOS](https://github.com/poodle64/thoth/releases/latest)** · **[Download for Linux](https://github.com/poodle64/thoth/releases/latest)**
 
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8D8?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
-[![Rust](https://img.shields.io/badge/Rust-1.75+-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-2024-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=flat-square&logo=svelte&logoColor=white)](https://svelte.dev/)
 [![Licence](https://img.shields.io/badge/Licence-MIT-blue?style=flat-square)](LICENCE)
 
-[Installation](#installation) · [Features](#features) · [Contributing](#contributing) · [Docs](docs/product/)
+[Installation](#installation) · [Features](#features) · [Documentation](#documentation) · [Contributing](#contributing)
 
 </div>
 
-![Thoth in action](docs/branding/hero.gif)
+<div align="center">
+<img src="docs/branding/hero.gif" alt="Thoth in action" width="760" />
+</div>
 
-Voice input on macOS and Linux is either cloud-dependent or requires complex
-setup. Thoth runs speech-to-text **locally** using whisper.cpp with GPU
-acceleration (Metal on macOS, CUDA/Vulkan on Linux). Nothing leaves the machine.
-No subscription. No cloud. No internet required.
+Voice input on the desktop is usually cloud-dependent, subscription-bound, or a
+chore to set up. Thoth runs speech-to-text **entirely on your machine** with GPU
+acceleration. Press a key in any app, speak, and the text lands at your cursor.
+Nothing leaves the machine. No subscription, no cloud, no internet required.
+
+---
+
+## Features
+
+<table>
+<tr>
+<td width="50%">
+
+**Local, private transcription**
+
+- Fastest on Apple Silicon: Parakeet on the Apple Neural Engine (CoreML), the recommended default
+- Or whisper.cpp with GPU acceleration (Metal on macOS; CUDA/ROCm/Vulkan on Linux)
+- A cross-platform Parakeet (sherpa-onnx) engine as well
+- Nothing leaves your machine; no telemetry; works offline; voice-activity detection trims the silence
+
+</td>
+<td width="50%">
+
+**Press a key, speak, paste**
+
+- One toggle hotkey (default F13): press to start, press again to stop
+- Text is inserted at the cursor in any app; your clipboard is preserved
+- Import existing audio too (MP3, M4A, OGG, FLAC, WAV)
+- Recording indicator near the cursor with subtle audio cues
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Smart correction**
+
+- Register a name once and its mishearings snap to it (phonetic + spelling), with per-term safety so everyday words are left alone
+- Australian/British spelling from the VARCON database, false-friend safe
+- Optional spoken-number conversion ("twenty three" to 23)
+- Filler-word, whitespace, and punctuation clean-up
+
+</td>
+<td width="50%">
+
+**Optional AI enhancement**
+
+- Post-process locally with Ollama or any OpenAI-compatible endpoint
+- Built-in prompts (grammar, tone, conciseness, summarise) plus your own
+- Length-constrained so it tidies without rewriting
+- Opt-in and clipboard-context aware
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**History and export**
+
+- Searchable history with waveform playback
+- Original and AI-enhanced versions side by side
+- Export to JSON, CSV, or TXT
+- Configurable retention; SQLite under the hood
+
+</td>
+<td width="50%">
+
+**Automation and MCP**
+
+- Opt-in loopback control API (token-authenticated, never network-exposed)
+- A bundled Model Context Protocol server so an LLM assistant can drive the dictionary, settings, and history, or transcribe a file
+- On by default for local assistants; toggle live, no restart
+
+</td>
+</tr>
+</table>
+
+<div align="center">
+<img src="docs/branding/overview.png" width="720" alt="Thoth main window" />
+</div>
 
 ---
 
@@ -32,7 +110,7 @@ No subscription. No cloud. No internet required.
 
 > After installing, Thoth checks for updates automatically and installs them in-app.
 
-### First launch (macOS)
+### macOS
 
 macOS will block the app the first time you open it because it isn't from the App
 Store. This is normal and only happens once.
@@ -50,116 +128,47 @@ xattr -dr com.apple.quarantine /Applications/Thoth.app
 
 </details>
 
-### First launch (Linux)
+### Linux
 
-1. Download the `.AppImage` from the [latest release](https://github.com/poodle64/thoth/releases/latest)
+1. Download the `.AppImage` (or `.deb`) from the [latest release](https://github.com/poodle64/thoth/releases/latest)
 2. Make it executable: `chmod +x Thoth_*.AppImage`
 3. Run it: `./Thoth_*.AppImage`
 
-> **NVIDIA users**: Ensure CUDA drivers are installed for GPU-accelerated transcription.
-> Without them, Thoth falls back to CPU.
+> For GPU-accelerated transcription, install `libvulkan1` and your GPU's Vulkan
+> driver; without them Thoth falls back to CPU. See the
+> [Troubleshooting guide](docs/troubleshooting.md) for Wayland and permission notes.
 
-### Setup
-
-The app walks you through three quick steps:
-
-1. **Download a speech model.** Click "Download Recommended Model" on the
-   Overview tab (~1.5 GB, runs locally).
-2. **Grant microphone access.** Click "Allow" when prompted so Thoth can hear
-   you.
-3. **Grant global shortcut access.** Click "Allow" so the recording hotkey works
-   from any app (System Settings › Privacy & Security › Accessibility).
-4. **Start dictating.** Press **F13** (the default shortcut), speak, and text
-   appears at your cursor.
-
-> **Tip:** F13 is the default. You can change it in Settings › Recording.
+Once it's running, the [Getting Started guide](docs/getting-started.md) walks you
+through downloading a model, granting permissions, and your first dictation.
 
 ---
 
-## Features
+## Tech Stack
 
-<table>
-<tr>
-<td width="50%">
+| Layer         | Choice      | Why                                                          |
+| ------------- | ----------- | ------------------------------------------------------------ |
+| Framework     | Tauri 2.0   | Native performance, small binaries, cross-platform           |
+| Backend       | Rust 2024   | Memory safety, audio performance                             |
+| Frontend      | Svelte 5    | Reactive UI with runes                                       |
+| Audio         | cpal        | Cross-platform audio capture                                 |
+| Transcription | whisper.cpp | GPU-accelerated; Apple Neural Engine and sherpa-onnx options |
+| Database      | SQLite      | Local persistence with migrations                            |
+| AI            | Ollama      | Local LLM enhancement (or any OpenAI-compatible endpoint)    |
+| Control API   | axum        | Loopback HTTP control surface for automation                 |
+| MCP           | rmcp        | Bundled MCP server for LLM assistants                        |
 
-**Offline Transcription**
+---
 
-- whisper.cpp with GPU acceleration (Metal/CUDA/Vulkan)
-- Nothing leaves your machine
-- Works without internet
-- Real-time voice activity detection
+## Documentation
 
-</td>
-<td width="50%">
-
-**AI Enhancement**
-
-- Post-process with Ollama (local)
-- Grammar, formatting, and tone correction
-- Clipboard context awareness
-- Custom prompts with templates
-
-</td>
-</tr>
-<tr>
-<td width="50%">
-
-**Personal Dictionary**
-
-- Custom vocabulary for domain terms
-- Text replacement rules
-- Prevents "dev" becoming "Dave"
-- Import/export support
-
-</td>
-<td width="50%">
-
-**Recording Options**
-
-- Push-to-talk or hands-free mode
-- VAD silence detection
-- Configurable audio device
-- Sound feedback (optional)
-
-</td>
-</tr>
-<tr>
-<td width="50%">
-
-**History & Export**
-
-- Searchable transcription history
-- JSON/CSV/TXT export
-- SQLite database
-- Configurable retention
-
-</td>
-<td width="50%">
-
-**Menu Bar App**
-
-- macOS native (Apple Silicon)
-- Global keyboard shortcuts
-- Recording indicator near cursor
-- Linux support planned
-
-</td>
-</tr>
-<tr>
-<td width="50%">
-
-**Automation & MCP**
-
-- Opt-in loopback HTTP control API (token-auth)
-- Bundled MCP server for LLM assistants
-- Drive the dictionary, settings, and history by agent
-- Transcribe dropped audio files programmatically
-
-</td>
-<td width="50%">
-</td>
-</tr>
-</table>
+| Guide                                                  | What it covers                                                             |
+| ------------------------------------------------------ | -------------------------------------------------------------------------- |
+| [Getting Started](docs/getting-started.md)             | First-run setup: download a model, grant permissions, your first dictation |
+| [Personal Dictionary](docs/dictionary.md)              | Custom vocabulary and smart name correction (the canonical registry)       |
+| [AI Enhancement Prompts](docs/custom-prompts-guide.md) | Writing effective prompts for the optional Ollama post-processing          |
+| [Automation and MCP](docs/automation.md)               | The control API and MCP server for driving Thoth from an LLM assistant     |
+| [Troubleshooting](docs/troubleshooting.md)             | Hotkeys, permissions, paste, GPU, and Wayland gotchas                      |
+| [Product docs](docs/product/)                          | Intent, workflows, and design principles                                   |
 
 ---
 
@@ -175,66 +184,35 @@ pnpm tauri build  # Production build
 <summary><strong>Requirements</strong></summary>
 
 - macOS 14.0+ or Linux
-- Rust 1.75+
+- Rust 1.87+ (2024 edition)
 - Node.js 20+
 - pnpm
 
 </details>
 
 <details>
-<summary><strong>Linux GPU Acceleration</strong></summary>
+<summary><strong>Linux GPU acceleration</strong></summary>
 
-whisper.cpp supports GPU acceleration on Linux for significantly faster transcription. Choose the backend that matches your hardware:
+whisper.cpp supports GPU acceleration on Linux. Choose the backend that matches your hardware:
 
-| GPU                | Feature Flag         | Requirements                      |
-| ------------------ | -------------------- | --------------------------------- |
-| NVIDIA             | `--features cuda`    | CUDA Toolkit 12.x, NVIDIA drivers |
-| AMD                | `--features hipblas` | ROCm 6.x                          |
-| Any (experimental) | `--features vulkan`  | Vulkan drivers                    |
-
-**Build with GPU acceleration:**
+| GPU                  | Feature Flag         | Requirements                            |
+| -------------------- | -------------------- | --------------------------------------- |
+| NVIDIA               | `--features cuda`    | CUDA Toolkit 12.x, NVIDIA drivers       |
+| AMD                  | `--features hipblas` | ROCm 6.x                                |
+| Any (vendor-neutral) | `--features vulkan`  | Vulkan drivers (what the release ships) |
 
 ```bash
-# NVIDIA (recommended for RTX/GTX cards)
-pnpm tauri build -- --features cuda
-
-# AMD (RX series)
-pnpm tauri build -- --features hipblas
-
-# Vulkan (cross-platform, experimental)
-pnpm tauri build -- --features vulkan
+pnpm tauri build -- --no-default-features --features vulkan   # what the Linux release ships
+pnpm tauri build -- --no-default-features --features cuda     # NVIDIA
+pnpm tauri build -- --no-default-features --features hipblas  # AMD
 ```
 
-Building from source needs the Linux system libraries and the Vulkan toolchain; see [docs/development/linux-setup.md](docs/development/linux-setup.md) for the full dependency list, runtime packages, and display-server notes.
-
-If GPU initialisation fails, Thoth automatically falls back to CPU transcription.
-
-**GNOME Wayland users:** On first transcription, GNOME may show a "Remote Desktop" dialogue requesting "Allow Remote Interaction". This is because GNOME doesn't support the Wayland virtual-keyboard protocol. Enable the permission once and GNOME will remember it for future transcriptions. Alternatively, use a different Wayland compositor (Sway, Hyprland) or X11 session.
+Building from source needs the Linux system libraries and the Vulkan toolchain; see
+[docs/development/linux-setup.md](docs/development/linux-setup.md) for the full dependency
+list, runtime packages, and display-server notes. If GPU initialisation fails at runtime,
+Thoth falls back to CPU automatically.
 
 </details>
-
----
-
-## Tech Stack
-
-| Layer         | Choice     | Why                                                    |
-| ------------- | ---------- | ------------------------------------------------------ |
-| Framework     | Tauri 2.0  | Native performance, cross-platform                     |
-| Backend       | Rust       | Memory safety, audio performance                       |
-| Frontend      | Svelte 5   | Reactive UI with runes                                 |
-| Audio         | cpal       | Cross-platform audio capture                           |
-| Transcription | whisper-rs | whisper.cpp with GPU acceleration (sherpa-rs fallback) |
-| Database      | SQLite     | Local persistence with migrations                      |
-| AI            | Ollama     | Local LLM enhancement                                  |
-| Control API   | axum       | Loopback HTTP control surface for automation           |
-| MCP           | rmcp       | Bundled MCP server for LLM assistants                  |
-
----
-
-## Documentation
-
-- **Product docs:** [docs/product/](docs/product/). Intent, workflows, design principles
-- **Development:** [docs/development/](docs/development/). Audio pipeline, data model, architecture
 
 ---
 
@@ -244,6 +222,8 @@ If GPU initialisation fails, Thoth automatically falls back to CPU transcription
 
 _Named after the Egyptian god of writing and wisdom, the scribe who faithfully records all that is spoken._
 
-Built on [whisper.cpp](https://github.com/ggerganov/whisper.cpp), [Tauri](https://tauri.app/), [cpal](https://github.com/RustAudio/cpal), and [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx). Inspired by [MacWhisper](https://goodsnooze.gumroad.com/l/macwhisper), [VoiceInk](https://voiceink.app/), and [Spokenly](https://www.spokenly.app/).
+Built on [whisper.cpp](https://github.com/ggerganov/whisper.cpp), [Tauri](https://tauri.app/), [cpal](https://github.com/RustAudio/cpal), and [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). Inspired by [MacWhisper](https://goodsnooze.gumroad.com/l/macwhisper), [VoiceInk](https://voiceink.app/), and [Spokenly](https://www.spokenly.app/).
+
+<sub><a href="LICENCE">MIT Licence</a> · <a href="https://github.com/poodle64/thoth/issues">Report a bug</a> · <a href="CHANGELOG.md">Changelog</a></sub>
 
 </div>

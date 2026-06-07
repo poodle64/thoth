@@ -1,28 +1,39 @@
-# Writing Effective Custom Prompts
+# Writing effective custom prompts
 
 This guide helps you create custom AI enhancement prompts that produce consistent, high-quality results.
 
-## Quick Start
+## Before you start
+
+AI enhancement is optional and stays off until you enable it. It runs your transcription through a local large language model to tidy grammar, adjust tone, or reformat; nothing leaves your machine unless you deliberately point it at a remote endpoint.
+
+You need a model endpoint:
+
+- **[Ollama](https://ollama.com)** is the default. Install it, pull a model (for example `ollama pull llama3.2`), and make sure it is running.
+- Any **OpenAI-compatible endpoint** also works (LM Studio, llama.cpp's server, vLLM, and similar), which is handy if you already run one.
+
+Then open **Settings > AI Enhancement** in Thoth, turn it on, and confirm the endpoint and model. Once it is enabled you can pick a built-in prompt or write your own using the rest of this guide.
+
+## Quick start
 
 A custom prompt is a template that tells the AI how to transform your transcribed text. The template must include `{text}` as a placeholder for your transcription.
 
 **Basic template structure:**
 
-```
+```text
 [Task instruction]. [Constraints]. [Output directive].
 
 {text}
 ```
 
-## Core Principles
+## Core principles
 
-### 1. Be Specific About the Task
+### 1. Be specific about the task
 
 Instead of vague instructions, clearly define what transformation you want.
 
 ❌ **Vague:**
 
-```
+```text
 Make this better:
 
 {text}
@@ -30,13 +41,13 @@ Make this better:
 
 ✅ **Specific:**
 
-```
+```text
 Rewrite this as a professional email. Use formal greeting and closing. Keep the main points intact.
 
 {text}
 ```
 
-### 2. Set Clear Constraints
+### 2. Set clear constraints
 
 Prevent the AI from over-elaborating by specifying length, style, and content boundaries.
 
@@ -49,7 +60,7 @@ Prevent the AI from over-elaborating by specifying length, style, and content bo
 
 ❌ **No constraints:**
 
-```
+```text
 Rewrite this in pirate speak:
 
 {text}
@@ -59,13 +70,13 @@ _Problem: May produce 5 paragraphs from 2 sentences_
 
 ✅ **With constraints:**
 
-```
+```text
 Rewrite this in pirate dialect. Keep the same approximate length and meaning. Do not add extra content or explanations. Only output the rewritten text:
 
 {text}
 ```
 
-### 3. Direct the Output Format
+### 3. Direct the output format
 
 Always end with a clear output directive to prevent the AI from adding commentary.
 
@@ -75,13 +86,13 @@ Always end with a clear output directive to prevent the AI from adding commentar
 - "Respond with only the transformed text, nothing else:"
 - "Output the result directly without any preamble or explanation:"
 
-## Template Patterns
+## Template patterns
 
-### Length-Preserving Transformations
+### Length-preserving transformations
 
 For prompts that should maintain similar length (grammar fixes, tone changes, translations):
 
-```
+```text
 [Action verb] the following text to [goal]. Keep the same meaning and approximate length. Do not add extra content or explanations. Only output the [transformed] text:
 
 {text}
@@ -93,11 +104,11 @@ For prompts that should maintain similar length (grammar fixes, tone changes, tr
 - "Translate the following text to Spanish..."
 - "Rewrite the following text in technical language..."
 
-### Length-Reducing Transformations
+### Length-reducing transformations
 
 For prompts that should condense text (summaries, key points):
 
-```
+```text
 [Action verb] the following text to [goal]. Limit to [specific constraint]. Keep only the most important [elements]. Only output the [result]:
 
 {text}
@@ -109,11 +120,11 @@ For prompts that should condense text (summaries, key points):
 - "Extract the 3-5 key action items from the following text..."
 - "Reduce the following text to its main conclusion..."
 
-### Length-Expanding Transformations
+### Length-expanding transformations
 
 For prompts that should add detail (expansions, elaborations):
 
-```
+```text
 [Action verb] the following text with [specific amount] more [element]. Keep the same [aspects]. Only output the expanded text:
 
 {text}
@@ -125,11 +136,11 @@ For prompts that should add detail (expansions, elaborations):
 - "Elaborate on the following text with specific examples..."
 - "Add technical context and background to the following text..."
 
-### Format Transformations
+### Format transformations
 
 For prompts that change structure (bullet points, code, formal documents):
 
-```
+```text
 Transform the following text into [format]. [Structure requirements]. [Content requirements]. Only output the formatted text:
 
 {text}
@@ -141,13 +152,13 @@ Transform the following text into [format]. [Structure requirements]. [Content r
 - "Convert the following text into a formal meeting agenda with time allocations..."
 - "Rewrite the following text as a code comment with proper formatting..."
 
-## Common Pitfalls
+## Common pitfalls
 
-### ❌ Over-Elaboration
+### Over-elaboration
 
 **Problem:** AI adds unwanted content
 
-```
+```text
 Improve this text:
 
 {text}
@@ -155,17 +166,17 @@ Improve this text:
 
 **Solution:** Add explicit constraints
 
-```
+```text
 Fix grammar and improve clarity in the following text. Keep the same meaning and approximate length. Do not add extra content or explanations. Only output the corrected text:
 
 {text}
 ```
 
-### ❌ Unwanted Preambles
+### Unwanted preambles
 
 **Problem:** AI adds "Here is the rewritten text:" before output
 
-```
+```text
 Rewrite this professionally.
 
 {text}
@@ -173,17 +184,17 @@ Rewrite this professionally.
 
 **Solution:** Add explicit output directive
 
-```
+```text
 Rewrite this professionally. Keep the same meaning. Only output the rewritten text:
 
 {text}
 ```
 
-### ❌ Inconsistent Results
+### Inconsistent results
 
 **Problem:** AI interprets vague instructions differently each time
 
-```
+```text
 Make this sound better:
 
 {text}
@@ -191,29 +202,29 @@ Make this sound better:
 
 **Solution:** Define specific transformation goals
 
-```
+```text
 Rewrite the following text to be more confident and assertive. Use active voice and strong verbs. Keep the same meaning and approximate length. Only output the rewritten text:
 
 {text}
 ```
 
-### ❌ Missing Placeholder
+### Missing placeholder
 
 **Problem:** Prompt doesn't include `{text}`
 
-```
+```text
 Fix any grammar mistakes in the transcription.
 ```
 
 **Solution:** Always include `{text}` placeholder
 
-```
+```text
 Fix any grammar mistakes in the following text. Only output the corrected text:
 
 {text}
 ```
 
-## Testing Your Prompts
+## Testing your prompts
 
 1. **Test with short input** (1-2 sentences)
    - Verify it doesn't over-elaborate
@@ -232,49 +243,49 @@ Fix any grammar mistakes in the following text. Only output the corrected text:
    - Technical jargon
    - Proper nouns and names
 
-## Example Custom Prompts
+## Example custom prompts
 
-### Meeting Notes Formatter
+### Meeting notes formatter
 
-```
+```text
 Transform the following transcription into structured meeting notes. Use these sections: Summary, Key Points, Action Items, Next Steps. Use bullet points for lists. Only output the formatted notes:
 
 {text}
 ```
 
-### Technical Documentation Style
+### Technical documentation style
 
-```
+```text
 Rewrite the following text in technical documentation style. Use clear, precise language. Define any acronyms on first use. Keep the same approximate length. Only output the rewritten text:
 
 {text}
 ```
 
-### Email Draft Generator
+### Email draft generator
 
-```
+```text
 Transform the following notes into a professional email draft. Include appropriate greeting and closing. Organise into clear paragraphs. Keep a friendly but professional tone. Only output the email:
 
 {text}
 ```
 
-### Code Comment Generator
+### Code comment generator
 
-```
+```text
 Transform the following explanation into properly formatted code comments. Use clear, concise language. Follow standard comment conventions. Only output the comments:
 
 {text}
 ```
 
-### Action Item Extractor
+### Action item extractor
 
-```
+```text
 Extract concrete action items from the following text. Format as bullet points with clear verb-noun structure. Include only actionable tasks. Only output the action items:
 
 {text}
 ```
 
-## Model Considerations
+## Model considerations
 
 Different models respond differently to prompts:
 
@@ -307,7 +318,7 @@ Different models respond differently to prompts:
 | Output is too literal    | Remove overly strict constraints                                      |
 | Inconsistent results     | Add more specific task definition and constraints                     |
 
-## Template Checklist
+## Template checklist
 
 Before saving a custom prompt, verify:
 
@@ -319,7 +330,7 @@ Before saving a custom prompt, verify:
 - [ ] Tested with sample input
 - [ ] Produces consistent results
 
-## Getting Help
+## Getting help
 
 If your custom prompt isn't working as expected:
 
