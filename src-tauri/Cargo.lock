@@ -1612,7 +1612,7 @@ dependencies = [
 [[package]]
 name = "fluidaudio-rs"
 version = "0.10.0"
-source = "git+https://github.com/poodle64/fluidaudio-rs?rev=0061017#006101724ddc2abe52a7f7efb2d3c68e6c35833a"
+source = "git+https://github.com/poodle64/fluidaudio-rs?tag=v0.15.0-thoth.1#006101724ddc2abe52a7f7efb2d3c68e6c35833a"
 dependencies = [
  "thiserror 1.0.69",
 ]
