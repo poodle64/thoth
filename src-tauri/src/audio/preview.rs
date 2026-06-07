@@ -9,8 +9,8 @@ use crate::error::Error;
 use cpal::traits::{DeviceTrait, StreamTrait};
 use parking_lot::Mutex;
 use serde::Serialize;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Audio level event emitted to the frontend
@@ -72,7 +72,7 @@ pub fn start_audio_preview(app: AppHandle, device_id: Option<String>) -> Result<
         let tx = tx.clone();
         device
             .build_input_stream(
-                &config.into(),
+                config.into(),
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     // Mix to mono and send to emitter thread
                     let mono: Vec<f32> = data

@@ -27,7 +27,7 @@ tauri-plugin-process = "2"
 tauri-plugin-single-instance = "2"
 
 # Audio
-cpal = "0.17"
+cpal = "0.18"
 hound = "3.5"
 rubato = "3.0"
 audioadapter-buffers = "3.0"

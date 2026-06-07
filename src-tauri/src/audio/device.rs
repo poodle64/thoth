@@ -1,7 +1,7 @@
 //! Audio device enumeration using cpal
 
-use cpal::DeviceId;
 use cpal::traits::{DeviceTrait, HostTrait};
+use cpal::DeviceId;
 use serde::Serialize;
 use std::str::FromStr;
 
@@ -16,19 +16,15 @@ pub struct AudioDevice {
     pub is_default: bool,
 }
 
-/// Get the display name for a device
+/// Get the display name for a device.
 ///
-/// Uses `description()` as the primary method (cpal 0.17+), with `name()` as fallback
-/// for edge cases where description isn't available.
+/// Uses `description()` (cpal 0.18 removed the old `name()` accessor), falling
+/// back to "Unknown" when the description is unavailable.
 pub fn get_device_display_name(device: &cpal::Device) -> String {
     device
         .description()
         .map(|desc| desc.name().to_string())
-        .unwrap_or_else(|_| {
-            // Fallback to deprecated name() only when description() fails
-            #[allow(deprecated)]
-            device.name().unwrap_or_else(|_| "Unknown".to_string())
-        })
+        .unwrap_or_else(|_| "Unknown".to_string())
 }
 
 /// List all available audio input devices

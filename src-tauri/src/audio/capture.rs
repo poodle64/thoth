@@ -20,12 +20,12 @@
 
 use super::format::AudioConverter;
 use super::ring_buffer::AudioRingBuffer;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{Receiver, Sender};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Target sample rate for transcription (whisper.cpp / Parakeet expect 16kHz mono).
 const TARGET_SAMPLE_RATE: u32 = 16000;
@@ -138,7 +138,7 @@ impl AudioRecorder {
             return Ok(());
         }
 
-        let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+        let device_name = super::device::get_device_display_name(device);
         tracing::info!("AudioRecorder::warm_up: opening device '{}'", device_name);
 
         let supported_config = device.default_input_config()?;
@@ -167,7 +167,7 @@ impl AudioRecorder {
         let callback_armed = self.armed.clone();
 
         let stream = device.build_input_stream(
-            &supported_config.into(),
+            supported_config.into(),
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
                 // Metering always runs while warm (regardless of armed state) so
                 // the recording indicator can show levels before the user hits record.
@@ -359,12 +359,11 @@ impl AudioRecorder {
     }
 
     /// Start recording from a specific device (legacy single-call API).
-    #[allow(deprecated)]
     pub fn start(&mut self, device: &cpal::Device, output_path: &Path) -> Result<()> {
         if self.stream.is_some() {
             return Err(anyhow!("Recording already in progress"));
         }
-        let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+        let device_name = super::device::get_device_display_name(device);
         tracing::info!("AudioRecorder::start (legacy): device='{}'", device_name);
 
         self.warm_up(device)?;
