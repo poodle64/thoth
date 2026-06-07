@@ -66,19 +66,17 @@ impl WhisperTranscriptionService {
         let ctx = WhisperContext::new_with_params(model_str, params)
             .map_err(|e| anyhow!("Failed to load Whisper model with GPU: {:?}", e))?;
 
-        // Log which GPU backend was actually used based on compile features
-        #[cfg(feature = "cuda")]
-        tracing::info!("Whisper model loaded with CUDA GPU acceleration");
-        #[cfg(all(not(feature = "cuda"), feature = "hipblas"))]
-        tracing::info!("Whisper model loaded with HIP/ROCm GPU acceleration");
-        #[cfg(all(not(any(feature = "cuda", feature = "hipblas")), feature = "vulkan"))]
-        tracing::info!("Whisper model loaded with Vulkan GPU acceleration");
-        #[cfg(not(any(feature = "cuda", feature = "hipblas", feature = "vulkan")))]
-        tracing::info!(
-            "Whisper model loaded with CPU backend (no GPU feature enabled). For GPU \
-             acceleration, build with --features vulkan (vendor-neutral), cuda (NVIDIA), or \
-             hipblas (AMD). Release Linux builds ship with Vulkan."
-        );
+        // Log the compiled backend (single source of truth: GpuBackendType::compiled).
+        let backend = crate::platform::GpuBackendType::compiled();
+        if backend == crate::platform::GpuBackendType::Cpu {
+            tracing::info!(
+                "Whisper model loaded with CPU backend (no GPU feature enabled). For GPU \
+                 acceleration, build with --features vulkan (vendor-neutral), cuda (NVIDIA), or \
+                 hipblas (AMD). Release Linux builds ship with Vulkan."
+            );
+        } else {
+            tracing::info!("Whisper model loaded with {backend} GPU acceleration");
+        }
 
         Ok(ctx)
     }

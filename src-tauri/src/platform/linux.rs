@@ -341,15 +341,18 @@ pub fn is_vulkan_available() -> bool {
     detect_vulkan_support().is_some()
 }
 
-/// Microphone authorization status values
+/// Microphone availability status.
+///
+/// Linux has no per-app microphone permission; this reports whether a capture
+/// source appears to exist. `Denied` is only returned for a positive "no
+/// capture source" signal — uncertain cases report `Granted` so the UI never
+/// shows a spurious permission warning when a microphone is in fact present.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MicrophoneStatus {
-    /// Microphone is available
+    /// A capture source is available (or its absence could not be confirmed).
     Granted,
-    /// No microphone found or access denied
+    /// PulseAudio/PipeWire positively reported no capture source.
     Denied,
-    /// Unable to determine status
-    Unknown,
 }
 
 impl std::fmt::Display for MicrophoneStatus {
@@ -357,7 +360,6 @@ impl std::fmt::Display for MicrophoneStatus {
         match self {
             MicrophoneStatus::Granted => write!(f, "granted"),
             MicrophoneStatus::Denied => write!(f, "denied"),
-            MicrophoneStatus::Unknown => write!(f, "unknown"),
         }
     }
 }
@@ -382,77 +384,66 @@ pub fn open_accessibility_settings() {
     tracing::debug!("No accessibility settings needed on Linux");
 }
 
-/// Check microphone permission status
+/// Check microphone availability.
 ///
-/// On Linux, microphone access is managed by PulseAudio or PipeWire.
-/// We check if a default audio source (microphone) is available.
+/// On Linux there is no per-app microphone permission; access is managed by
+/// PulseAudio/PipeWire. We probe for a capture source and only report `Denied`
+/// when we have a positive signal that none exists, so a microphone that is in
+/// fact present never triggers a spurious permission warning.
 pub fn check_microphone_permission() -> MicrophoneStatus {
-    // Try to check PulseAudio/PipeWire for available sources
-    // Use pactl to list sources
-
     let output = Command::new("pactl")
         .args(["list", "short", "sources"])
         .output();
 
     match output {
-        Ok(output) => {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                // Check if there are any input sources (microphones)
-                // Each line represents a source, we look for non-empty output
-                let has_sources = stdout
-                    .lines()
-                    .any(|line| !line.trim().is_empty() && line.contains("input"));
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // A capture source is any non-empty source that is not the monitor
+            // of an output. Match on ".monitor" rather than the word "input" so
+            // non-"input"-named sources (PipeWire nodes, Bluetooth, USB) still
+            // count and we don't falsely report "no microphone" on
+            // PipeWire-native systems.
+            let has_capture_source = stdout
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .any(|line| !line.contains(".monitor"));
 
-                if has_sources {
-                    tracing::debug!("Microphone available via PulseAudio/PipeWire");
-                    MicrophoneStatus::Granted
-                } else {
-                    tracing::warn!("No microphone sources found");
-                    MicrophoneStatus::Denied
-                }
+            if has_capture_source {
+                tracing::debug!("Microphone available via PulseAudio/PipeWire");
+                MicrophoneStatus::Granted
             } else {
-                tracing::warn!("pactl command failed, trying pipewire...");
-                // Try PipeWire directly if pactl fails
-                check_pipewire_microphone()
+                tracing::warn!("pactl listed sources but none are capture devices");
+                MicrophoneStatus::Denied
             }
         }
-        Err(e) => {
-            tracing::warn!("pactl not available: {}, trying pipewire...", e);
+        _ => {
+            // pactl unavailable or failed; fall back to PipeWire's pw-cli.
             check_pipewire_microphone()
         }
     }
 }
 
-/// Check microphone via PipeWire's pw-cli
+/// Check microphone availability via PipeWire's `pw-cli`.
+///
+/// pw-cli output is verbose and easy to misparse, so absence of a match is not
+/// treated as proof there is no microphone: we only ever report `Granted` here
+/// (the actual capture attempt is the real test) rather than surface a false
+/// permission warning.
 fn check_pipewire_microphone() -> MicrophoneStatus {
-    let output = Command::new("pw-cli").args(["list-objects"]).output();
-
-    match output {
-        Ok(output) => {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                // Look for audio capture devices in pw-cli output
-                let has_capture = stdout.contains("Audio/Source") || stdout.contains("capture");
-
-                if has_capture {
-                    tracing::debug!("Microphone available via PipeWire");
-                    MicrophoneStatus::Granted
-                } else {
-                    tracing::warn!("No PipeWire capture devices found");
-                    MicrophoneStatus::Denied
-                }
+    match Command::new("pw-cli").args(["list-objects"]).output() {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if stdout.contains("Audio/Source") || stdout.contains("capture") {
+                tracing::debug!("Microphone available via PipeWire");
             } else {
-                tracing::warn!("pw-cli command failed");
-                // Assume granted if we can't check - let the audio system handle it
-                MicrophoneStatus::Unknown
+                tracing::debug!("pw-cli found no obvious capture device; assuming available");
             }
+            MicrophoneStatus::Granted
         }
-        Err(e) => {
-            tracing::warn!("pw-cli not available: {}", e);
-            // Neither pactl nor pw-cli available - assume unknown
-            // The actual audio capture will fail if there's no microphone
-            MicrophoneStatus::Unknown
+        _ => {
+            tracing::debug!("No PulseAudio/PipeWire probe available; assuming microphone present");
+            MicrophoneStatus::Granted
         }
     }
 }
@@ -584,6 +575,22 @@ mod tests {
         assert_eq!(result.compiled_backend, GpuBackend::Vulkan);
         #[cfg(not(any(feature = "cuda", feature = "hipblas", feature = "vulkan")))]
         assert_eq!(result.compiled_backend, GpuBackend::Cpu);
+    }
+
+    #[test]
+    fn test_get_compiled_backend_matches_features() {
+        // The compiled backend must match exactly the GPU feature the build was
+        // compiled with. This is the acceptance criterion for #64: the Vulkan
+        // release build must report Vulkan, the CPU build CPU, and so on.
+        let backend = get_compiled_backend();
+        #[cfg(feature = "cuda")]
+        assert_eq!(backend, GpuBackend::Cuda);
+        #[cfg(all(not(feature = "cuda"), feature = "hipblas"))]
+        assert_eq!(backend, GpuBackend::Hipblas);
+        #[cfg(all(not(any(feature = "cuda", feature = "hipblas")), feature = "vulkan"))]
+        assert_eq!(backend, GpuBackend::Vulkan);
+        #[cfg(not(any(feature = "cuda", feature = "hipblas", feature = "vulkan")))]
+        assert_eq!(backend, GpuBackend::Cpu);
     }
 
     #[test]

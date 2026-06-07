@@ -103,44 +103,9 @@ pub fn init_whisper_transcription(model_path: String) -> Result<(), String> {
 
     tracing::info!(
         "Whisper transcription service initialised ({} backend)",
-        whisper_backend_label()
+        crate::platform::GpuBackendType::compiled()
     );
     Ok(())
-}
-
-/// The compiled whisper acceleration backend, for accurate logging. macOS uses
-/// Metal; Linux/Windows depend on which GPU feature (if any) was built in.
-fn whisper_backend_label() -> &'static str {
-    #[cfg(target_os = "macos")]
-    {
-        "Metal GPU"
-    }
-    #[cfg(all(not(target_os = "macos"), feature = "cuda"))]
-    {
-        "CUDA GPU"
-    }
-    #[cfg(all(not(target_os = "macos"), not(feature = "cuda"), feature = "hipblas"))]
-    {
-        "ROCm/HIP GPU"
-    }
-    #[cfg(all(
-        not(target_os = "macos"),
-        not(feature = "cuda"),
-        not(feature = "hipblas"),
-        feature = "vulkan"
-    ))]
-    {
-        "Vulkan GPU"
-    }
-    #[cfg(all(
-        not(target_os = "macos"),
-        not(feature = "cuda"),
-        not(feature = "hipblas"),
-        not(feature = "vulkan")
-    ))]
-    {
-        "CPU"
-    }
 }
 
 /// Initialise the transcription service with parakeet backend (fallback)

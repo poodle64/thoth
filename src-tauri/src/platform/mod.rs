@@ -38,6 +38,47 @@ impl std::fmt::Display for GpuBackendType {
     }
 }
 
+impl GpuBackendType {
+    /// The GPU backend compiled into this build.
+    ///
+    /// macOS always builds with Metal; other platforms depend on which
+    /// (mutually exclusive) GPU feature was enabled at compile time, defaulting
+    /// to CPU. Single source of truth so the compile-time cfg ladder lives in
+    /// one place instead of being duplicated across every logging site.
+    pub fn compiled() -> Self {
+        #[cfg(target_os = "macos")]
+        {
+            Self::Metal
+        }
+        #[cfg(all(not(target_os = "macos"), feature = "cuda"))]
+        {
+            Self::Cuda
+        }
+        #[cfg(all(not(target_os = "macos"), not(feature = "cuda"), feature = "hipblas"))]
+        {
+            Self::Hipblas
+        }
+        #[cfg(all(
+            not(target_os = "macos"),
+            not(feature = "cuda"),
+            not(feature = "hipblas"),
+            feature = "vulkan"
+        ))]
+        {
+            Self::Vulkan
+        }
+        #[cfg(all(
+            not(target_os = "macos"),
+            not(feature = "cuda"),
+            not(feature = "hipblas"),
+            not(feature = "vulkan")
+        ))]
+        {
+            Self::Cpu
+        }
+    }
+}
+
 /// GPU information for the current system
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SystemGpuInfo {
@@ -228,7 +269,11 @@ pub fn check_accessibility() -> bool {
     {
         macos::check_accessibility_permission()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    {
+        linux::check_accessibility_permission()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         true // Not needed on other platforms
     }
@@ -246,7 +291,13 @@ pub fn request_accessibility() -> bool {
             true
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    {
+        // X11 allows key grabbing and Wayland uses the XDG portal, so there is
+        // no per-app accessibility grant to request; it is always available.
+        true
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         true
     }
@@ -260,7 +311,11 @@ pub fn check_input_monitoring_permission() -> bool {
     {
         macos::check_input_monitoring_permission()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    {
+        linux::check_input_monitoring_permission()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         true // Not needed on other platforms
     }
@@ -271,6 +326,14 @@ pub fn open_input_monitoring_settings() {
     #[cfg(target_os = "macos")]
     {
         macos::open_input_monitoring_settings();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux::open_input_monitoring_settings();
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        // No input-monitoring concept on other platforms.
     }
 }
 
@@ -340,7 +403,12 @@ pub fn check_microphone_permission() -> String {
     {
         macos::check_microphone_permission().to_string()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    {
+        // Probes PulseAudio/PipeWire for an available capture source.
+        linux::check_microphone_permission().to_string()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         "granted".to_string() // Not needed on other platforms
     }
@@ -373,7 +441,15 @@ pub fn get_caret_position() -> Option<CaretPosition> {
             height: p.height,
         })
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    {
+        linux::get_caret_position().map(|p| CaretPosition {
+            x: p.x,
+            y: p.y,
+            height: p.height,
+        })
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         None // Not implemented on other platforms yet
     }
@@ -408,8 +484,46 @@ pub fn request_microphone_permission(app: tauri::AppHandle) {
             }
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     {
         let _ = app;
+        // PulseAudio/PipeWire grant capture access without a system dialogue.
+        linux::request_microphone_permission();
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = app;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gpu_backend_type_compiled_matches_features() {
+        // GpuBackendType::compiled() is the single resolver used for backend
+        // logging; assert it matches the compiled feature set on every target.
+        let backend = GpuBackendType::compiled();
+        #[cfg(target_os = "macos")]
+        assert_eq!(backend, GpuBackendType::Metal);
+        #[cfg(all(not(target_os = "macos"), feature = "cuda"))]
+        assert_eq!(backend, GpuBackendType::Cuda);
+        #[cfg(all(not(target_os = "macos"), not(feature = "cuda"), feature = "hipblas"))]
+        assert_eq!(backend, GpuBackendType::Hipblas);
+        #[cfg(all(
+            not(target_os = "macos"),
+            not(feature = "cuda"),
+            not(feature = "hipblas"),
+            feature = "vulkan"
+        ))]
+        assert_eq!(backend, GpuBackendType::Vulkan);
+        #[cfg(all(
+            not(target_os = "macos"),
+            not(feature = "cuda"),
+            not(feature = "hipblas"),
+            not(feature = "vulkan")
+        ))]
+        assert_eq!(backend, GpuBackendType::Cpu);
     }
 }
