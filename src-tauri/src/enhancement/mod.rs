@@ -19,6 +19,7 @@ pub use prompts::{
     get_custom_prompts_cmd, get_prompt_by_id, save_custom_prompt_cmd,
 };
 
+use crate::error::Error;
 use parking_lot::Mutex;
 use std::sync::OnceLock;
 
@@ -124,12 +125,16 @@ pub async fn check_ollama_available() -> bool {
 
 /// List available Ollama models
 #[tauri::command]
-pub async fn list_ollama_models() -> Result<Vec<String>, String> {
+pub async fn list_ollama_models() -> Result<Vec<String>, Error> {
     let client = get_backend().lock().ollama.clone();
-    client.list_models().await.map_err(|e| {
-        tracing::error!("Failed to list Ollama models: {}", e);
-        format!("Failed to list models: {}", e)
-    })
+    client
+        .list_models()
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to list Ollama models: {}", e);
+            format!("Failed to list models: {}", e)
+        })
+        .map_err(Into::into)
 }
 
 /// Check if the configured OpenAI-compatible server is available
@@ -144,14 +149,20 @@ pub async fn check_openai_compat_available() -> bool {
 
 /// List available models from the OpenAI-compatible server
 #[tauri::command]
-pub async fn list_openai_compat_models() -> Result<Vec<String>, String> {
+pub async fn list_openai_compat_models() -> Result<Vec<String>, Error> {
     let client = get_backend().lock().openai_compat.clone();
     match client {
-        Some(c) => c.list_models().await.map_err(|e| {
-            tracing::error!("Failed to list OpenAI-compat models: {}", e);
-            format!("Failed to list models: {}", e)
-        }),
-        None => Err("OpenAI-compatible backend not configured".to_string()),
+        Some(c) => c
+            .list_models()
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to list OpenAI-compat models: {}", e);
+                format!("Failed to list models: {}", e)
+            })
+            .map_err(Into::into),
+        None => Err("OpenAI-compatible backend not configured"
+            .to_string()
+            .into()),
     }
 }
 
@@ -164,13 +175,13 @@ pub async fn list_openai_compat_models() -> Result<Vec<String>, String> {
 /// The public signature `(text, model, prompt)` is unchanged; only internal
 /// dispatch changed.
 #[tauri::command]
-pub async fn enhance_text(text: String, model: String, prompt: String) -> Result<String, String> {
+pub async fn enhance_text(text: String, model: String, prompt: String) -> Result<String, Error> {
     if text.is_empty() {
-        return Err("Text cannot be empty".to_string());
+        return Err("Text cannot be empty".to_string().into());
     }
 
     if model.is_empty() {
-        return Err("Model cannot be empty".to_string());
+        return Err("Model cannot be empty".to_string().into());
     }
 
     let (backend_type, ollama, openai_compat) = {

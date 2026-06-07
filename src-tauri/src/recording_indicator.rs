@@ -16,6 +16,7 @@
 
 use crate::config;
 use crate::config::IndicatorStyle;
+use crate::error::Error;
 use crate::mouse_tracker;
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Runtime, WebviewWindow};
 
@@ -288,11 +289,12 @@ fn position_at_primary_monitor<R: Runtime>(indicator: &tauri::WebviewWindow<R>) 
 ///
 /// Returns silently if the recording indicator is disabled in config.
 #[tauri::command]
-pub fn show_recording_indicator(app: AppHandle) -> Result<(), String> {
+pub fn show_recording_indicator(app: AppHandle) -> Result<(), Error> {
     tracing::info!("show_recording_indicator called");
     show_indicator_common(&app, |app_handle, indicator| {
         position_at_bottom_centre(app_handle, indicator)
     })
+    .map_err(Into::into)
 }
 
 /// Position the indicator at the bottom centre of the main window's monitor
@@ -357,7 +359,7 @@ fn position_at_bottom_centre(app: &AppHandle, indicator: &WebviewWindow) -> Resu
 /// class of bug. The webview stays warm from pre-warm, so re-showing an
 /// already-mapped 58px borderless window is fast.
 #[tauri::command]
-pub fn hide_recording_indicator(app: AppHandle) -> Result<(), String> {
+pub fn hide_recording_indicator(app: AppHandle) -> Result<(), Error> {
     tracing::info!("hide_recording_indicator called");
 
     // Stop mouse tracking before hiding

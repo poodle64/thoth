@@ -18,6 +18,7 @@ pub use metering::{AudioLevel, AudioMeter};
 pub use preview::{start_recording_metering, stop_recording_metering};
 pub use ring_buffer::AudioRingBuffer;
 
+use crate::error::Error;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -84,7 +85,7 @@ pub fn cool_down_recording() {
 /// Callers may invoke this proactively (e.g., at startup or after device
 /// selection) to eliminate the first-record latency entirely.
 #[tauri::command]
-pub fn warm_up_recording() -> Result<(), String> {
+pub fn warm_up_recording() -> Result<(), Error> {
     let config = crate::config::get_config().map_err(|e| format!("Failed to get config: {}", e))?;
 
     // Only warm if the feature is enabled.
@@ -160,13 +161,13 @@ fn spawn_idle_teardown(generation: u64) {
 
 /// Start recording audio to ~/.thoth/Recordings/
 #[tauri::command]
-pub fn start_recording() -> Result<String, String> {
+pub fn start_recording() -> Result<String, Error> {
     tracing::info!("Audio: start_recording called");
     let mut recorder = get_recorder().lock();
 
     if recorder.is_recording() {
         tracing::warn!("Audio: Recording already in progress");
-        return Err("Recording already in progress".to_string());
+        return Err("Recording already in progress".to_string().into());
     }
 
     // Bump the idle-teardown generation so any pending teardown timer (scheduled
@@ -237,11 +238,11 @@ pub fn start_recording() -> Result<String, String> {
 
 /// Stop recording and return the path to the recorded file
 #[tauri::command]
-pub fn stop_recording() -> Result<String, String> {
+pub fn stop_recording() -> Result<String, Error> {
     let mut recorder = get_recorder().lock();
 
     if !recorder.is_recording() {
-        return Err("No recording in progress".to_string());
+        return Err("No recording in progress".to_string().into());
     }
 
     let config = crate::config::get_config().map_err(|e| format!("Failed to get config: {}", e))?;

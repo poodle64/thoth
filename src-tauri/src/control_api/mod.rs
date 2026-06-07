@@ -18,6 +18,8 @@ use tokio::sync::Mutex;
 use tower_http::validate_request::ValidateRequestHeaderLayer;
 use uuid::Uuid;
 
+use crate::error::Error;
+
 // ---------------------------------------------------------------------------
 // Token generation
 // ---------------------------------------------------------------------------
@@ -117,6 +119,15 @@ impl From<&str> for AppError {
 
 impl From<serde_json::Error> for AppError {
     fn from(e: serde_json::Error) -> Self {
+        AppError::Internal(e.to_string())
+    }
+}
+
+// Tauri commands now return the crate-level `Error`; the HTTP handlers call
+// those same functions, so map their error into a 500 via its Display string
+// (identical to the previous `String` payload).
+impl From<Error> for AppError {
+    fn from(e: Error) -> Self {
         AppError::Internal(e.to_string())
     }
 }
@@ -338,7 +349,7 @@ pub(crate) async fn submit_transcribe_job(path: String) -> Result<String, String
                 }
                 Ok(Err(e)) => {
                     job.status = "failed".to_string();
-                    job.error = Some(e);
+                    job.error = Some(e.to_string());
                 }
                 Err(e) => {
                     job.status = "failed".to_string();
@@ -543,7 +554,7 @@ pub struct IntegrationsStatus {
 
 /// Return the current integrations status for the frontend settings panel.
 #[tauri::command]
-pub async fn get_integrations_status() -> Result<IntegrationsStatus, String> {
+pub async fn get_integrations_status() -> Result<IntegrationsStatus, Error> {
     let cfg = crate::config::get_config()?;
     let running = is_running().await;
     Ok(IntegrationsStatus {
@@ -560,7 +571,7 @@ pub async fn get_integrations_status() -> Result<IntegrationsStatus, String> {
 /// When enabling: generates a token if none exists, then starts the server.
 /// When disabling: stops the server and persists the updated flag.
 #[tauri::command]
-pub async fn set_api_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+pub async fn set_api_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), Error> {
     let _ = app; // AppHandle reserved for future event emission
     let mut cfg = crate::config::get_config()?;
     cfg.integrations.api_enabled = enabled;
@@ -590,7 +601,7 @@ pub async fn set_api_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(),
 /// isn't already running (the MCP route can't exist without the host server).
 /// The route change takes effect immediately; no app restart is required.
 #[tauri::command]
-pub async fn set_mcp_enabled(enabled: bool) -> Result<(), String> {
+pub async fn set_mcp_enabled(enabled: bool) -> Result<(), Error> {
     let mut cfg = crate::config::get_config()?;
     cfg.integrations.mcp_enabled = enabled;
 
@@ -620,7 +631,7 @@ pub async fn set_mcp_enabled(enabled: bool) -> Result<(), String> {
 
 /// Return the current API token for display/copy in the settings panel.
 #[tauri::command]
-pub async fn get_api_token() -> Result<Option<String>, String> {
+pub async fn get_api_token() -> Result<Option<String>, Error> {
     let cfg = crate::config::get_config()?;
     Ok(cfg.integrations.api_token)
 }
@@ -629,7 +640,7 @@ pub async fn get_api_token() -> Result<Option<String>, String> {
 ///
 /// Returns the new token so the frontend can display it immediately.
 #[tauri::command]
-pub async fn rotate_api_token(app: tauri::AppHandle) -> Result<String, String> {
+pub async fn rotate_api_token(app: tauri::AppHandle) -> Result<String, Error> {
     let _ = app;
     let new_token = generate_token();
     let mut cfg = crate::config::get_config()?;
@@ -647,7 +658,7 @@ pub async fn rotate_api_token(app: tauri::AppHandle) -> Result<String, String> {
 
 /// Change the API port. Restarts the server on the new port if it was running.
 #[tauri::command]
-pub async fn set_api_port(app: tauri::AppHandle, port: u16) -> Result<(), String> {
+pub async fn set_api_port(app: tauri::AppHandle, port: u16) -> Result<(), Error> {
     let _ = app;
     let mut cfg = crate::config::get_config()?;
     cfg.integrations.api_port = port;

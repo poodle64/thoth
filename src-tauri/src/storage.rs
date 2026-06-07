@@ -4,6 +4,7 @@
 //! locations: models, recordings, logs, database, config, and
 //! FluidAudio CoreML cache.
 
+use crate::error::Error;
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -112,7 +113,7 @@ fn config_file_sizes(base: &Path) -> u64 {
 
 /// Get storage usage breakdown
 #[tauri::command]
-pub fn get_storage_usage() -> Result<StorageUsage, String> {
+pub fn get_storage_usage() -> Result<StorageUsage, Error> {
     let base = thoth_dir();
 
     let models_bytes = dir_size(&base.join("models"));
@@ -149,7 +150,7 @@ pub fn get_storage_usage() -> Result<StorageUsage, String> {
 
 /// Delete all audio recordings
 #[tauri::command]
-pub fn delete_all_recordings() -> Result<u64, String> {
+pub fn delete_all_recordings() -> Result<u64, Error> {
     let recordings_dir = thoth_dir().join("Recordings");
     if !recordings_dir.exists() {
         return Ok(0);
@@ -174,7 +175,7 @@ pub fn delete_all_recordings() -> Result<u64, String> {
 
 /// Delete all log files
 #[tauri::command]
-pub fn delete_all_logs() -> Result<u64, String> {
+pub fn delete_all_logs() -> Result<u64, Error> {
     let logs_dir = thoth_dir().join("logs");
     if !logs_dir.exists() {
         return Ok(0);
@@ -199,7 +200,7 @@ pub fn delete_all_logs() -> Result<u64, String> {
 
 /// Delete the FluidAudio CoreML model cache
 #[tauri::command]
-pub fn delete_fluidaudio_cache() -> Result<(), String> {
+pub fn delete_fluidaudio_cache() -> Result<(), Error> {
     let Some(cache_dir) = fluidaudio_models_dir() else {
         return Ok(()); // No FluidAudio cache off macOS.
     };
@@ -232,7 +233,7 @@ pub fn delete_fluidaudio_cache() -> Result<(), String> {
 ///
 /// Removes ~/.thoth/ and ~/Library/Application Support/FluidAudio/Models/
 #[tauri::command]
-pub fn delete_all_data() -> Result<(), String> {
+pub fn delete_all_data() -> Result<(), Error> {
     let base = thoth_dir();
     if base.exists() {
         fs::remove_dir_all(&base)

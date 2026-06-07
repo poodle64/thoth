@@ -13,6 +13,7 @@ use crate::clipboard;
 use crate::database;
 use crate::dictionary;
 use crate::enhancement;
+use crate::error::Error;
 use crate::transcription;
 use crate::tray;
 use serde::{Deserialize, Serialize};
@@ -235,12 +236,12 @@ impl Drop for ProcessingGuard {
 /// Emits `pipeline-progress` event with state updates.
 /// Also shows the recording indicator overlay and starts audio metering.
 #[tauri::command]
-pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
+pub fn pipeline_start_recording(app: AppHandle) -> Result<String, Error> {
     tracing::info!("Pipeline: pipeline_start_recording called");
 
     if PIPELINE_RUNNING.swap(true, Ordering::SeqCst) {
         tracing::warn!("Pipeline: Already running, rejecting start request");
-        return Err("Pipeline is already running".to_string());
+        return Err("Pipeline is already running".to_string().into());
     }
 
     // If the transcription model isn't loaded yet, try to load it in the
@@ -253,7 +254,8 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
             let _ = crate::recording_indicator::hide_recording_indicator(app.clone());
             return Err(
                 "No transcription model downloaded. Open Settings \u{2192} Models to get started."
-                    .to_string(),
+                    .to_string()
+                    .into(),
             );
         }
         tracing::info!("Pipeline: Model not loaded yet, starting eager background load");
@@ -326,7 +328,7 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
 pub async fn pipeline_stop_and_process(
     app: AppHandle,
     config: Option<PipelineConfig>,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     tracing::info!("Pipeline: stop_and_process called");
     let config = config.unwrap_or_default();
 
@@ -411,7 +413,7 @@ pub async fn pipeline_stop_and_process(
 
 /// Cancel the current pipeline execution
 #[tauri::command]
-pub fn pipeline_cancel(app: AppHandle) -> Result<(), String> {
+pub fn pipeline_cancel(app: AppHandle) -> Result<(), Error> {
     if !PIPELINE_RUNNING.load(Ordering::SeqCst) {
         return Ok(()); // Nothing to cancel
     }
@@ -515,7 +517,8 @@ async fn run_transcription_pipeline(
     let raw_text =
         tokio::task::spawn_blocking(move || transcription::transcribe_file(audio_path_owned))
             .await
-            .map_err(|e| format!("Transcription task panicked: {}", e))??;
+            .map_err(|e| format!("Transcription task panicked: {}", e))?
+            .map_err(|e| e.to_string())?;
     let transcription_duration_seconds = transcription_start.elapsed().as_secs_f64();
 
     tracing::info!(
@@ -884,11 +887,11 @@ pub async fn pipeline_transcribe_file(
     app: AppHandle,
     file_path: String,
     config: Option<PipelineConfig>,
-) -> Result<PipelineResult, String> {
+) -> Result<PipelineResult, Error> {
     tracing::info!("Pipeline: transcribe_file called for {}", file_path);
 
     if PIPELINE_RUNNING.swap(true, Ordering::SeqCst) {
-        return Err("Pipeline is already running".to_string());
+        return Err("Pipeline is already running".to_string().into());
     }
 
     // RAII guard ensures PIPELINE_RUNNING is reset even on early return
@@ -901,7 +904,8 @@ pub async fn pipeline_transcribe_file(
         if !transcription::download::check_model_downloaded(None) {
             return Err(
                 "No transcription model downloaded. Open Settings \u{2192} Models to get started."
-                    .to_string(),
+                    .to_string()
+                    .into(),
             );
         }
         tracing::info!("Pipeline: Model not loaded yet, starting eager background load for import");
@@ -970,7 +974,7 @@ pub async fn pipeline_transcribe_file(
         }
     }
 
-    result
+    result.map_err(Into::into)
 }
 
 /// Re-transcribe an existing history record using the current model.
@@ -982,7 +986,7 @@ pub async fn pipeline_retranscribe(
     app: AppHandle,
     transcription_id: String,
     config: Option<PipelineConfig>,
-) -> Result<PipelineResult, String> {
+) -> Result<PipelineResult, Error> {
     tracing::info!("Pipeline: retranscribe called for id={}", transcription_id);
 
     // Look up the existing record from the database
@@ -999,12 +1003,13 @@ pub async fn pipeline_retranscribe(
     if !std::path::Path::new(audio_path).exists() {
         return Err(
             "Audio file no longer available. It may have been deleted via Storage cleanup."
-                .to_string(),
+                .to_string()
+                .into(),
         );
     }
 
     if PIPELINE_RUNNING.swap(true, Ordering::SeqCst) {
-        return Err("Pipeline is already running".to_string());
+        return Err("Pipeline is already running".to_string().into());
     }
 
     // RAII guard ensures PIPELINE_RUNNING is reset even on early return
@@ -1015,7 +1020,8 @@ pub async fn pipeline_retranscribe(
         if !transcription::download::check_model_downloaded(None) {
             return Err(
                 "No transcription model downloaded. Open Settings \u{2192} Models to get started."
-                    .to_string(),
+                    .to_string()
+                    .into(),
             );
         }
         tracing::info!(
@@ -1099,7 +1105,7 @@ pub async fn pipeline_retranscribe(
 pub async fn pipeline_toggle_recording(
     app: AppHandle,
     config: Option<PipelineConfig>,
-) -> Result<ToggleOutcome, String> {
+) -> Result<ToggleOutcome, Error> {
     if crate::audio::is_recording() {
         // --- STOP ---
         // Play BONG now, before disarming, so the sound is always paired with

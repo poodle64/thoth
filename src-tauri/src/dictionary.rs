@@ -3,6 +3,7 @@
 //! Provides persistent storage and CRUD operations for custom word replacements.
 //! Dictionary entries are stored in JSON format at `~/.thoth/dictionary.json`.
 
+use crate::error::Error;
 use parking_lot::RwLock;
 use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
@@ -80,20 +81,20 @@ fn save_dictionary(dictionary: &Dictionary) -> Result<(), String> {
 
 /// Get all dictionary entries
 #[tauri::command]
-pub fn get_dictionary_entries() -> Result<Vec<DictionaryEntry>, String> {
+pub fn get_dictionary_entries() -> Result<Vec<DictionaryEntry>, Error> {
     let dictionary = get_dictionary().read();
     Ok(dictionary.entries.clone())
 }
 
 /// Add a new dictionary entry
 #[tauri::command]
-pub fn add_dictionary_entry(entry: DictionaryEntry) -> Result<(), String> {
+pub fn add_dictionary_entry(entry: DictionaryEntry) -> Result<(), Error> {
     // Validate entry
     if entry.from.trim().is_empty() {
-        return Err("The 'from' field cannot be empty".to_string());
+        return Err("The 'from' field cannot be empty".to_string().into());
     }
     if entry.to.trim().is_empty() {
-        return Err("The 'to' field cannot be empty".to_string());
+        return Err("The 'to' field cannot be empty".to_string().into());
     }
 
     let mut dictionary = get_dictionary().write();
@@ -105,7 +106,7 @@ pub fn add_dictionary_entry(entry: DictionaryEntry) -> Result<(), String> {
         .iter()
         .any(|e| e.from.to_lowercase() == from_lower)
     {
-        return Err(format!("An entry for '{}' already exists", entry.from));
+        return Err(format!("An entry for '{}' already exists", entry.from).into());
     }
 
     dictionary.entries.push(entry);
@@ -120,19 +121,19 @@ pub fn add_dictionary_entry(entry: DictionaryEntry) -> Result<(), String> {
 
 /// Update an existing dictionary entry
 #[tauri::command]
-pub fn update_dictionary_entry(index: usize, entry: DictionaryEntry) -> Result<(), String> {
+pub fn update_dictionary_entry(index: usize, entry: DictionaryEntry) -> Result<(), Error> {
     // Validate entry
     if entry.from.trim().is_empty() {
-        return Err("The 'from' field cannot be empty".to_string());
+        return Err("The 'from' field cannot be empty".to_string().into());
     }
     if entry.to.trim().is_empty() {
-        return Err("The 'to' field cannot be empty".to_string());
+        return Err("The 'to' field cannot be empty".to_string().into());
     }
 
     let mut dictionary = get_dictionary().write();
 
     if index >= dictionary.entries.len() {
-        return Err(format!("Invalid entry index: {}", index));
+        return Err(format!("Invalid entry index: {}", index).into());
     }
 
     // Check for duplicates (excluding the current entry)
@@ -143,7 +144,7 @@ pub fn update_dictionary_entry(index: usize, entry: DictionaryEntry) -> Result<(
         .enumerate()
         .any(|(i, e)| i != index && e.from.to_lowercase() == from_lower)
     {
-        return Err(format!("An entry for '{}' already exists", entry.from));
+        return Err(format!("An entry for '{}' already exists", entry.from).into());
     }
 
     dictionary.entries[index] = entry;
@@ -155,11 +156,11 @@ pub fn update_dictionary_entry(index: usize, entry: DictionaryEntry) -> Result<(
 
 /// Remove a dictionary entry by index
 #[tauri::command]
-pub fn remove_dictionary_entry(index: usize) -> Result<(), String> {
+pub fn remove_dictionary_entry(index: usize) -> Result<(), Error> {
     let mut dictionary = get_dictionary().write();
 
     if index >= dictionary.entries.len() {
-        return Err(format!("Invalid entry index: {}", index));
+        return Err(format!("Invalid entry index: {}", index).into());
     }
 
     let removed = dictionary.entries.remove(index);
@@ -175,7 +176,7 @@ pub fn remove_dictionary_entry(index: usize) -> Result<(), String> {
 
 /// Import dictionary entries from JSON content
 #[tauri::command]
-pub fn import_dictionary(json_content: String, merge: bool) -> Result<usize, String> {
+pub fn import_dictionary(json_content: String, merge: bool) -> Result<usize, Error> {
     let imported: Dictionary =
         serde_json::from_str(&json_content).map_err(|e| format!("Invalid JSON format: {}", e))?;
 
@@ -225,9 +226,11 @@ pub fn import_dictionary(json_content: String, merge: bool) -> Result<usize, Str
 
 /// Export dictionary entries as JSON
 #[tauri::command]
-pub fn export_dictionary() -> Result<String, String> {
+pub fn export_dictionary() -> Result<String, Error> {
     let dictionary = get_dictionary().read();
-    serde_json::to_string_pretty(&*dictionary).map_err(|e| format!("Failed to serialise: {}", e))
+    serde_json::to_string_pretty(&*dictionary)
+        .map_err(|e| format!("Failed to serialise: {}", e))
+        .map_err(Into::into)
 }
 
 /// Apply dictionary replacements to text

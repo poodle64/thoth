@@ -2,6 +2,7 @@
 //!
 //! This module contains all IPC commands that can be invoked from the frontend.
 
+use crate::error::Error;
 use tauri::{AppHandle, Manager};
 
 /// Greet command for testing
@@ -12,46 +13,48 @@ pub fn greet(name: &str) -> String {
 
 /// Show a window by label
 #[tauri::command]
-pub fn show_window(app: AppHandle, label: &str) -> Result<(), String> {
+pub fn show_window(app: AppHandle, label: &str) -> Result<(), Error> {
     if let Some(window) = app.get_webview_window(label) {
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
         tracing::info!("Showed window: {}", label);
         Ok(())
     } else {
-        Err(format!("Window '{}' not found", label))
+        Err(format!("Window '{}' not found", label).into())
     }
 }
 
 /// Hide a window by label
 #[tauri::command]
-pub fn hide_window(app: AppHandle, label: &str) -> Result<(), String> {
+pub fn hide_window(app: AppHandle, label: &str) -> Result<(), Error> {
     if let Some(window) = app.get_webview_window(label) {
         window.hide().map_err(|e| e.to_string())?;
         tracing::info!("Hid window: {}", label);
         Ok(())
     } else {
-        Err(format!("Window '{}' not found", label))
+        Err(format!("Window '{}' not found", label).into())
     }
 }
 
 /// Open a URL in the system's default browser
 #[tauri::command]
-pub fn open_url(url: &str) -> Result<(), String> {
+pub fn open_url(url: &str) -> Result<(), Error> {
     // Only allow http/https URLs for security
     if !url.starts_with("https://") && !url.starts_with("http://") {
-        return Err("Only http:// and https:// URLs are allowed".to_string());
+        return Err("Only http:// and https:// URLs are allowed"
+            .to_string()
+            .into());
     }
 
     // `open` selects the platform launcher (open / xdg-open / cmd start); the
     // detached variant returns without waiting on the spawned browser process,
     // matching the previous fire-and-forget behaviour.
-    open::that_detached(url).map_err(|e| format!("Failed to open URL: {}", e))
+    open::that_detached(url).map_err(|e| format!("Failed to open URL: {}", e).into())
 }
 
 /// Set dock icon visibility (macOS) and persist to config
 #[tauri::command]
-pub fn set_show_in_dock(app: AppHandle, show: bool) -> Result<(), String> {
+pub fn set_show_in_dock(app: AppHandle, show: bool) -> Result<(), Error> {
     // Update config
     let mut config =
         crate::config::get_config().map_err(|e| format!("Failed to load config: {}", e))?;
@@ -93,7 +96,7 @@ pub fn get_show_in_dock() -> bool {
 /// the device_id from being accidentally overwritten by other config saves.
 /// Also cools down the warm stream so the next recording opens the new device.
 #[tauri::command]
-pub fn set_audio_device(device_id: Option<String>) -> Result<(), String> {
+pub fn set_audio_device(device_id: Option<String>) -> Result<(), Error> {
     crate::config::set_audio_device_config(device_id.clone())
         .map_err(|e| format!("Failed to save audio device: {}", e))?;
     // Cool down the warm stream — the new device must be opened fresh.
@@ -112,7 +115,7 @@ pub fn get_audio_device() -> Option<String> {
 
 /// Toggle window visibility
 #[tauri::command]
-pub fn toggle_window(app: AppHandle, label: &str) -> Result<bool, String> {
+pub fn toggle_window(app: AppHandle, label: &str) -> Result<bool, Error> {
     if let Some(window) = app.get_webview_window(label) {
         let visible = window.is_visible().map_err(|e| e.to_string())?;
         if visible {
@@ -126,7 +129,7 @@ pub fn toggle_window(app: AppHandle, label: &str) -> Result<bool, String> {
             Ok(true)
         }
     } else {
-        Err(format!("Window '{}' not found", label))
+        Err(format!("Window '{}' not found", label).into())
     }
 }
 
@@ -135,7 +138,7 @@ pub fn toggle_window(app: AppHandle, label: &str) -> Result<bool, String> {
 /// Remove the macOS quarantine extended attribute from Thoth.app.
 /// Safe to call on any version — no-ops if already cleared.
 #[tauri::command]
-pub fn remove_quarantine() -> Result<(), String> {
+pub fn remove_quarantine() -> Result<(), Error> {
     #[cfg(target_os = "macos")]
     {
         let output = std::process::Command::new("xattr")
@@ -152,7 +155,7 @@ pub fn remove_quarantine() -> Result<(), String> {
             if stderr.contains("No such xattr") || stderr.is_empty() {
                 Ok(()) // Already clear
             } else {
-                Err(format!("xattr failed: {}", stderr))
+                Err(format!("xattr failed: {}", stderr).into())
             }
         }
     }
@@ -165,7 +168,7 @@ pub fn remove_quarantine() -> Result<(), String> {
 /// Open a macOS Privacy & Security preference pane
 #[tauri::command]
 #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
-pub fn open_privacy_pane(pane: String) -> Result<(), String> {
+pub fn open_privacy_pane(pane: String) -> Result<(), Error> {
     #[cfg(target_os = "macos")]
     {
         let url = match pane.as_str() {
@@ -178,7 +181,7 @@ pub fn open_privacy_pane(pane: String) -> Result<(), String> {
             "microphone" => {
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
             }
-            _ => return Err(format!("Unknown pane: {}", pane)),
+            _ => return Err(format!("Unknown pane: {}", pane).into()),
         };
         std::process::Command::new("open")
             .arg(url)
@@ -194,6 +197,6 @@ pub fn open_privacy_pane(pane: String) -> Result<(), String> {
 
 /// Quit and relaunch the application (used by troubleshooting flow)
 #[tauri::command]
-pub fn relaunch_app(app: AppHandle) -> Result<(), String> {
+pub fn relaunch_app(app: AppHandle) -> Result<(), Error> {
     app.restart();
 }

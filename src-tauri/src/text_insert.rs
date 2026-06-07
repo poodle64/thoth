@@ -3,6 +3,7 @@
 //! Provides cross-platform text insertion at cursor position in any application.
 //! Supports multiple insertion methods with configurable delays.
 
+use crate::error::Error;
 use std::thread;
 use std::time::Duration;
 use tracing::{debug, info, warn};
@@ -526,7 +527,7 @@ pub fn insert_text_by_typing(
     text: String,
     keystroke_delay_ms: Option<u64>,
     initial_delay_ms: Option<u64>,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     let config = InsertionConfig {
         method: InsertionMethod::Typing,
         keystroke_delay_ms: keystroke_delay_ms.unwrap_or(0),
@@ -534,7 +535,7 @@ pub fn insert_text_by_typing(
     };
 
     let service = TextInsertService::with_config(config);
-    service.insert_text(&text)
+    service.insert_text(&text).map_err(Into::into)
 }
 
 /// Insert text at the current cursor position using clipboard paste.
@@ -552,7 +553,7 @@ pub fn insert_text_by_typing(
 ///
 /// `Ok(())` on success, or an error message on failure.
 #[tauri::command]
-pub fn insert_text_by_paste(text: String, initial_delay_ms: Option<u64>) -> Result<(), String> {
+pub fn insert_text_by_paste(text: String, initial_delay_ms: Option<u64>) -> Result<(), Error> {
     let config = InsertionConfig {
         method: InsertionMethod::Paste,
         keystroke_delay_ms: 0,
@@ -560,7 +561,7 @@ pub fn insert_text_by_paste(text: String, initial_delay_ms: Option<u64>) -> Resu
     };
 
     let service = TextInsertService::with_config(config);
-    service.insert_text(&text)
+    service.insert_text(&text).map_err(Into::into)
 }
 
 /// Insert text at the current cursor position.
@@ -577,7 +578,7 @@ pub fn insert_text_by_paste(text: String, initial_delay_ms: Option<u64>) -> Resu
 ///
 /// `Ok(())` on success, or an error message on failure.
 #[tauri::command]
-pub fn insert_text(text: String, method: Option<String>) -> Result<(), String> {
+pub fn insert_text(text: String, method: Option<String>) -> Result<(), Error> {
     let insertion_method = method
         .as_deref()
         .map(InsertionMethod::parse)
@@ -589,7 +590,7 @@ pub fn insert_text(text: String, method: Option<String>) -> Result<(), String> {
     };
 
     let service = TextInsertService::with_config(config);
-    service.insert_text(&text)
+    service.insert_text(&text).map_err(Into::into)
 }
 
 #[cfg(test)]

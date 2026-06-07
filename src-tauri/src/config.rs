@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use crate::enhancement;
+use crate::error::Error;
 
 /// Current config schema version
 const CURRENT_VERSION: u32 = 1;
@@ -545,7 +546,7 @@ fn get_config_instance() -> &'static RwLock<Config> {
 /// Returns the current configuration state. The config is cached in memory
 /// and loaded from disk on first access.
 #[tauri::command]
-pub fn get_config() -> Result<Config, String> {
+pub fn get_config() -> Result<Config, Error> {
     let config = get_config_instance().read().clone();
     Ok(config)
 }
@@ -555,7 +556,7 @@ pub fn get_config() -> Result<Config, String> {
 /// Replaces the current configuration with the provided config and persists
 /// it to disk. The version field is automatically updated to the current schema.
 #[tauri::command]
-pub fn set_config(mut config: Config) -> Result<(), String> {
+pub fn set_config(mut config: Config) -> Result<(), Error> {
     // Ensure version is current
     config.version = CURRENT_VERSION;
 
@@ -726,7 +727,7 @@ pub fn set_enhancement_enabled(enabled: bool) -> Result<(), String> {
 ///
 /// Pass `Some(key)` to store a new key, `None` to clear it.
 #[tauri::command]
-pub fn set_enhancement_api_key(key: Option<String>) -> Result<(), String> {
+pub fn set_enhancement_api_key(key: Option<String>) -> Result<(), Error> {
     let mut cached = get_config_instance().write();
     cached.enhancement.api_key = key;
     save_to_disk(&cached)?;
@@ -748,7 +749,7 @@ pub fn set_enhancement_api_key(key: Option<String>) -> Result<(), String> {
 /// overwriting shortcuts, but would also block intentional changes (e.g.
 /// resetting a shortcut back to its default value).
 #[tauri::command]
-pub fn set_shortcut_config(shortcuts: ShortcutConfig) -> Result<(), String> {
+pub fn set_shortcut_config(shortcuts: ShortcutConfig) -> Result<(), Error> {
     let mut cached = get_config_instance().write();
     cached.shortcuts = shortcuts;
     save_to_disk(&cached)?;
@@ -763,7 +764,7 @@ pub fn set_shortcut_config(shortcuts: ShortcutConfig) -> Result<(), String> {
 ///
 /// Resets all settings to their default values and persists to disk.
 #[tauri::command]
-pub fn reset_config() -> Result<Config, String> {
+pub fn reset_config() -> Result<Config, Error> {
     let default_config = Config::default();
 
     // Save to disk

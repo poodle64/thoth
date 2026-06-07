@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use crate::database::migrations::run_migrations;
+use crate::error::Error;
 
 /// Global database path, initialised once.
 static DATABASE_PATH: OnceLock<PathBuf> = OnceLock::new();
@@ -114,19 +115,22 @@ pub fn initialise_database() -> Result<(), DatabaseError> {
 
 /// Initialises the database. Call this on application startup.
 #[tauri::command]
-pub fn init_database() -> Result<(), String> {
-    initialise_database().map_err(|e| {
-        tracing::error!("Failed to initialise database: {}", e);
-        format!("Failed to initialise database: {}", e)
-    })
+pub fn init_database() -> Result<(), Error> {
+    initialise_database()
+        .map_err(|e| {
+            tracing::error!("Failed to initialise database: {}", e);
+            format!("Failed to initialise database: {}", e)
+        })
+        .map_err(Into::into)
 }
 
 /// Returns the path to the database file.
 #[tauri::command]
-pub fn get_database_path_command() -> Result<String, String> {
+pub fn get_database_path_command() -> Result<String, Error> {
     get_database_path()
         .map(|p| p.to_string_lossy().to_string())
         .map_err(|e| format!("Failed to get database path: {}", e))
+        .map_err(Into::into)
 }
 
 // =============================================================================

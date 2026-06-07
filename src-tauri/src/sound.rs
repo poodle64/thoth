@@ -19,6 +19,7 @@
 //! reclaims it when playback ends.
 
 use crate::config;
+use crate::error::Error;
 
 /// Sound event types for different application states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,14 +156,14 @@ pub fn play_error_sound() {
 
 /// Check if sounds are enabled
 #[tauri::command]
-pub fn are_sounds_enabled() -> Result<bool, String> {
+pub fn are_sounds_enabled() -> Result<bool, Error> {
     let cfg = config::get_config()?;
     Ok(cfg.audio.play_sounds)
 }
 
 /// Set sounds enabled state
 #[tauri::command]
-pub fn set_sounds_enabled(enabled: bool) -> Result<(), String> {
+pub fn set_sounds_enabled(enabled: bool) -> Result<(), Error> {
     let mut cfg = config::get_config()?;
     cfg.audio.play_sounds = enabled;
     config::set_config(cfg)?;

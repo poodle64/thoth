@@ -24,6 +24,7 @@ pub use linux::{DisplayServer, get_display_server};
 pub use conflict::{RegistrationResult, ShortcutConflict};
 pub use manager::{ShortcutInfo, shortcut_ids};
 
+use crate::error::Error;
 use crate::keyboard_service;
 use tauri::AppHandle;
 
@@ -59,7 +60,7 @@ pub fn register_shortcut(
     id: String,
     accelerator: String,
     description: String,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     // Route modifier-only shortcuts to the keyboard service
     if keyboard_service::is_modifier_shortcut(&accelerator) {
         if keyboard_service::register_modifier_shortcut(
@@ -70,20 +71,17 @@ pub fn register_shortcut(
             keyboard_service::restart_monitoring(app);
             Ok(())
         } else {
-            Err(format!(
-                "Failed to register modifier shortcut: {}",
-                accelerator
-            ))
+            Err(format!("Failed to register modifier shortcut: {}", accelerator).into())
         }
     } else {
         // Platform-specific registration
         #[cfg(target_os = "linux")]
         {
-            linux::register(&app, id, accelerator, description)
+            linux::register(&app, id, accelerator, description).map_err(Into::into)
         }
         #[cfg(not(target_os = "linux"))]
         {
-            manager::register(&app, id, accelerator, description)
+            manager::register(&app, id, accelerator, description).map_err(Into::into)
         }
     }
 }
@@ -97,7 +95,7 @@ pub fn register_shortcut(
 /// * `Ok(())` on success
 /// * `Err(String)` if the shortcut is not registered or unregistration fails
 #[tauri::command]
-pub fn unregister_shortcut(app: AppHandle, id: String) -> Result<(), String> {
+pub fn unregister_shortcut(app: AppHandle, id: String) -> Result<(), Error> {
     // Try modifier monitor first, then regular shortcuts
     if keyboard_service::is_modifier_shortcut_registered(&id) {
         keyboard_service::unregister_modifier_shortcut(&id);
@@ -106,11 +104,11 @@ pub fn unregister_shortcut(app: AppHandle, id: String) -> Result<(), String> {
         // Platform-specific unregistration
         #[cfg(target_os = "linux")]
         {
-            linux::unregister(&app, &id)
+            linux::unregister(&app, &id).map_err(Into::into)
         }
         #[cfg(not(target_os = "linux"))]
         {
-            manager::unregister(&app, &id)
+            manager::unregister(&app, &id).map_err(Into::into)
         }
     }
 }
@@ -165,7 +163,7 @@ pub fn get_default_shortcuts() -> Vec<ShortcutInfo> {
 /// * `Ok(())` if all shortcuts were registered successfully
 /// * `Err(String)` if any shortcuts failed to register (includes details)
 #[tauri::command]
-pub fn register_default_shortcuts(app: AppHandle) -> Result<(), String> {
+pub fn register_default_shortcuts(app: AppHandle) -> Result<(), Error> {
     // Register each default through `register_shortcut`, which routes modifier-only
     // accelerators (e.g. "ShiftRight") to the keyboard service and everything else to
     // the platform layer. Calling the platform layer directly here would hand a bare
@@ -196,7 +194,8 @@ pub fn register_default_shortcuts(app: AppHandle) -> Result<(), String> {
         Err(format!(
             "Some default shortcuts failed to register: {}",
             errors.join("; ")
-        ))
+        )
+        .into())
     }
 }
 
@@ -209,18 +208,18 @@ pub fn register_default_shortcuts(app: AppHandle) -> Result<(), String> {
 /// * `Ok(())` on success
 /// * `Err(String)` if unregistration fails
 #[tauri::command]
-pub fn unregister_all_shortcuts(app: AppHandle) -> Result<(), String> {
+pub fn unregister_all_shortcuts(app: AppHandle) -> Result<(), Error> {
     // Unregister all modifier shortcuts (thread stays alive for mode transitions)
     keyboard_service::unregister_all_modifier_shortcuts();
 
     // Platform-specific unregistration
     #[cfg(target_os = "linux")]
     {
-        linux::unregister_all(&app)
+        linux::unregister_all(&app).map_err(Into::into)
     }
     #[cfg(not(target_os = "linux"))]
     {
-        manager::unregister_all(&app)
+        manager::unregister_all(&app).map_err(Into::into)
     }
 }
 
@@ -303,7 +302,7 @@ pub fn try_register_shortcut(
 /// * `Ok(false)` if the shortcut is already registered by this app
 /// * `Err(String)` if the format is invalid
 #[tauri::command]
-pub fn check_shortcut_available(app: AppHandle, accelerator: String) -> Result<bool, String> {
+pub fn check_shortcut_available(app: AppHandle, accelerator: String) -> Result<bool, Error> {
     // Modifier-only shortcuts are always "available" (we handle them ourselves)
     if keyboard_service::is_modifier_shortcut(&accelerator) {
         // Check if already registered as a modifier shortcut
@@ -374,6 +373,6 @@ pub fn get_shortcut_suggestions(shortcut: String) -> Vec<String> {
 /// * `Ok(())` if the format is valid
 /// * `Err(String)` describing the format issue
 #[tauri::command]
-pub fn validate_shortcut(shortcut: String) -> Result<(), String> {
-    conflict::validate_shortcut_format(&shortcut)
+pub fn validate_shortcut(shortcut: String) -> Result<(), Error> {
+    conflict::validate_shortcut_format(&shortcut).map_err(Into::into)
 }

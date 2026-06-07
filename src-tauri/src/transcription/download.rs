@@ -5,6 +5,7 @@
 //! - Archive downloads with extraction (sherpa-onnx models)
 
 use super::manifest::{RemoteModelInfo, get_fallback_manifest, get_model_directory};
+use crate::error::Error;
 use anyhow::{Result, anyhow};
 use parking_lot::Mutex;
 use reqwest::Client;
@@ -148,12 +149,12 @@ pub fn get_download_progress() -> DownloadState {
 /// - `model-download-complete`: When download and extraction complete
 /// - `model-download-error`: If an error occurs
 #[tauri::command]
-pub async fn download_model(app: AppHandle, model_id: Option<String>) -> Result<(), String> {
+pub async fn download_model(app: AppHandle, model_id: Option<String>) -> Result<(), Error> {
     // Check if already downloading
     {
         let state = get_download_state().lock().clone();
         if state == DownloadState::Downloading || state == DownloadState::Extracting {
-            return Err("Download already in progress".to_string());
+            return Err("Download already in progress".to_string().into());
         }
     }
 
@@ -228,7 +229,7 @@ pub async fn download_model(app: AppHandle, model_id: Option<String>) -> Result<
                 }
                 app.emit("model-download-error", &error_msg)
                     .map_err(|e| e.to_string())?;
-                return Err(error_msg);
+                return Err(error_msg.into());
             }
         }
     }
@@ -260,7 +261,7 @@ pub async fn download_model(app: AppHandle, model_id: Option<String>) -> Result<
             }
             app.emit("model-download-error", &error_msg)
                 .map_err(|e| e.to_string())?;
-            Err(error_msg)
+            Err(error_msg.into())
         }
     }
 }
@@ -777,7 +778,7 @@ pub fn get_model_info() -> Vec<super::manifest::ModelInfo> {
 
 /// Delete the downloaded model files
 #[tauri::command]
-pub fn delete_model(model_id: Option<String>) -> Result<(), String> {
+pub fn delete_model(model_id: Option<String>) -> Result<(), Error> {
     // Get the model info from manifest
     let manifest = get_fallback_manifest();
     let model_id = model_id.unwrap_or_else(|| {

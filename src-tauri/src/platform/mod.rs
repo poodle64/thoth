@@ -10,6 +10,8 @@ pub mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::{GpuBackend, GpuDetectionResult, GpuInfo};
 
+use crate::error::Error;
+
 /// GPU backend type (re-exported for all platforms)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -107,7 +109,7 @@ pub struct DetectedGpu {
 
 /// Get GPU information for the current system
 #[tauri::command]
-pub fn get_gpu_info() -> Result<SystemGpuInfo, String> {
+pub fn get_gpu_info() -> Result<SystemGpuInfo, Error> {
     #[cfg(target_os = "linux")]
     {
         let detection = linux::detect_gpus();
@@ -377,10 +379,10 @@ pub fn reset_permissions_after_update() -> Result<String, String> {
 ///
 /// Valid services: "Accessibility", "ListenEvent", "Microphone", "All"
 #[tauri::command]
-pub async fn reset_tcc_permissions(services: Vec<String>) -> Result<String, String> {
+pub async fn reset_tcc_permissions(services: Vec<String>) -> Result<String, Error> {
     #[cfg(target_os = "macos")]
     {
-        macos::reset_tcc_permissions(&services)
+        macos::reset_tcc_permissions(&services).map_err(Into::into)
     }
     #[cfg(not(target_os = "macos"))]
     {

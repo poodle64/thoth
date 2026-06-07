@@ -3,6 +3,7 @@
 //! Provides smart clipboard operations including auto-copy on transcription
 //! completion, clipboard history, and configurable formatting options.
 
+use crate::error::Error;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -192,9 +193,9 @@ pub async fn copy_to_clipboard(
     app: AppHandle,
     text: String,
     source: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     if text.is_empty() {
-        return Err("Cannot copy empty text to clipboard".to_string());
+        return Err("Cannot copy empty text to clipboard".to_string().into());
     }
 
     debug!("Copying {} chars to clipboard", text.len());
@@ -218,24 +219,30 @@ pub async fn copy_to_clipboard(
 /// Returns the current text content of the clipboard, or an empty string
 /// if the clipboard is empty or does not contain text.
 #[tauri::command]
-pub async fn read_clipboard(app: AppHandle) -> Result<String, String> {
+pub async fn read_clipboard(app: AppHandle) -> Result<String, Error> {
     debug!("Reading from clipboard");
 
-    app.clipboard().read_text().map_err(|e| {
-        error!("Failed to read clipboard: {}", e);
-        format!("Failed to read clipboard: {}", e)
-    })
+    app.clipboard()
+        .read_text()
+        .map_err(|e| {
+            error!("Failed to read clipboard: {}", e);
+            format!("Failed to read clipboard: {}", e)
+        })
+        .map_err(Into::into)
 }
 
 /// Clear the system clipboard.
 #[tauri::command]
-pub async fn clear_clipboard(app: AppHandle) -> Result<(), String> {
+pub async fn clear_clipboard(app: AppHandle) -> Result<(), Error> {
     debug!("Clearing clipboard");
 
-    app.clipboard().clear().map_err(|e| {
-        error!("Failed to clear clipboard: {}", e);
-        format!("Failed to clear clipboard: {}", e)
-    })
+    app.clipboard()
+        .clear()
+        .map_err(|e| {
+            error!("Failed to clear clipboard: {}", e);
+            format!("Failed to clear clipboard: {}", e)
+        })
+        .map_err(Into::into)
 }
 
 /// Copy transcription to clipboard with auto-copy settings applied.
@@ -247,7 +254,7 @@ pub async fn copy_transcription(
     app: AppHandle,
     text: String,
     enhanced: bool,
-) -> Result<bool, String> {
+) -> Result<bool, Error> {
     let manager = get_manager().lock();
     let settings = manager.settings().clone();
     drop(manager);
@@ -311,7 +318,7 @@ pub fn get_clipboard_settings() -> ClipboardSettings {
 
 /// Update clipboard settings.
 #[tauri::command]
-pub fn set_clipboard_settings(settings: ClipboardSettings) -> Result<(), String> {
+pub fn set_clipboard_settings(settings: ClipboardSettings) -> Result<(), Error> {
     let mut manager = get_manager().lock();
     manager.update_settings(settings);
     Ok(())
@@ -340,7 +347,7 @@ pub fn remove_clipboard_history_entry(id: String) -> bool {
 
 /// Copy an entry from clipboard history to the clipboard.
 #[tauri::command]
-pub async fn copy_from_history(app: AppHandle, id: String) -> Result<(), String> {
+pub async fn copy_from_history(app: AppHandle, id: String) -> Result<(), Error> {
     let manager = get_manager().lock();
     let entry = manager
         .get_history()
@@ -362,7 +369,7 @@ pub async fn copy_from_history(app: AppHandle, id: String) -> Result<(), String>
 ///
 /// Call this after pasting to restore the user's original clipboard content.
 #[tauri::command]
-pub async fn restore_clipboard(app: AppHandle) -> Result<bool, String> {
+pub async fn restore_clipboard(app: AppHandle) -> Result<bool, Error> {
     let mut manager = get_manager().lock();
     if let Some(content) = manager.take_preserved_content() {
         drop(manager);
@@ -398,9 +405,9 @@ pub async fn paste_transcription(
     app: AppHandle,
     text: String,
     enhanced: bool,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     if text.is_empty() {
-        return Err("Cannot paste empty text".to_string());
+        return Err("Cannot paste empty text".to_string().into());
     }
 
     let manager = get_manager().lock();

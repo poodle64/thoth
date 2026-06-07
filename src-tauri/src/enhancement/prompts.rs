@@ -3,6 +3,7 @@
 //! Provides built-in and custom prompt templates for text enhancement.
 //! Custom prompts are stored in `~/.thoth/prompts.json`.
 
+use crate::error::Error;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -183,41 +184,43 @@ pub fn get_custom_prompts_cmd() -> Vec<PromptTemplate> {
 
 /// Add or update a custom prompt template
 #[tauri::command]
-pub fn save_custom_prompt_cmd(prompt: PromptTemplate) -> Result<(), String> {
+pub fn save_custom_prompt_cmd(prompt: PromptTemplate) -> Result<(), Error> {
     if prompt.is_builtin {
-        return Err("Cannot save a built-in prompt as custom".to_string());
+        return Err("Cannot save a built-in prompt as custom".to_string().into());
     }
 
     if prompt.id.is_empty() {
-        return Err("Prompt ID cannot be empty".to_string());
+        return Err("Prompt ID cannot be empty".to_string().into());
     }
 
     if prompt.name.is_empty() {
-        return Err("Prompt name cannot be empty".to_string());
+        return Err("Prompt name cannot be empty".to_string().into());
     }
 
     if prompt.template.is_empty() {
-        return Err("Prompt template cannot be empty".to_string());
+        return Err("Prompt template cannot be empty".to_string().into());
     }
 
     if !prompt.template.contains("{text}") {
-        return Err("Prompt template must contain {text} placeholder".to_string());
+        return Err("Prompt template must contain {text} placeholder"
+            .to_string()
+            .into());
     }
 
     let custom_path = get_custom_prompts_path();
-    save_custom_prompt(&custom_path, &prompt)
+    save_custom_prompt(&custom_path, &prompt).map_err(Into::into)
 }
 
 /// Delete a custom prompt template
 #[tauri::command]
-pub fn delete_custom_prompt_cmd(prompt_id: String) -> Result<(), String> {
+pub fn delete_custom_prompt_cmd(prompt_id: String) -> Result<(), Error> {
     // Check if it's a built-in prompt
     if get_builtin_prompts().iter().any(|p| p.id == prompt_id) {
-        return Err("Cannot delete a built-in prompt".to_string());
+        return Err("Cannot delete a built-in prompt".to_string().into());
     }
 
     let custom_path = get_custom_prompts_path();
-    delete_custom_prompt(&custom_path, &prompt_id)
+    delete_custom_prompt(&custom_path, &prompt_id).map_err(Into::into)
 }
 
 /// Get a prompt by ID

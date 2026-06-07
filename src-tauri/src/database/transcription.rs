@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::database::{DatabaseError, open_connection};
+use crate::error::Error;
 
 /// A transcription record stored in the database.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -658,11 +659,13 @@ pub fn get_transcription_stats() -> Result<TranscriptionStats, DatabaseError> {
 
 /// Returns aggregated transcription statistics for the performance dashboard.
 #[tauri::command]
-pub fn get_transcription_stats_cmd() -> Result<TranscriptionStats, String> {
-    get_transcription_stats().map_err(|e| {
-        tracing::error!("Failed to get transcription stats: {}", e);
-        format!("Failed to get stats: {}", e)
-    })
+pub fn get_transcription_stats_cmd() -> Result<TranscriptionStats, Error> {
+    get_transcription_stats()
+        .map_err(|e| {
+            tracing::error!("Failed to get transcription stats: {}", e);
+            format!("Failed to get stats: {}", e)
+        })
+        .map_err(Into::into)
 }
 
 /// Saves a new transcription to the database.
@@ -679,7 +682,7 @@ pub fn save_transcription(
     transcription_duration_seconds: Option<f64>,
     enhancement_model_name: Option<String>,
     enhancement_duration_seconds: Option<f64>,
-) -> Result<Transcription, String> {
+) -> Result<Transcription, Error> {
     let transcription = Transcription::with_details(
         text,
         raw_text,
@@ -703,11 +706,13 @@ pub fn save_transcription(
 
 /// Retrieves a transcription by its ID.
 #[tauri::command]
-pub fn get_transcription_by_id(id: String) -> Result<Option<Transcription>, String> {
-    get_transcription(&id).map_err(|e| {
-        tracing::error!("Failed to get transcription {}: {}", id, e);
-        format!("Failed to get transcription: {}", e)
-    })
+pub fn get_transcription_by_id(id: String) -> Result<Option<Transcription>, Error> {
+    get_transcription(&id)
+        .map_err(|e| {
+            tracing::error!("Failed to get transcription {}: {}", id, e);
+            format!("Failed to get transcription: {}", e)
+        })
+        .map_err(Into::into)
 }
 
 /// Lists all transcriptions with optional pagination.
@@ -715,39 +720,47 @@ pub fn get_transcription_by_id(id: String) -> Result<Option<Transcription>, Stri
 pub fn list_all_transcriptions(
     limit: Option<i64>,
     offset: Option<i64>,
-) -> Result<Vec<Transcription>, String> {
-    list_transcriptions(limit, offset).map_err(|e| {
-        tracing::error!("Failed to list transcriptions: {}", e);
-        format!("Failed to list transcriptions: {}", e)
-    })
+) -> Result<Vec<Transcription>, Error> {
+    list_transcriptions(limit, offset)
+        .map_err(|e| {
+            tracing::error!("Failed to list transcriptions: {}", e);
+            format!("Failed to list transcriptions: {}", e)
+        })
+        .map_err(Into::into)
 }
 
 /// Deletes a transcription by its ID.
 #[tauri::command]
-pub fn delete_transcription_by_id(id: String) -> Result<bool, String> {
-    delete_transcription(&id).map_err(|e| {
-        tracing::error!("Failed to delete transcription {}: {}", id, e);
-        format!("Failed to delete transcription: {}", e)
-    })
+pub fn delete_transcription_by_id(id: String) -> Result<bool, Error> {
+    delete_transcription(&id)
+        .map_err(|e| {
+            tracing::error!("Failed to delete transcription {}: {}", id, e);
+            format!("Failed to delete transcription: {}", e)
+        })
+        .map_err(Into::into)
 }
 
 /// Deletes all transcriptions.
 #[tauri::command]
-pub fn delete_all_transcriptions_cmd() -> Result<usize, String> {
-    delete_all_transcriptions().map_err(|e| {
-        tracing::error!("Failed to delete all transcriptions: {}", e);
-        format!("Failed to delete all transcriptions: {}", e)
-    })
+pub fn delete_all_transcriptions_cmd() -> Result<usize, Error> {
+    delete_all_transcriptions()
+        .map_err(|e| {
+            tracing::error!("Failed to delete all transcriptions: {}", e);
+            format!("Failed to delete all transcriptions: {}", e)
+        })
+        .map_err(Into::into)
 }
 
 /// Scans ~/.thoth/Recordings/ for WAV files not referenced by any DB row and
 /// removes them. Returns the number of files removed and bytes freed.
 #[tauri::command]
-pub fn reconcile_orphaned_recordings_cmd() -> Result<ReconcileResult, String> {
-    reconcile_orphaned_recordings().map_err(|e| {
-        tracing::error!("Failed to reconcile orphaned recordings: {}", e);
-        format!("Failed to reconcile orphaned recordings: {}", e)
-    })
+pub fn reconcile_orphaned_recordings_cmd() -> Result<ReconcileResult, Error> {
+    reconcile_orphaned_recordings()
+        .map_err(|e| {
+            tracing::error!("Failed to reconcile orphaned recordings: {}", e);
+            format!("Failed to reconcile orphaned recordings: {}", e)
+        })
+        .map_err(Into::into)
 }
 
 /// Searches transcriptions by text content.
@@ -755,20 +768,24 @@ pub fn reconcile_orphaned_recordings_cmd() -> Result<ReconcileResult, String> {
 pub fn search_transcriptions_text(
     query: String,
     limit: Option<i64>,
-) -> Result<Vec<Transcription>, String> {
-    search_transcriptions(&query, limit).map_err(|e| {
-        tracing::error!("Failed to search transcriptions: {}", e);
-        format!("Failed to search transcriptions: {}", e)
-    })
+) -> Result<Vec<Transcription>, Error> {
+    search_transcriptions(&query, limit)
+        .map_err(|e| {
+            tracing::error!("Failed to search transcriptions: {}", e);
+            format!("Failed to search transcriptions: {}", e)
+        })
+        .map_err(Into::into)
 }
 
 /// Counts transcriptions, optionally filtered by a search query.
 #[tauri::command]
-pub fn count_transcriptions_filtered(query: Option<String>) -> Result<usize, String> {
-    count_transcriptions(query.as_deref()).map_err(|e| {
-        tracing::error!("Failed to count transcriptions: {}", e);
-        format!("Failed to count transcriptions: {}", e)
-    })
+pub fn count_transcriptions_filtered(query: Option<String>) -> Result<usize, Error> {
+    count_transcriptions(query.as_deref())
+        .map_err(|e| {
+            tracing::error!("Failed to count transcriptions: {}", e);
+            format!("Failed to count transcriptions: {}", e)
+        })
+        .map_err(Into::into)
 }
 
 #[cfg(test)]

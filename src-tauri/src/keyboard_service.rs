@@ -14,6 +14,7 @@
 //! This module replaces the previous `modifier_monitor.rs` and `keyboard_capture.rs`
 //! which had two independent polling threads that raced against each other.
 
+use crate::error::Error;
 use device_query::{DeviceQuery, DeviceState, Keycode};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -379,7 +380,7 @@ pub fn try_start_keyboard_service(app: AppHandle) {
 ///
 /// Returns "native" or "webview" to indicate the capture backend.
 #[tauri::command]
-pub fn enter_capture_mode(app: AppHandle) -> Result<String, String> {
+pub fn enter_capture_mode(app: AppHandle) -> Result<String, Error> {
     #[cfg(target_os = "macos")]
     {
         if !crate::platform::check_input_monitoring_permission() {
@@ -387,7 +388,8 @@ pub fn enter_capture_mode(app: AppHandle) -> Result<String, String> {
             return Err(
                 "Input Monitoring permission required. Please grant permission in \
                  System Preferences > Privacy & Security > Input Monitoring"
-                    .to_string(),
+                    .to_string()
+                    .into(),
             );
         }
     }
@@ -429,7 +431,7 @@ pub fn enter_capture_mode(app: AppHandle) -> Result<String, String> {
 /// Re-registers all shortcuts from config (clean slate).
 /// The frontend MUST save config before calling this.
 #[tauri::command]
-pub fn exit_capture_mode(app: AppHandle) -> Result<(), String> {
+pub fn exit_capture_mode(app: AppHandle) -> Result<(), Error> {
     // 1. Switch mode back (atomic, instant)
     let has_modifier_shortcuts = !get_registry().read().shortcuts.is_empty();
     let new_mode = if has_modifier_shortcuts {
@@ -469,7 +471,7 @@ pub fn report_key_event(
     alt: bool,
     meta: bool,
     event_type: String,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     if !is_capture_active() {
         return Ok(());
     }

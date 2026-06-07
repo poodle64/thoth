@@ -3,6 +3,7 @@
 //! Fetches model information from a remote JSON manifest to keep
 //! the model list up-to-date without requiring app updates.
 
+use crate::error::Error;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -429,7 +430,7 @@ pub fn to_model_info(remote: &RemoteModelInfo, selected_id: Option<&str>) -> Mod
 /// new models added in app updates are visible even before the remote
 /// manifest on GitHub is updated.
 #[tauri::command]
-pub async fn fetch_model_manifest(force_refresh: bool) -> Result<Vec<ModelInfo>, String> {
+pub async fn fetch_model_manifest(force_refresh: bool) -> Result<Vec<ModelInfo>, Error> {
     let remote_manifest = match fetch_manifest(force_refresh).await {
         Ok(m) => Some(m),
         Err(e) => {

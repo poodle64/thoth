@@ -4,6 +4,8 @@
 
 use tauri::Manager;
 
+use crate::error::Error;
+
 pub mod app_handle;
 pub mod audio;
 pub mod canonical;
@@ -14,6 +16,7 @@ pub mod control_api;
 pub mod database;
 pub mod dictionary;
 pub mod enhancement;
+pub mod error;
 pub mod export;
 pub mod keyboard_service;
 pub mod mcp_server;
@@ -44,7 +47,7 @@ fn register_single_shortcut(
     id: &str,
     accelerator: &str,
     description: &str,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     // Check if this is a standalone modifier shortcut (e.g., ShiftRight)
     if keyboard_service::is_modifier_shortcut(accelerator) {
         // Register with keyboard service
@@ -55,10 +58,7 @@ fn register_single_shortcut(
         ) {
             Ok(())
         } else {
-            Err(format!(
-                "Failed to register modifier shortcut: {}",
-                accelerator
-            ))
+            Err(format!("Failed to register modifier shortcut: {}", accelerator).into())
         }
     } else {
         // Use regular global shortcut system
@@ -76,7 +76,7 @@ fn register_single_shortcut(
 /// Unregisters everything first, then registers from the current config.
 /// Called by the frontend after clearing or resetting a shortcut.
 #[tauri::command]
-fn reregister_shortcuts(app: tauri::AppHandle) -> Result<(), String> {
+fn reregister_shortcuts(app: tauri::AppHandle) -> Result<(), Error> {
     // Unregister everything
     shortcuts::unregister_all_shortcuts(app.clone())?;
 

@@ -121,7 +121,7 @@ fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, McpErro
     Ok(CallToolResult::success(vec![Content::text(text)]))
 }
 
-/// Map a `Result<_, String>` core call into an MCP tool error on failure.
+/// Map a core-call error message into an MCP tool error on failure.
 fn core_err(msg: String) -> McpError {
     McpError::internal_error(msg, None)
 }
@@ -156,7 +156,8 @@ impl ThothMcp {
     ) -> Result<CallToolResult, McpError> {
         match p.action.as_str() {
             "list" => {
-                let entries = crate::dictionary::get_dictionary_entries().map_err(core_err)?;
+                let entries = crate::dictionary::get_dictionary_entries()
+                    .map_err(|e| core_err(e.to_string()))?;
                 json_result(&entries)
             }
             "add" => {
@@ -169,8 +170,10 @@ impl ThothMcp {
                         .ok_or_else(|| core_err("`to` required for add".into()))?,
                     case_sensitive: p.case_sensitive.unwrap_or(false),
                 };
-                crate::dictionary::add_dictionary_entry(entry).map_err(core_err)?;
-                let entries = crate::dictionary::get_dictionary_entries().map_err(core_err)?;
+                crate::dictionary::add_dictionary_entry(entry)
+                    .map_err(|e| core_err(e.to_string()))?;
+                let entries = crate::dictionary::get_dictionary_entries()
+                    .map_err(|e| core_err(e.to_string()))?;
                 json_result(&entries)
             }
             "update" => {
@@ -186,16 +189,20 @@ impl ThothMcp {
                         .ok_or_else(|| core_err("`to` required for update".into()))?,
                     case_sensitive: p.case_sensitive.unwrap_or(false),
                 };
-                crate::dictionary::update_dictionary_entry(index, entry).map_err(core_err)?;
-                let entries = crate::dictionary::get_dictionary_entries().map_err(core_err)?;
+                crate::dictionary::update_dictionary_entry(index, entry)
+                    .map_err(|e| core_err(e.to_string()))?;
+                let entries = crate::dictionary::get_dictionary_entries()
+                    .map_err(|e| core_err(e.to_string()))?;
                 json_result(&entries)
             }
             "delete" => {
                 let index = p
                     .index
                     .ok_or_else(|| core_err("`index` required for delete".into()))?;
-                crate::dictionary::remove_dictionary_entry(index).map_err(core_err)?;
-                let entries = crate::dictionary::get_dictionary_entries().map_err(core_err)?;
+                crate::dictionary::remove_dictionary_entry(index)
+                    .map_err(|e| core_err(e.to_string()))?;
+                let entries = crate::dictionary::get_dictionary_entries()
+                    .map_err(|e| core_err(e.to_string()))?;
                 json_result(&entries)
             }
             "import" => {
@@ -203,11 +210,12 @@ impl ThothMcp {
                     .json
                     .ok_or_else(|| core_err("`json` required for import".into()))?;
                 let count = crate::dictionary::import_dictionary(json, p.merge.unwrap_or(true))
-                    .map_err(core_err)?;
+                    .map_err(|e| core_err(e.to_string()))?;
                 json_result(&serde_json::json!({ "imported": count }))
             }
             "export" => {
-                let json = crate::dictionary::export_dictionary().map_err(core_err)?;
+                let json =
+                    crate::dictionary::export_dictionary().map_err(|e| core_err(e.to_string()))?;
                 Ok(CallToolResult::success(vec![Content::text(json)]))
             }
             other => Err(core_err(format!("unknown action: {}", other))),
@@ -223,7 +231,8 @@ impl ThothMcp {
     ) -> Result<CallToolResult, McpError> {
         match p.action.as_str() {
             "list" => {
-                let terms = crate::canonical::get_canonical_terms().map_err(core_err)?;
+                let terms =
+                    crate::canonical::get_canonical_terms().map_err(|e| core_err(e.to_string()))?;
                 json_result(&terms)
             }
             "add" => {
@@ -238,8 +247,9 @@ impl ThothMcp {
                     max_words: 3,
                     threshold: None,
                 };
-                crate::canonical::add_canonical_term(ct).map_err(core_err)?;
-                let terms = crate::canonical::get_canonical_terms().map_err(core_err)?;
+                crate::canonical::add_canonical_term(ct).map_err(|e| core_err(e.to_string()))?;
+                let terms =
+                    crate::canonical::get_canonical_terms().map_err(|e| core_err(e.to_string()))?;
                 json_result(&terms)
             }
             "update" => {
@@ -257,16 +267,20 @@ impl ThothMcp {
                     max_words: 3,
                     threshold: None,
                 };
-                crate::canonical::update_canonical_term(index, ct).map_err(core_err)?;
-                let terms = crate::canonical::get_canonical_terms().map_err(core_err)?;
+                crate::canonical::update_canonical_term(index, ct)
+                    .map_err(|e| core_err(e.to_string()))?;
+                let terms =
+                    crate::canonical::get_canonical_terms().map_err(|e| core_err(e.to_string()))?;
                 json_result(&terms)
             }
             "remove" => {
                 let index = p
                     .index
                     .ok_or_else(|| core_err("`index` required for remove".into()))?;
-                crate::canonical::remove_canonical_term(index).map_err(core_err)?;
-                let terms = crate::canonical::get_canonical_terms().map_err(core_err)?;
+                crate::canonical::remove_canonical_term(index)
+                    .map_err(|e| core_err(e.to_string()))?;
+                let terms =
+                    crate::canonical::get_canonical_terms().map_err(|e| core_err(e.to_string()))?;
                 json_result(&terms)
             }
             other => Err(core_err(format!("unknown action: {}", other))),
@@ -282,7 +296,7 @@ impl ThothMcp {
     ) -> Result<CallToolResult, McpError> {
         match p.action.as_str() {
             "get" => {
-                let cfg = crate::config::get_config().map_err(core_err)?;
+                let cfg = crate::config::get_config().map_err(|e| core_err(e.to_string()))?;
                 json_result(&cfg)
             }
             "update" => {
@@ -290,16 +304,17 @@ impl ThothMcp {
                     .patch
                     .ok_or_else(|| core_err("`patch` required for update".into()))?;
                 // Merge the patch onto the current config, then set.
-                let mut current =
-                    serde_json::to_value(crate::config::get_config().map_err(core_err)?)
-                        .map_err(|e| core_err(e.to_string()))?;
+                let mut current = serde_json::to_value(
+                    crate::config::get_config().map_err(|e| core_err(e.to_string()))?,
+                )
+                .map_err(|e| core_err(e.to_string()))?;
                 let patch_val: serde_json::Value = serde_json::from_str(&patch)
                     .map_err(|e| core_err(format!("invalid patch JSON: {}", e)))?;
                 merge_json(&mut current, &patch_val);
                 let new_cfg: crate::config::Config = serde_json::from_value(current)
                     .map_err(|e| core_err(format!("merged config invalid: {}", e)))?;
-                crate::config::set_config(new_cfg).map_err(core_err)?;
-                let cfg = crate::config::get_config().map_err(core_err)?;
+                crate::config::set_config(new_cfg).map_err(|e| core_err(e.to_string()))?;
+                let cfg = crate::config::get_config().map_err(|e| core_err(e.to_string()))?;
                 json_result(&cfg)
             }
             other => Err(core_err(format!("unknown action: {}", other))),
@@ -316,14 +331,14 @@ impl ThothMcp {
         match p.action.as_str() {
             "stats" => {
                 let stats = crate::database::transcription::get_transcription_stats_cmd()
-                    .map_err(core_err)?;
+                    .map_err(|e| core_err(e.to_string()))?;
                 json_result(&stats)
             }
             "get" => {
                 let id =
                     p.id.ok_or_else(|| core_err("`id` required for get".into()))?;
                 let record = crate::database::transcription::get_transcription_by_id(id)
-                    .map_err(core_err)?;
+                    .map_err(|e| core_err(e.to_string()))?;
                 match record {
                     Some(r) => json_result(&r),
                     None => Err(core_err("transcription not found".into())),
@@ -332,7 +347,8 @@ impl ThothMcp {
             "list" => {
                 // Recent records: reuse the stats-backed history listing if available;
                 // fall back to an empty-ids fetch which the export module supports.
-                let records = crate::export::get_transcriptions(Vec::new()).map_err(core_err)?;
+                let records = crate::export::get_transcriptions(Vec::new())
+                    .map_err(|e| core_err(e.to_string()))?;
                 json_result(&records)
             }
             other => Err(core_err(format!("unknown action: {}", other))),
@@ -348,7 +364,7 @@ impl ThothMcp {
     ) -> Result<CallToolResult, McpError> {
         let job_id = crate::control_api::submit_transcribe_job(p.path)
             .await
-            .map_err(core_err)?;
+            .map_err(|e| core_err(e.to_string()))?;
         json_result(&serde_json::json!({ "jobId": job_id, "status": "queued" }))
     }
 
@@ -373,7 +389,7 @@ impl ThothMcp {
 
     #[tool(description = "Get GPU/system info and transcription readiness.")]
     async fn get_system(&self) -> Result<CallToolResult, McpError> {
-        let info = crate::platform::get_gpu_info().map_err(core_err)?;
+        let info = crate::platform::get_gpu_info().map_err(|e| core_err(e.to_string()))?;
         json_result(&info)
     }
 

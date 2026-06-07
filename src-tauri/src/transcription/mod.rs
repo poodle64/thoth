@@ -16,6 +16,7 @@ pub mod whisper;
 pub use filter::{FilterOptions, OutputFilter};
 pub use manifest::{ModelInfo, fetch_model_manifest, get_manifest_update_time};
 
+use crate::error::Error;
 use parking_lot::Mutex;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -94,7 +95,7 @@ fn get_service() -> &'static Mutex<Option<TranscriptionService>> {
 
 /// Initialise the transcription service with whisper backend (primary)
 #[tauri::command]
-pub fn init_whisper_transcription(model_path: String) -> Result<(), String> {
+pub fn init_whisper_transcription(model_path: String) -> Result<(), Error> {
     let service =
         TranscriptionService::new_whisper(&PathBuf::from(model_path)).map_err(|e| e.to_string())?;
 
@@ -110,7 +111,7 @@ pub fn init_whisper_transcription(model_path: String) -> Result<(), String> {
 
 /// Initialise the transcription service with parakeet backend (fallback)
 #[tauri::command]
-pub fn init_parakeet_transcription(_model_dir: String) -> Result<(), String> {
+pub fn init_parakeet_transcription(_model_dir: String) -> Result<(), Error> {
     #[cfg(feature = "parakeet")]
     {
         let service = TranscriptionService::new_parakeet(&PathBuf::from(_model_dir))
@@ -124,12 +125,14 @@ pub fn init_parakeet_transcription(_model_dir: String) -> Result<(), String> {
     }
 
     #[cfg(not(feature = "parakeet"))]
-    Err("Parakeet backend not available in this build".to_string())
+    Err("Parakeet backend not available in this build"
+        .to_string()
+        .into())
 }
 
 /// Initialise the transcription service with FluidAudio backend (Apple Neural Engine)
 #[tauri::command]
-pub fn init_fluidaudio_transcription() -> Result<(), String> {
+pub fn init_fluidaudio_transcription() -> Result<(), Error> {
     #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
     {
         let service = TranscriptionService::new_fluidaudio().map_err(|e| e.to_string())?;
@@ -162,14 +165,16 @@ pub fn init_fluidaudio_transcription() -> Result<(), String> {
     }
 
     #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
-    Err("FluidAudio backend not available in this build".to_string())
+    Err("FluidAudio backend not available in this build"
+        .to_string()
+        .into())
 }
 
 /// Initialise the transcription service (auto-detect best backend)
 ///
 /// Tries whisper first, falls back to parakeet if whisper model not found.
 #[tauri::command]
-pub fn init_transcription(model_path: String) -> Result<(), String> {
+pub fn init_transcription(model_path: String) -> Result<(), Error> {
     let path = PathBuf::from(&model_path);
 
     // If it's a direct .bin file path, use whisper
@@ -216,13 +221,15 @@ pub fn init_transcription(model_path: String) -> Result<(), String> {
         return Err(format!(
             "No valid transcription model found in directory: {}",
             path.display()
-        ));
+        )
+        .into());
     }
 
     Err(format!(
         "Model path does not exist or is not valid: {}",
         path.display()
-    ))
+    )
+    .into())
 }
 
 /// Minimum RMS level to consider audio as containing speech.
@@ -242,7 +249,7 @@ const MIN_SPEECH_RMS: f32 = 0.002;
 /// Returns empty string if the audio is essentially silent (no speech detected),
 /// which prevents Whisper from hallucinating phrases like "Thank you" on silent input.
 #[tauri::command]
-pub fn transcribe_file(audio_path: String) -> Result<String, String> {
+pub fn transcribe_file(audio_path: String) -> Result<String, Error> {
     let input = PathBuf::from(&audio_path);
 
     // Decide whether a transcode is needed.
@@ -279,7 +286,10 @@ pub fn transcribe_file(audio_path: String) -> Result<String, String> {
         .as_mut()
         .ok_or_else(|| "Transcription service not initialised".to_string())?;
 
-    service.transcribe(&wav_path).map_err(|e| e.to_string())
+    service
+        .transcribe(&wav_path)
+        .map_err(|e| e.to_string())
+        .map_err(Into::into)
     // _temp drops here, deleting the temp file (if any) on both Ok and Err paths.
 }
 
@@ -542,7 +552,7 @@ pub fn get_selected_model_id() -> Option<String> {
 
 /// Set the selected model ID in config
 #[tauri::command]
-pub fn set_selected_model_id(model_id: Option<String>) -> Result<(), String> {
+pub fn set_selected_model_id(model_id: Option<String>) -> Result<(), Error> {
     let mut config = crate::config::get_config().map_err(|e| e.to_string())?;
     config.transcription.model_id = model_id.clone();
     crate::config::set_config(config).map_err(|e| e.to_string())?;

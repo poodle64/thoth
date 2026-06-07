@@ -4,6 +4,7 @@
 //! to various formats (JSON, CSV, TXT).
 
 use crate::database;
+use crate::error::Error;
 use chrono::{DateTime, Utc};
 use csv::WriterBuilder;
 use serde::{Deserialize, Serialize};
@@ -388,7 +389,7 @@ pub fn search_history(
     enhanced_only: Option<bool>,
     limit: Option<u32>,
     offset: Option<u32>,
-) -> Result<SearchResult, String> {
+) -> Result<SearchResult, Error> {
     let params = SearchParams {
         query,
         from_date,
@@ -399,7 +400,7 @@ pub fn search_history(
     };
 
     tracing::debug!("Searching history with params: {:?}", params);
-    search_transcriptions_db(&params)
+    search_transcriptions_db(&params).map_err(Into::into)
 }
 
 /// Generic export function that handles record fetching and calls the format-specific exporter.
@@ -437,8 +438,8 @@ pub fn export_to_json(
     ids: Vec<String>,
     path: String,
     search_params: Option<SearchParams>,
-) -> Result<u32, String> {
-    export_records(&ids, Path::new(&path), search_params, export_json)
+) -> Result<u32, Error> {
+    export_records(&ids, Path::new(&path), search_params, export_json).map_err(Into::into)
 }
 
 /// Exports transcription records to a CSV file.
@@ -447,8 +448,8 @@ pub fn export_to_csv(
     ids: Vec<String>,
     path: String,
     search_params: Option<SearchParams>,
-) -> Result<u32, String> {
-    export_records(&ids, Path::new(&path), search_params, export_csv)
+) -> Result<u32, Error> {
+    export_records(&ids, Path::new(&path), search_params, export_csv).map_err(Into::into)
 }
 
 /// Exports transcription records to a plain text file.
@@ -457,8 +458,8 @@ pub fn export_to_txt(
     ids: Vec<String>,
     path: String,
     search_params: Option<SearchParams>,
-) -> Result<u32, String> {
-    export_records(&ids, Path::new(&path), search_params, export_txt)
+) -> Result<u32, Error> {
+    export_records(&ids, Path::new(&path), search_params, export_txt).map_err(Into::into)
 }
 
 /// Gets transcriptions by their IDs.
@@ -466,8 +467,8 @@ pub fn export_to_txt(
 /// # Arguments
 /// * `ids` - List of transcription IDs to retrieve
 #[tauri::command]
-pub fn get_transcriptions(ids: Vec<String>) -> Result<Vec<TranscriptionRecord>, String> {
-    get_transcriptions_by_ids(&ids)
+pub fn get_transcriptions(ids: Vec<String>) -> Result<Vec<TranscriptionRecord>, Error> {
+    get_transcriptions_by_ids(&ids).map_err(Into::into)
 }
 
 #[cfg(test)]
