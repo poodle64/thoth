@@ -100,31 +100,62 @@ const MOCK_MODELS = [
 const MOCK_TRANSCRIPTIONS = [
   {
     id: '1',
-    text: 'Hello world, this is a mock transcription.',
-    createdAt: new Date(Date.now() - 3600 * 1000).toISOString(),
-    durationSeconds: 2.4,
+    text: "Can you push the latest changes to the staging branch before standup? I'll review the pull request straight after.",
+    createdAt: new Date(Date.now() - 1800 * 1000).toISOString(),
+    durationSeconds: 6.2,
     audioPath: null,
     isEnhanced: false,
-    rawText: 'Hello world, this is a mock transcription.',
+    rawText:
+      "Can you push the latest changes to the staging branch before standup? I'll review the pull request straight after.",
     enhancementPrompt: null,
-    transcriptionModelName: 'Whisper Base',
-    transcriptionDurationSeconds: 0.8,
+    transcriptionModelName: 'Parakeet TDT v3',
+    transcriptionDurationSeconds: 0.4,
     enhancementModelName: null,
     enhancementDurationSeconds: null,
   },
   {
     id: '2',
-    text: 'Another example transcription entry in the history pane.',
-    createdAt: new Date(Date.now() - 7200 * 1000).toISOString(),
-    durationSeconds: 3.1,
+    text: "Let's grab coffee at 3 and go over the Q3 numbers.",
+    createdAt: new Date(Date.now() - 3600 * 1000).toISOString(),
+    durationSeconds: 3.4,
     audioPath: null,
     isEnhanced: true,
-    rawText: 'another example transcription entry in the history pane',
+    rawText: 'lets grab coffee at 3 and go over the q3 numbers',
     enhancementPrompt: 'Fix grammar and punctuation.',
-    transcriptionModelName: 'Whisper Base',
-    transcriptionDurationSeconds: 1.1,
+    transcriptionModelName: 'Parakeet TDT v3',
+    transcriptionDurationSeconds: 0.3,
     enhancementModelName: 'llama3.2',
-    enhancementDurationSeconds: 0.9,
+    enhancementDurationSeconds: 0.7,
+  },
+  {
+    id: '3',
+    text: 'Thanks for the quick turnaround on the design mockups. Let us lock in the colour palette on Thursday and ship the landing page by Friday.',
+    createdAt: new Date(Date.now() - 7200 * 1000).toISOString(),
+    durationSeconds: 7.8,
+    audioPath: null,
+    isEnhanced: false,
+    rawText:
+      'Thanks for the quick turnaround on the design mockups. Let us lock in the colour palette on Thursday and ship the landing page by Friday.',
+    enhancementPrompt: null,
+    transcriptionModelName: 'Parakeet TDT v3',
+    transcriptionDurationSeconds: 0.5,
+    enhancementModelName: null,
+    enhancementDurationSeconds: null,
+  },
+  {
+    id: '4',
+    text: 'Note to self: cache the model manifest so the settings window opens instantly next time.',
+    createdAt: new Date(Date.now() - 10800 * 1000).toISOString(),
+    durationSeconds: 4.6,
+    audioPath: null,
+    isEnhanced: false,
+    rawText:
+      'Note to self: cache the model manifest so the settings window opens instantly next time.',
+    enhancementPrompt: null,
+    transcriptionModelName: 'Parakeet TDT v3',
+    transcriptionDurationSeconds: 0.3,
+    enhancementModelName: null,
+    enhancementDurationSeconds: null,
   },
 ];
 
@@ -133,7 +164,12 @@ const MOCK_AUDIO_DEVICES = [
   { id: 'usb-1', name: 'DJI MIC MINI', is_default: false },
 ];
 
-const MOCK_DICTIONARY_ENTRIES = [{ from: 'im', to: "I'm", caseSensitive: false }];
+const MOCK_DICTIONARY_ENTRIES = [
+  { from: 'github', to: 'GitHub', caseSensitive: false },
+  { from: 'postgres', to: 'PostgreSQL', caseSensitive: false },
+  { from: 'kubernetes', to: 'Kubernetes', caseSensitive: false },
+  { from: 'im', to: "I'm", caseSensitive: false },
+];
 
 const MOCK_SHORTCUTS = [
   { id: 'toggle_recording', accelerator: 'F13', description: 'Toggle recording', is_enabled: true },
@@ -181,11 +217,11 @@ const MOCK_STORAGE_USAGE = {
 };
 
 const MOCK_TRANSCRIPTION_STATS = {
-  totalCount: 2,
-  analysableCount: 2,
+  totalCount: 4,
+  analysableCount: 4,
   enhancedCount: 1,
-  totalAudioDuration: 5.5,
-  transcriptionModels: [{ name: 'Whisper Base', count: 2 }],
+  totalAudioDuration: 22.0,
+  transcriptionModels: [{ name: 'Parakeet TDT v3', count: 4 }],
   enhancementModels: [{ name: 'llama3.2', count: 1 }],
 };
 
