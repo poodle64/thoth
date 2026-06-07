@@ -24,8 +24,10 @@ jobs:
             args: '--target aarch64-apple-darwin'
             rustflags: ''
           # Linux x86_64 (Whisper with Vulkan GPU acceleration; Parakeet excluded —
-          # upstream sherpa-onnx Linux static archive lacks .a libs; FluidAudio is
-          # macOS-only). Vulkan is vendor-neutral (NVIDIA/AMD/Intel via the GPU's
+          # it now links statically (the old sherpa-rs no-static-archive blocker is
+          # gone) but a Parakeet transcription is not yet runtime-verified on a glibc
+          # desktop and crashes at model init under the Nix toolchain (#53); FluidAudio
+          # is macOS-only). Vulkan is vendor-neutral (NVIDIA/AMD/Intel via the GPU's
           # Vulkan ICD), so one build serves every GPU; whisper.cpp falls back to
           # CPU at runtime when no Vulkan device is present.
           - platform: ubuntu-22.04

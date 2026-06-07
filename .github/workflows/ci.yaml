@@ -38,7 +38,10 @@ jobs:
           # Vulkan on. This compiles the Linux-only code (Wayland portal via
           # ashpd, x11rb mouse tracking, the Vulkan whisper backend) that never
           # builds on a macOS dev machine. Parakeet/FluidAudio are excluded as
-          # in the release build (sherpa-rs has no Linux static archive; #53).
+          # in the release build: Parakeet now links statically on Linux (the old
+          # sherpa-rs blocker is gone) but a Parakeet transcription is not yet
+          # runtime-verified on a glibc desktop and crashes at model init under
+          # the Nix toolchain — opt in with `--features parakeet` to test (#53).
           - platform: ubuntu-22.04
             args: '--no-default-features --features vulkan'
 
