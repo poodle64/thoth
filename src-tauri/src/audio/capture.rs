@@ -20,12 +20,12 @@
 
 use super::format::AudioConverter;
 use super::ring_buffer::AudioRingBuffer;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{Receiver, Sender};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Target sample rate for transcription (whisper.cpp / Parakeet expect 16kHz mono).
 const TARGET_SAMPLE_RATE: u32 = 16000;
