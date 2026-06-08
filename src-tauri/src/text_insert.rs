@@ -119,7 +119,37 @@ impl TextInsertService {
     fn insert_by_paste(&self, text: &str) -> Result<(), String> {
         debug!("Inserting {} characters by paste", text.len());
 
-        // Set clipboard to new text
+        #[cfg(target_os = "linux")]
+        {
+            use crate::platform::linux::{display_session, WaylandCompositor};
+
+            let session = display_session();
+            if session.is_wayland() {
+                // On Wayland, use wl-copy for clipboard (arboard doesn't reliably
+                // serve content to other clients due to ownership semantics)
+                if !Self::wl_copy_set_clipboard(text) {
+                    return Err("Failed to set clipboard via wl-copy".to_string());
+                }
+
+                let pasted = match session.compositor() {
+                    WaylandCompositor::Hyprland => Self::paste_with_hyprctl(),
+                    WaylandCompositor::Sway => Self::paste_with_wtype_ctrl_v(),
+                    _ => Self::paste_with_wtype_ctrl_v() || Self::paste_with_enigo().is_ok(),
+                };
+
+                if pasted {
+                    info!(
+                        "Inserted {} characters via wl-copy + {:?} paste",
+                        text.len(),
+                        session.compositor()
+                    );
+                    return Ok(());
+                }
+                return Err("Failed to paste on Wayland".to_string());
+            }
+        }
+
+        // macOS or Linux X11: use arboard for clipboard
         let mut clipboard =
             arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
 
@@ -127,10 +157,8 @@ impl TextInsertService {
             .set_text(text.to_string())
             .map_err(|e| format!("Failed to set clipboard: {}", e))?;
 
-        // Small delay to ensure clipboard is ready
         thread::sleep(Duration::from_millis(10));
 
-        // Perform paste
         #[cfg(target_os = "macos")]
         {
             self.paste_macos()?;
@@ -138,11 +166,8 @@ impl TextInsertService {
 
         #[cfg(target_os = "linux")]
         {
-            self.paste_linux()?;
+            Self::paste_with_enigo()?;
         }
-
-        // Note: Clipboard restoration is handled by the clipboard module
-        // via paste_transcription -> restore_clipboard flow with configurable delay
 
         Ok(())
     }
@@ -321,40 +346,121 @@ impl TextInsertService {
     }
 
     #[cfg(target_os = "linux")]
-    fn paste_linux(&self) -> Result<(), String> {
-        // Try wtype first (native Wayland support, no modifier key issues)
-        if Self::try_paste_with_wtype() {
-            debug!("Pasted via wtype (native Wayland)");
-            return Ok(());
-        }
+    /// Set clipboard via wl-copy (Wayland-native, works across all clients).
+    #[cfg(target_os = "linux")]
+    fn wl_copy_set_clipboard(text: &str) -> bool {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
 
-        // Fall back to enigo (X11/XWayland). See insert_by_typing_linux for why
-        // this is the Wayland pain point; warn so the cause is visible.
-        warn!("wtype unavailable or failed; falling back to enigo for paste (Wayland users: install wtype or grant Remote Interaction)");
-        Self::paste_with_enigo()
+        let mut child = match Command::new("wl-copy")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("Failed to spawn wl-copy: {}", e);
+                return false;
+            }
+        };
+
+        if let Some(ref mut stdin) = child.stdin {
+            if stdin.write_all(text.as_bytes()).is_err() {
+                return false;
+            }
+        }
+        drop(child.stdin.take());
+
+        let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+        if ok {
+            thread::sleep(Duration::from_millis(20));
+        }
+        ok
     }
 
+    /// Paste via the best method for Hyprland.
+    /// Terminals: wtype Ctrl+Shift+V (virtual keyboard events).
+    /// GUI apps: hyprctl sendshortcut Ctrl+V (avoids layout-change notification).
     #[cfg(target_os = "linux")]
-    fn try_paste_with_wtype() -> bool {
+    fn paste_with_hyprctl() -> bool {
+        use std::process::{Command, Stdio};
+
+        if Self::active_window_is_terminal() {
+            Command::new("wtype")
+                .args([
+                    "-M", "ctrl", "-M", "shift", "v", "-m", "shift", "-m", "ctrl",
+                ])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        } else {
+            Command::new("hyprctl")
+                .args(["dispatch", "sendshortcut", "CTRL,v,activewindow"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        }
+    }
+
+    /// Check if the active Hyprland window is a terminal emulator.
+    #[cfg(target_os = "linux")]
+    fn active_window_is_terminal() -> bool {
         use std::process::Command;
 
-        // wtype is a native Wayland tool that avoids modifier key sync issues
-        // Note: Only works on compositors supporting the virtual-keyboard protocol (Sway, Hyprland, etc.)
-        // Falls back to enigo on GNOME which triggers the "Allow Remote Interaction" dialog.
-        //
-        // Use Ctrl+Shift+V, not Ctrl+V: terminal emulators (GNOME Terminal, Konsole,
-        // Alacritty, kitty, foot, xterm) reserve Ctrl+V for other functions and only
-        // accept Ctrl+Shift+V as paste, so a plain Ctrl+V pasted nothing in a
-        // terminal. Ctrl+Shift+V also pastes correctly in mainstream GUI apps
-        // (browsers, editors, GTK/Qt text fields), so it is the single safe binding.
-        match Command::new("wtype")
-            .args([
-                "-M", "ctrl", "-M", "shift", "v", "-m", "shift", "-m", "ctrl",
-            ])
-            .status()
+        let output = match Command::new("hyprctl")
+            .args(["activewindow", "-j"])
+            .output()
         {
-            Ok(status) => status.success(),
-            Err(_) => false,
+            Ok(o) if o.status.success() => o.stdout,
+            _ => return false,
+        };
+
+        let json: serde_json::Value = match serde_json::from_slice(&output) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+
+        let class = json
+            .get("class")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        // Common terminal emulator window classes
+        class.contains("kitty")
+            || class.contains("alacritty")
+            || class.contains("foot")
+            || class.contains("wezterm")
+            || class.contains("terminal")
+            || class.contains("konsole")
+            || class.contains("xterm")
+            || class.contains("terminator")
+            || class.contains("tilix")
+            || class.contains("ghostty")
+    }
+
+    /// Paste via wtype (Ctrl+V or Ctrl+Shift+V depending on active window).
+    #[cfg(target_os = "linux")]
+    fn paste_with_wtype_ctrl_v() -> bool {
+        use std::process::Command;
+
+        if Self::active_window_is_terminal() {
+            Command::new("wtype")
+                .args([
+                    "-M", "ctrl", "-M", "shift", "v", "-m", "shift", "-m", "ctrl",
+                ])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        } else {
+            Command::new("wtype")
+                .args(["-M", "ctrl", "v", "-m", "ctrl"])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
         }
     }
 
@@ -365,33 +471,20 @@ impl TextInsertService {
         let mut enigo = Enigo::new(&Settings::default())
             .map_err(|e| format!("Failed to initialise enigo: {}", e))?;
 
-        // Synthesise Ctrl+Shift+V (not Ctrl+V): terminal emulators only accept the
-        // shifted form as paste, and it also works in mainstream GUI apps. Hold
-        // both modifiers around the V click, then release in reverse press order
-        // (Shift, then Control), and always release both even if the click errors
-        // so we never leave a modifier stuck down.
         enigo
             .key(Key::Control, Direction::Press)
             .map_err(|e| format!("Failed to press Control: {}", e))?;
-        if let Err(e) = enigo.key(Key::Shift, Direction::Press) {
-            // Release Control before bailing so it isn't left held.
-            let _ = enigo.key(Key::Control, Direction::Release);
-            return Err(format!("Failed to press Shift: {}", e));
-        }
 
         let click_result = enigo
             .key(Key::Unicode('v'), Direction::Click)
             .map_err(|e| format!("Failed to press V: {}", e));
 
-        if let Err(e) = enigo.key(Key::Shift, Direction::Release) {
-            tracing::error!("Failed to release Shift key: {}", e);
-        }
         if let Err(e) = enigo.key(Key::Control, Direction::Release) {
             tracing::error!("Failed to release Control key: {}", e);
         }
 
         click_result?;
-        debug!("Pasted via enigo (Ctrl+Shift+V)");
+        debug!("Pasted via enigo (Ctrl+V)");
         Ok(())
     }
 }

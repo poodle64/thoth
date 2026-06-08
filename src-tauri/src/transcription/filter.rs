@@ -105,6 +105,15 @@ impl OutputFilter {
     pub fn filter(&self, text: &str) -> String {
         let mut result = text.to_string();
 
+        // Collapse decoder-loop repetition before anything else, so the dedup
+        // sees the raw transducer output (including duplicated words at chunk
+        // overlaps). Linux/Parakeet only — the macOS path never loops this way,
+        // and we don't want to risk collapsing legitimate repetition there.
+        #[cfg(target_os = "linux")]
+        {
+            result = remove_repeated_phrases(&result);
+        }
+
         // Apply dictionary replacements first (before other processing)
         if self.options.apply_dictionary {
             result = dictionary::apply_dictionary(&result);
@@ -137,6 +146,135 @@ impl OutputFilter {
         }
 
         result
+    }
+}
+
+/// Remove repeated phrases caused by transducer decoder loops.
+///
+/// Sherpa-ONNX's NeMo transducer (Parakeet) — like Whisper's autoregressive
+/// decoder — can get stuck repeating the last few sentences on longer audio,
+/// and the chunked Linux transcription path can duplicate a word or two where
+/// adjacent chunks overlap. This collapses both:
+///
+/// 1. runs of consecutive identical sentences, and
+/// 2. sub-sentence n-gram repetition (e.g. "to matter to matter to matter").
+///
+/// Linux/Parakeet only — see the call site in [`OutputFilter::filter`].
+#[cfg(target_os = "linux")]
+pub fn remove_repeated_phrases(text: &str) -> String {
+    if text.len() < 20 {
+        return text.to_string();
+    }
+
+    // Phase 1: sentence-level dedup — split on sentence boundaries and
+    // collapse consecutive identical sentences.
+    let sentence_result = dedup_consecutive_sentences(text);
+
+    // Phase 2: sub-sentence n-gram dedup — catches "to matter to matter to matter"
+    // style repetition that doesn't align on sentence boundaries.
+    dedup_inline_ngrams(&sentence_result)
+}
+
+/// Split text into sentences, collapse consecutive duplicates.
+#[cfg(target_os = "linux")]
+fn dedup_consecutive_sentences(text: &str) -> String {
+    static SENTENCE_BOUNDARY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"([.!?])\s+").unwrap());
+
+    // Split while preserving the terminal punctuation on each sentence.
+    let mut sentences: Vec<String> = Vec::new();
+    let mut last_end = 0;
+    for m in SENTENCE_BOUNDARY.find_iter(text) {
+        let punct_end = m.start() + 1; // include the punctuation char
+        sentences.push(text[last_end..punct_end].to_string());
+        last_end = m.end();
+    }
+    if last_end < text.len() {
+        sentences.push(text[last_end..].to_string());
+    }
+
+    if sentences.len() < 2 {
+        return text.to_string();
+    }
+
+    let mut result = Vec::with_capacity(sentences.len());
+    let mut prev_normalised = String::new();
+
+    for sentence in &sentences {
+        let normalised = sentence.trim().to_lowercase();
+        if normalised == prev_normalised && !normalised.is_empty() {
+            continue;
+        }
+        prev_normalised = normalised;
+        result.push(sentence.as_str());
+    }
+
+    if result.len() < sentences.len() {
+        tracing::debug!(
+            "Repetition filter: collapsed {} repeated sentences",
+            sentences.len() - result.len()
+        );
+    }
+
+    result.join(" ")
+}
+
+/// Detect and remove inline n-gram repetition.
+///
+/// Finds a repeating word-sequence (2–12 words) that appears 3+ times
+/// consecutively and collapses it to a single occurrence.
+#[cfg(target_os = "linux")]
+fn dedup_inline_ngrams(text: &str) -> String {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.len() < 9 {
+        return text.to_string();
+    }
+
+    let mut result_words = words.clone();
+    let mut changed = false;
+
+    for n in 2..=12 {
+        if result_words.len() < n * 3 {
+            break;
+        }
+        let mut i = 0;
+        let mut new_words: Vec<&str> = Vec::with_capacity(result_words.len());
+        while i < result_words.len() {
+            if i + n * 3 <= result_words.len() {
+                let chunk: Vec<String> = result_words[i..i + n]
+                    .iter()
+                    .map(|w| w.to_lowercase())
+                    .collect();
+                let mut reps = 1usize;
+                while i + n * (reps + 1) <= result_words.len() {
+                    let next: Vec<String> = result_words[i + n * reps..i + n * (reps + 1)]
+                        .iter()
+                        .map(|w| w.to_lowercase())
+                        .collect();
+                    if next == chunk {
+                        reps += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if reps >= 3 {
+                    new_words.extend_from_slice(&result_words[i..i + n]);
+                    i += n * reps;
+                    changed = true;
+                    continue;
+                }
+            }
+            new_words.push(result_words[i]);
+            i += 1;
+        }
+        result_words = new_words;
+    }
+
+    if changed {
+        tracing::debug!("Repetition filter: removed inline n-gram repetitions");
+        result_words.join(" ")
+    } else {
+        text.to_string()
     }
 }
 
@@ -1513,5 +1651,41 @@ mod tests {
         let options = FilterOptions::default();
         assert!(!options.australian_spelling);
         assert!(!options.spoken_numbers_to_digits);
+    }
+
+    // Repetition filter (Linux/Parakeet only) ---------------------------------
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_dedup_consecutive_sentences() {
+        let input = "The meeting is at noon. The meeting is at noon. See you there.";
+        assert_eq!(
+            remove_repeated_phrases(input),
+            "The meeting is at noon. See you there."
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_dedup_inline_ngram_repetition() {
+        let input = "it seems to matter to matter to matter to matter in the end";
+        assert_eq!(
+            remove_repeated_phrases(input),
+            "it seems to matter in the end"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_repetition_filter_leaves_clean_text_untouched() {
+        let input = "This is a perfectly normal sentence with no repetition at all.";
+        assert_eq!(remove_repeated_phrases(input), input);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_repetition_filter_keeps_short_text() {
+        // Below the 20-char floor — returned unchanged.
+        assert_eq!(remove_repeated_phrases("hi hi hi"), "hi hi hi");
     }
 }

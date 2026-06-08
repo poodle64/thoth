@@ -239,10 +239,10 @@ impl ThothMcp {
                 }
             }
             "list" => {
-                // Recent records: reuse the stats-backed history listing if available;
-                // fall back to an empty-ids fetch which the export module supports.
-                let records = crate::export::get_transcriptions(Vec::new()).map_err(core_err)?;
-                json_result(&records)
+                let result =
+                    crate::export::search_history(None, None, None, None, Some(100), Some(0))
+                        .map_err(core_err)?;
+                json_result(&result)
             }
             other => Err(core_err(format!("unknown action: {}", other))),
         }

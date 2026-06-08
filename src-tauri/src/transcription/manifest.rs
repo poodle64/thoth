@@ -357,6 +357,22 @@ fn read_installed_version(model_dir: &std::path::Path) -> Option<String> {
         .map(|s| s.trim().to_string())
 }
 
+/// Platform-aware model recommendation.
+///
+/// On macOS the manifest's own `recommended` flag is used (FluidAudio CoreML).
+/// On Linux the Parakeet TDT v2 (Sherpa-ONNX) model is recommended instead,
+/// since FluidAudio/CoreML is unavailable.
+fn platform_recommended(remote: &RemoteModelInfo) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        return remote.id == "parakeet-tdt-0.6b-v2-int8";
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        remote.recommended
+    }
+}
+
 /// Whether an update is available for a model.
 ///
 /// Returns `true` only when the model is downloaded and its persisted version
@@ -399,6 +415,10 @@ pub fn to_model_info(remote: &RemoteModelInfo, selected_id: Option<&str>) -> Mod
             .to_string()
     };
 
+    // Platform-aware recommendation: FluidAudio CoreML is macOS-only,
+    // Parakeet TDT v2 (Sherpa-ONNX) is recommended on Linux.
+    let recommended = platform_recommended(remote);
+
     ModelInfo {
         id: remote.id.clone(),
         name: remote.name.clone(),
@@ -408,7 +428,7 @@ pub fn to_model_info(remote: &RemoteModelInfo, selected_id: Option<&str>) -> Mod
         downloaded,
         path,
         disk_size,
-        recommended: remote.recommended,
+        recommended,
         languages: remote.languages.clone(),
         update_available: is_update_available(
             downloaded,

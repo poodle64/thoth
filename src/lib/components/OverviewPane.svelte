@@ -20,7 +20,10 @@
   import * as Card from '$components/ui/card';
   import * as AlertDialog from '$components/ui/alert-dialog';
   import * as Alert from '$components/ui/alert';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import LoadingState from '$components/common/LoadingState.svelte';
+
+  const isLinux = /Linux/.test(navigator.userAgent);
 
   interface ModelStats {
     name: string;
@@ -97,6 +100,9 @@
   let showInDock = $state(false);
   let dockLoading = $state(false);
 
+  /** Window decorations (Linux) */
+  let windowDecorations = $state(configStore.general.windowDecorations ?? true);
+
   /** Permission states */
   let microphonePermission = $state<'unknown' | 'granted' | 'denied' | 'not_determined'>('unknown');
   let accessibilityPermission = $state<'unknown' | 'granted' | 'denied' | 'stale'>('unknown');
@@ -167,6 +173,18 @@
       console.error('Failed to toggle dock visibility:', error);
     } finally {
       dockLoading = false;
+    }
+  }
+
+  async function handleDecorationToggle(checked: boolean) {
+    windowDecorations = checked;
+    try {
+      await getCurrentWindow().setDecorations(checked);
+      configStore.general.windowDecorations = checked;
+      await configStore.save();
+    } catch (error) {
+      console.error('Failed to toggle decorations:', error);
+      windowDecorations = !checked;
     }
   }
 
@@ -444,6 +462,25 @@
 
     setupState = transcriptionReady ? 'ready' : 'needed';
     isLoading = false;
+
+    // Poll for transcription readiness if the model is downloaded but not
+    // yet loaded (the backend warmup thread may still be initialising).
+    if (modelDownloaded && !transcriptionReady) {
+      const pollInterval = setInterval(async () => {
+        try {
+          const ready = await invoke<boolean>('is_transcription_ready');
+          if (ready) {
+            transcriptionReady = true;
+            setupState = 'ready';
+            clearInterval(pollInterval);
+          }
+        } catch {
+          clearInterval(pollInterval);
+        }
+      }, 1000);
+      // Stop polling after 30 seconds regardless
+      setTimeout(() => clearInterval(pollInterval), 30000);
+    }
 
     // Ollama check runs separately to avoid blocking (30s timeout)
     if (!configStore.enhancement.enabled) {
@@ -758,6 +795,12 @@
         <span class="text-sm text-muted-foreground">Show in Dock</span>
         <Switch checked={showInDock} disabled={dockLoading} onCheckedChange={handleDockToggle} />
       </div>
+      {#if isLinux}
+        <div class="flex items-center justify-between py-1.5">
+          <span class="text-sm text-muted-foreground">Window Decorations</span>
+          <Switch checked={windowDecorations} onCheckedChange={handleDecorationToggle} />
+        </div>
+      {/if}
     </div>
   </details>
 {:else if stats}
@@ -1024,6 +1067,12 @@
           <span class="status-label">Show in Dock</span>
           <Switch checked={showInDock} disabled={dockLoading} onCheckedChange={handleDockToggle} />
         </div>
+        {#if isLinux}
+          <div class="autostart-row">
+            <span class="status-label">Window Decorations</span>
+            <Switch checked={windowDecorations} onCheckedChange={handleDecorationToggle} />
+          </div>
+        {/if}
       </div>
     </div>
   </section>

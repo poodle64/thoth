@@ -544,6 +544,96 @@ pub fn open_input_monitoring_settings() {
     tracing::debug!("No input monitoring settings on Linux");
 }
 
+// =============================================================================
+// Wayland compositor detection
+// =============================================================================
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaylandCompositor {
+    Hyprland,
+    Sway,
+    Gnome,
+    Kde,
+    Cosmic,
+    Other,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplaySession {
+    Wayland(WaylandCompositor),
+    X11,
+    Unknown,
+}
+
+impl DisplaySession {
+    pub fn is_wayland(&self) -> bool {
+        matches!(self, DisplaySession::Wayland(_))
+    }
+
+    pub fn compositor(&self) -> WaylandCompositor {
+        match self {
+            DisplaySession::Wayland(c) => *c,
+            _ => WaylandCompositor::None,
+        }
+    }
+}
+
+pub fn display_session() -> &'static DisplaySession {
+    use std::sync::OnceLock;
+    static SESSION: OnceLock<DisplaySession> = OnceLock::new();
+    SESSION.get_or_init(detect_display_session)
+}
+
+fn detect_display_session() -> DisplaySession {
+    let session_type = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
+
+    if session_type == "x11" {
+        tracing::info!("Display session: X11");
+        return DisplaySession::X11;
+    }
+
+    let is_wayland = session_type == "wayland" || std::env::var("WAYLAND_DISPLAY").is_ok();
+
+    if !is_wayland {
+        tracing::info!(
+            "Display session: Unknown (XDG_SESSION_TYPE={:?})",
+            session_type
+        );
+        return DisplaySession::Unknown;
+    }
+
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .to_lowercase();
+
+    let compositor = if desktop.contains("hyprland") || is_process_running("Hyprland") {
+        WaylandCompositor::Hyprland
+    } else if desktop.contains("sway") || is_process_running("sway") {
+        WaylandCompositor::Sway
+    } else if desktop.contains("gnome") || is_process_running("gnome-shell") {
+        WaylandCompositor::Gnome
+    } else if desktop.contains("kde") || desktop.contains("plasma") || is_process_running("kwin") {
+        WaylandCompositor::Kde
+    } else if desktop.contains("cosmic") || is_process_running("cosmic-comp") {
+        WaylandCompositor::Cosmic
+    } else {
+        WaylandCompositor::Other
+    };
+
+    tracing::info!("Display session: Wayland ({:?})", compositor);
+    DisplaySession::Wayland(compositor)
+}
+
+fn is_process_running(name: &str) -> bool {
+    Command::new("pgrep")
+        .arg("-x")
+        .arg(name)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

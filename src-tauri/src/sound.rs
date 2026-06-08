@@ -72,13 +72,19 @@ pub fn play_sound(event: SoundEvent) {
         play_macos_sound(path);
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = path;
+        play_linux_sound(event);
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         tracing::debug!(
             "System sounds not implemented for this platform, skipping {:?}",
             event
         );
-        let _ = path; // Suppress unused warning
+        let _ = path;
     }
 }
 
@@ -123,6 +129,52 @@ fn play_macos_sound(path: &'static str) {
     // reclaimed by the OS when the ~0.5s cue ends), matching the prior cue model.
     std::mem::forget(player);
     tracing::debug!("Playing sound via AVAudioPlayer: {}", path);
+}
+
+/// Play a sound on Linux via canberra-gtk-play (XDG sound theme) or pw-play.
+#[cfg(target_os = "linux")]
+fn play_linux_sound(event: SoundEvent) {
+    use std::process::Command;
+
+    // Only play sound for recording start — user preference
+    let event_id = match event {
+        SoundEvent::RecordingStart => "dialog-information",
+        SoundEvent::RecordingStop | SoundEvent::TranscriptionComplete => return,
+        SoundEvent::Error => "dialog-error",
+    };
+
+    std::thread::spawn(move || {
+        let result = Command::new("canberra-gtk-play")
+            .args(["-i", event_id])
+            .output();
+
+        match result {
+            Ok(out) if out.status.success() => {
+                tracing::debug!("Played Linux sound event: {}", event_id);
+            }
+            Ok(out) => {
+                tracing::debug!(
+                    "canberra-gtk-play failed (exit {}), trying pw-play fallback",
+                    out.status
+                );
+                let _ = Command::new("pw-play")
+                    .arg(format!(
+                        "/usr/share/sounds/freedesktop/stereo/{}.oga",
+                        event_id
+                    ))
+                    .output();
+            }
+            Err(_) => {
+                tracing::debug!("canberra-gtk-play not found, trying pw-play fallback");
+                let _ = Command::new("pw-play")
+                    .arg(format!(
+                        "/usr/share/sounds/freedesktop/stereo/{}.oga",
+                        event_id
+                    ))
+                    .output();
+            }
+        }
+    });
 }
 
 /// Play a sound for recording start

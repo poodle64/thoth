@@ -6,10 +6,7 @@
 //! Platform support:
 //! - macOS: Tauri's GlobalShortcut plugin
 //! - Linux X11: Tauri's GlobalShortcut plugin
-//! - Linux Wayland: the XDG Desktop Portal `GlobalShortcuts` interface, where
-//!   the compositor implements it (KDE, wlroots-based compositors, GNOME 48+).
-//!   On compositors without it the user is told that global shortcuts are
-//!   unavailable so they can use a function-key shortcut instead.
+//! - Linux Wayland: Tauri's GlobalShortcut plugin via XWayland
 
 pub mod conflict;
 pub mod manager;
@@ -17,7 +14,7 @@ pub mod manager;
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "linux")]
-pub mod wayland_portal;
+pub mod portal;
 #[cfg(target_os = "linux")]
 pub use linux::{get_display_server, DisplayServer};
 

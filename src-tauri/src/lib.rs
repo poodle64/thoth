@@ -88,12 +88,6 @@ fn reregister_shortcuts(app: tauri::AppHandle) -> Result<(), String> {
 fn register_shortcuts_from_config(app: &tauri::AppHandle, cfg: &config::Config) {
     use shortcuts::manager::shortcut_ids;
 
-    // On Wayland, the actual global-shortcut binding is owned by the XDG portal,
-    // set up once here. On X11 this is a no-op and the per-shortcut registration
-    // below binds via the Tauri plugin as on macOS.
-    #[cfg(target_os = "linux")]
-    shortcuts::linux::init_global_shortcuts(app);
-
     // Collect (id, accelerator, description) tuples for all configured shortcuts
     let shortcuts: Vec<(&str, &str, &str)> = [
         Some((
@@ -137,6 +131,24 @@ fn register_shortcuts_from_config(app: &tauri::AppHandle, cfg: &config::Config) 
 
     // Start the keyboard service if any modifier shortcuts were registered
     keyboard_service::start_monitoring(app.clone());
+
+    // On Wayland, initialize the portal session (Hyprland uses native binds via hyprctl)
+    #[cfg(target_os = "linux")]
+    {
+        if shortcuts::get_display_server() == shortcuts::DisplayServer::Wayland {
+            let app_clone = app.clone();
+            tauri::async_runtime::spawn(async move {
+                match shortcuts::portal::init(app_clone).await {
+                    Ok(()) => tracing::info!("XDG Portal GlobalShortcuts initialized"),
+                    Err(e) => tracing::warn!(
+                        "XDG Portal GlobalShortcuts not available: {}. \
+                         Global shortcuts may not work on this Wayland compositor.",
+                        e
+                    ),
+                }
+            });
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -374,6 +386,20 @@ pub fn run() {
                     tracing::warn!(
                         "Accessibility permission not granted - global shortcuts may not work"
                     );
+                }
+            }
+
+            // Linux: apply window decoration preference before window is shown
+            #[cfg(target_os = "linux")]
+            {
+                let decorations = config::get_config()
+                    .map(|c| c.general.window_decorations)
+                    .unwrap_or(true);
+                if !decorations {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.set_decorations(false);
+                        tracing::info!("Window decorations disabled per config");
+                    }
                 }
             }
 

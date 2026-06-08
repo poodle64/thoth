@@ -260,15 +260,18 @@
     });
   }
 
+  const isLinux = /Linux/.test(navigator.userAgent);
+  const isMac = /Mac/.test(navigator.userAgent);
+
   /** Friendly backend label for the detail row */
   function backendLabel(modelType: string): string {
     switch (modelType) {
       case 'fluidaudio_coreml':
         return 'Apple Neural Engine';
       case 'nemo_transducer':
-        return 'Sherpa-ONNX (CPU)';
+        return isLinux ? 'Sherpa-ONNX (GPU)' : 'Sherpa-ONNX';
       case 'whisper_ggml':
-        return 'whisper.cpp (Metal GPU)';
+        return isMac ? 'whisper.cpp (Metal GPU)' : isLinux ? 'whisper.cpp (Vulkan GPU)' : 'whisper.cpp';
       default:
         return modelType;
     }

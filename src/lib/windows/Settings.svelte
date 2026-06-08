@@ -33,6 +33,7 @@
   import OverviewPane from '../components/OverviewPane.svelte';
   import AboutDialog from '../components/AboutDialog.svelte';
   import ShortcutInput from '../components/ShortcutInput.svelte';
+  import WindowControls from '../components/WindowControls.svelte';
   import { configStore, type IndicatorStyle } from '../stores/config.svelte';
   import { pipelineStore } from '../stores/pipeline.svelte';
   import { shortcutsStore, type ShortcutInfo } from '../stores/shortcuts.svelte';
@@ -74,6 +75,10 @@
 
   /** About dialog visibility */
   let showAbout = $state(false);
+
+  /** Linux only — show custom controls when system decorations are disabled. */
+  const isLinux = /Linux/.test(navigator.userAgent);
+  const showWindowControls = $derived(isLinux && !configStore.general.windowDecorations);
 
   /** Map of shortcut IDs to their pending (unsaved) accelerators */
   const pendingChanges = $state<Map<string, string>>(new Map());
@@ -259,6 +264,11 @@
       </span>
     {:else if pipelineStore.isProcessing}
       <span class="processing-indicator">Processing...</span>
+    {/if}
+    {#if showWindowControls}
+      <div class="title-bar-controls">
+        <WindowControls />
+      </div>
     {/if}
   </header>
 
@@ -717,6 +727,16 @@
     font-weight: 500;
     color: var(--foreground);
     user-select: none;
+  }
+
+  /* Pinned to the right edge so the centred title stays centred. */
+  .title-bar-controls {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
   }
 
   .main-area {

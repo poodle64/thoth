@@ -333,6 +333,9 @@ pub struct GeneralConfig {
     /// `None` on a genuinely fresh install — no reset is triggered then.
     #[serde(default)]
     pub last_run_version: Option<String>,
+    /// Show system window decorations (title bar). Linux only.
+    #[serde(default = "default_true")]
+    pub window_decorations: bool,
 }
 
 impl Default for GeneralConfig {
@@ -345,6 +348,7 @@ impl Default for GeneralConfig {
             show_recording_indicator: true,
             indicator_style: IndicatorStyle::default(),
             last_run_version: None,
+            window_decorations: true,
         }
     }
 }
@@ -958,6 +962,7 @@ mod tests {
                 show_recording_indicator: true,
                 indicator_style: IndicatorStyle::CursorDot,
                 last_run_version: None,
+                window_decorations: true,
             },
             recorder: RecorderConfig {
                 position: RecorderPosition::Centre,
