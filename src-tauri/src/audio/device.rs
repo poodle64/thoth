@@ -176,34 +176,39 @@ pub fn get_recording_device(device_id: Option<&str>) -> Option<cpal::Device> {
     }
 
     // When falling back to the default, check whether it is a Bluetooth device.
-    // If so, prefer the built-in microphone to avoid forcing the Bluetooth
-    // headset from A2DP (high-quality stereo) into HFP "call" mode, which
-    // degrades the user's music until the app quits. This only triggers when
-    // no device_id is explicitly configured (or the configured one was not found).
+    // If so, prefer the first non-Bluetooth input to avoid forcing the headset
+    // from A2DP (high-quality stereo) into HFP "call" mode, which degrades the
+    // user's music for the duration of the recording. This covers built-in mics,
+    // USB mics, and any wired device — anything that won't trigger HFP.
     if crate::platform::default_input_transport_is_bluetooth() {
-        if let Some(builtin_name) = crate::platform::builtin_input_device_name() {
-            let host = cpal::default_host();
-            let builtin_device = host
-                .input_devices()
-                .ok()
-                .and_then(|mut iter| iter.find(|d| get_device_display_name(d) == builtin_name));
+        let non_bt = cpal::default_host()
+            .input_devices()
+            .ok()
+            .and_then(|mut iter| {
+                iter.find(|d| {
+                    let name = get_device_display_name(d);
+                    !crate::platform::device_name_is_bluetooth(&name)
+                })
+            });
 
-            if let Some(device) = builtin_device {
-                tracing::info!(
-                    "Default input is Bluetooth; using built-in mic '{}' to avoid degrading its audio",
-                    builtin_name
-                );
-                return Some(device);
-            } else {
-                tracing::warn!(
-                    "Default input is Bluetooth but built-in mic '{}' not found in cpal list; falling back to Bluetooth default",
-                    builtin_name
-                );
-            }
-        } else {
-            tracing::warn!(
-                "Default input is Bluetooth but no built-in mic found via CoreAudio; falling back to Bluetooth default"
+        if let Some(device) = non_bt {
+            let name = get_device_display_name(&device);
+            tracing::info!(
+                "Default input is Bluetooth; recording from non-Bluetooth input '{}' \
+                 to keep headphone audio in high-quality (A2DP) mode",
+                name
             );
+            return Some(device);
+        } else {
+            let msg = "Your Bluetooth headset mic will be used for recording, which reduces \
+                       headphone audio to call quality during the recording. Connect another \
+                       microphone if you want to avoid this.";
+            tracing::warn!(
+                "Default input is Bluetooth and no non-Bluetooth input is available; \
+                 recording from Bluetooth mic — headphone audio will drop to call quality \
+                 during recording"
+            );
+            crate::app_handle::emit("audio-device-fallback", msg);
         }
     }
 

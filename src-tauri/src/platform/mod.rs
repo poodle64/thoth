@@ -216,22 +216,6 @@ pub fn default_input_transport_is_bluetooth() -> bool {
     }
 }
 
-/// Return the display name of the first built-in audio input device on macOS,
-/// as reported by CoreAudio. This name matches what cpal returns for the device,
-/// allowing callers to look it up in cpal's device list by name.
-///
-/// Returns `None` on non-macOS or if no built-in input device is found.
-pub fn builtin_input_device_name() -> Option<String> {
-    #[cfg(target_os = "macos")]
-    {
-        macos::builtin_input_device_name()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        None
-    }
-}
-
 /// Return `true` if the audio input device named `name` has a Bluetooth
 /// transport type on macOS. Used to decide whether the device we actually
 /// recorded from must be released immediately (Bluetooth) rather than held warm.
