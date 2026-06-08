@@ -451,7 +451,16 @@ pub fn list_transcriptions(
     offset: Option<i64>,
 ) -> Result<Vec<Transcription>, DatabaseError> {
     let conn = open_connection()?;
+    list_transcriptions_with_conn(&conn, limit, offset)
+}
 
+/// Inner implementation that accepts an existing connection (enables testing
+/// against an in-memory DB without touching the global DATABASE_PATH).
+fn list_transcriptions_with_conn(
+    conn: &rusqlite::Connection,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<Transcription>, DatabaseError> {
     let limit = limit.unwrap_or(100);
     let offset = offset.unwrap_or(0);
 
@@ -492,7 +501,15 @@ pub fn search_transcriptions(
 /// Counts the total number of transcriptions, optionally filtered by a search query.
 pub fn count_transcriptions(query: Option<&str>) -> Result<usize, DatabaseError> {
     let conn = open_connection()?;
+    count_transcriptions_with_conn(&conn, query)
+}
 
+/// Inner implementation that accepts an existing connection (enables testing
+/// against an in-memory DB without touching the global DATABASE_PATH).
+fn count_transcriptions_with_conn(
+    conn: &rusqlite::Connection,
+    query: Option<&str>,
+) -> Result<usize, DatabaseError> {
     let count: i64 = match query {
         Some(q) if !q.is_empty() => {
             let search_pattern = format!("%{}%", q);
@@ -812,6 +829,15 @@ mod tests {
         .expect("insert row");
     }
 
+    /// Insert a transcription row with an explicit created_at, for order-sensitive tests.
+    fn insert_row_at(conn: &Connection, id: &str, created_at: &str) {
+        conn.execute(
+            "INSERT INTO transcriptions (id, text, created_at, audio_path, is_enhanced) VALUES (?1, ?2, ?3, ?4, 0)",
+            rusqlite::params![id, "test", created_at, None::<&str>],
+        )
+        .expect("insert row");
+    }
+
     // -------------------------------------------------------------------------
     // Struct construction (unchanged from before)
     // -------------------------------------------------------------------------
@@ -990,5 +1016,43 @@ mod tests {
             "file referenced via symlink path must not be removed"
         );
         assert!(real_file.exists(), "real file must survive");
+    }
+
+    // -------------------------------------------------------------------------
+    // list_transcriptions: regression tests for the MCP list action
+    // -------------------------------------------------------------------------
+
+    /// Seeding rows and calling list returns them (newest-first order).
+    #[test]
+    fn test_list_transcriptions_returns_seeded_records() {
+        let conn = make_test_db();
+        // Strictly increasing timestamps so newest-first order is well-defined.
+        insert_row_at(&conn, "id-oldest", "2024-01-01T00:00:00Z");
+        insert_row_at(&conn, "id-middle", "2024-06-01T00:00:00Z");
+        insert_row_at(&conn, "id-newest", "2025-01-01T00:00:00Z");
+
+        let results = list_transcriptions_with_conn(&conn, None, None).expect("list");
+        assert_eq!(results.len(), 3, "expected all 3 seeded rows");
+
+        // Must be newest-first (ORDER BY created_at DESC). This fails if the
+        // ordering is removed or reversed.
+        let ids: Vec<&str> = results.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["id-newest", "id-middle", "id-oldest"]);
+
+        // Fields are populated, not blank.
+        assert!(!results[0].text.is_empty(), "text should be populated");
+    }
+
+    /// list count and count_transcriptions must agree on the same in-memory DB.
+    #[test]
+    fn test_list_and_stats_counts_are_consistent() {
+        let conn = make_test_db();
+        insert_row(&conn, "cons-1", None);
+        insert_row(&conn, "cons-2", None);
+
+        let listed = list_transcriptions_with_conn(&conn, None, None).expect("list");
+        let counted = count_transcriptions_with_conn(&conn, None).expect("count");
+
+        assert_eq!(listed.len(), counted, "list length and count must agree");
     }
 }

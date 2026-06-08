@@ -322,7 +322,7 @@ impl ThothMcp {
     }
 
     #[tool(
-        description = "Read transcription history and quality. Action: list (recent records), get (one by id), stats (counts, average duration, per-model throughput). get requires id. Returns: records (list), a record (get), or summary statistics (stats)."
+        description = "Read transcription history and quality. Action: list (up to 100 most recent records, newest first), get (one by id), stats (counts, average duration, per-model throughput). get requires id. Returns: records (list), a record (get), or summary statistics (stats)."
     )]
     async fn transcription(
         &self,
@@ -345,9 +345,7 @@ impl ThothMcp {
                 }
             }
             "list" => {
-                // Recent records: reuse the stats-backed history listing if available;
-                // fall back to an empty-ids fetch which the export module supports.
-                let records = crate::export::get_transcriptions(Vec::new())
+                let records = crate::database::transcription::list_transcriptions(None, None)
                     .map_err(|e| core_err(e.to_string()))?;
                 json_result(&records)
             }
