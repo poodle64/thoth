@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.3] - 2026-06-08
+
+### Fixed
+
+- **Bluetooth headphone audio no longer drops to call quality when you start recording.** With no other microphone connected, macOS makes a Bluetooth headset the default input, and opening its mic forced the headset out of high-quality music mode (A2DP) into low-quality call mode (HFP) for the duration of the recording — your music would pause and come back distorted, then recover when recording stopped. The previous guard tried to record from the built-in mic instead but located it by an exact name match that failed on a headphones-only setup, so it fell back to the headset anyway. Thoth now records from the first non-Bluetooth input it finds (built-in or USB), leaving your headphones in A2DP so music keeps playing. If a Bluetooth headset is genuinely the only microphone available, it is used and you are told the audio will briefly drop to call quality.
+- **The `transcription` MCP tool's `list` action returns your history instead of an empty list.** It always returned `[]` even with thousands of records, because it called a fetch-by-IDs path with an empty ID list (which means "fetch none", not "fetch all"). It now reads the 100 most recent records, newest first, from the same database path the `get` and `stats` actions use.
+
 ## [2026.6.2] - 2026-06-07
 
 ### Added
