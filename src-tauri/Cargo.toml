@@ -34,11 +34,15 @@ webrtc-vad = "0.4"
 symphonia = { version = "0.5", features = ["mp3", "aac", "ogg", "vorbis", "flac", "wav", "pcm", "isomp4"] }
 
 # Transcription
-# sherpa-rs: Parakeet TDT models via Sherpa-ONNX (statically linked)
-# NOTE: static + download-binaries works on macOS (archive has .a files)
-# but NOT on Linux (archive only has binaries, no .a files). Linux CI
-# builds without parakeet feature until upstream fixes the archive.
-sherpa-rs = { version = "0.6", features = ["static", "download-binaries"], optional = true }
+# Parakeet TDT via Sherpa-ONNX. No library-acquisition method is baked in here:
+# the `parakeet-bundled` feature adds `download-binaries` (fetches prebuilt libs
+# over the network — used by `pnpm tauri dev` and CI), while a sealed build (Nix)
+# enables just `parakeet` and points SHERPA_LIB_PATH at a prebuilt sherpa-onnx.
+# macOS additionally links statically (see the macOS target table below) so the
+# release bundle stays self-contained.
+# default-features = false drops sherpa-rs's own default `download-binaries`, so
+# `--features parakeet` alone does NOT hit the network; `parakeet-bundled` adds it.
+sherpa-rs = { version = "0.6", default-features = false, optional = true }
 # fluidaudio-rs: Apple Neural Engine backend via CoreML (macOS-only, Apple Silicon)
 # Forked with platform guards: compiles as no-op on Linux/Windows
 fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", rev = "97aaf88", optional = true }
@@ -95,6 +99,10 @@ tauri-plugin-updater = "2.10"
 [target.'cfg(target_os = "macos")'.dependencies]
 # whisper-rs with Metal GPU acceleration on macOS
 whisper-rs = { version = "0.15", features = ["metal"] }
+# Statically link Sherpa-ONNX on macOS so the release bundle is self-contained
+# (the macOS archive ships the .a files; Linux's does not). Unioned with the
+# base sherpa-rs dependency above.
+sherpa-rs = { version = "0.6", default-features = false, features = ["static"], optional = true }
 cocoa = "0.26"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSNotification", "NSOperation", "NSString", "NSObject", "NSURL"] }
@@ -110,8 +118,14 @@ objc2-core-audio = "0.3"
 objc2-core-foundation = { version = "0.3", features = ["CFString"] }
 
 [features]
-default = ["parakeet", "fluidaudio"]
-parakeet = ["sherpa-rs"]
+# `parakeet` is just the code path + the (optional) sherpa-rs dependency; it does
+# NOT decide how the Sherpa-ONNX libraries are obtained. `parakeet-bundled` adds
+# `download-binaries` (network fetch at build time) and is what dev/CI use via the
+# default. A sealed build enables `parakeet` alone and supplies the libraries out
+# of band (SHERPA_LIB_PATH) — see flake.nix's package.
+default = ["parakeet-bundled", "fluidaudio"]
+parakeet = ["dep:sherpa-rs"]
+parakeet-bundled = ["parakeet", "sherpa-rs/download-binaries"]
 fluidaudio = ["fluidaudio-rs"]
 # GPU acceleration for whisper.cpp (mutually exclusive, only use one)
 # Use: cargo build --features cuda      for NVIDIA GPUs

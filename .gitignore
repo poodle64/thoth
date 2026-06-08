@@ -89,7 +89,8 @@ logs/
 # ============================================================================
 target/
 src-tauri/target/
-src-tauri/Cargo.lock
+# Cargo.lock is committed: Thoth ships as an application (reproducible builds)
+# and the Nix package needs it in the source tree to vendor dependencies.
 *.dylib
 
 # ============================================================================
@@ -116,3 +117,6 @@ docs/branding/app-icon-prompt.md
 # Temporary files
 *.tmp
 *.temp
+
+# Claude Code per-project session/memory data (not part of the project)
+.claude/projects/
