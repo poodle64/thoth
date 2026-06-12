@@ -467,6 +467,26 @@
     setupState = transcriptionReady ? 'ready' : 'needed';
     isLoading = false;
 
+    // Poll for transcription readiness if the model is downloaded but not yet
+    // loaded (the backend warm-up thread may still be initialising). Without
+    // this the status sticks on "Loading…" until the next pane visit.
+    if (modelDownloaded && !transcriptionReady) {
+      const pollInterval = setInterval(async () => {
+        try {
+          const ready = await invoke<boolean>('is_transcription_ready');
+          if (ready) {
+            transcriptionReady = true;
+            setupState = 'ready';
+            clearInterval(pollInterval);
+          }
+        } catch {
+          clearInterval(pollInterval);
+        }
+      }, 1000);
+      // Stop polling after 30 seconds regardless.
+      setTimeout(() => clearInterval(pollInterval), 30000);
+    }
+
     // Ollama check runs separately to avoid blocking (30s timeout)
     if (!configStore.enhancement.enabled) {
       ollamaStatus = 'not-configured';
