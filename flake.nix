@@ -188,7 +188,133 @@
           SHERPA_ONNX_LIB_DIR = "${sherpaOnnxCuda}/lib";
         });
 
+        # Runtime libraries the wrapped binary loads (CUDA EP + Vulkan + tray).
+        runtimeLibs = [
+          pkgs.libappindicator-gtk3
+          pkgs.vulkan-loader
+          sherpaOnnxCuda
+          cudaPackages.cudnn
+          cudaPackages.libcurand
+          cudaPackages.libcufft
+          cudaPackages.libcusparse
+          cudaPackages.cuda_cudart
+          cudaPackages.libcublas
+        ];
+
+        # ---------------------------------------------------------------------
+        # Installable, importable package:
+        #   inputs.thoth.packages.${system}.default
+        #
+        # Builds GPU Parakeet (CUDA, via the prebuilt sherpa-onnx pinned above)
+        # plus Whisper (Vulkan). The binary is wrapped with the Wayland runtime
+        # tools (wl-clipboard, wtype) and the CUDA/Vulkan libraries it dlopen()s.
+        # `hyprctl` is taken from the user's PATH (present on any Hyprland system).
+        #
+        # Refresh the two hashes whenever Cargo.lock / pnpm-lock.yaml change:
+        # set both to lib.fakeHash, run `nix build`, paste the reported pnpmDeps
+        # hash, run again, paste the cargoHash, run once more to compile.
+        # ---------------------------------------------------------------------
+        thothPackage = pkgs.rustPlatform.buildRustPackage (finalAttrs: {
+          pname = "thoth";
+          version = "2026.6.3";
+          src = ./.;
+
+          cargoRoot = "src-tauri";
+          buildAndTestSubdir = "src-tauri";
+          # TODO(one-time): run `nix build .#packages.x86_64-linux.default`, then
+          # paste the `got:` hash it reports here. (Couldn't be pre-computed where
+          # this was authored — crates.io rate-limited the vendor fetch.)
+          cargoHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
+          # GPU Parakeet (sherpa-onnx CUDA via SHERPA_ONNX_LIB_DIR) + Whisper (Vulkan).
+          # No default features (drops fluidaudio, a macOS-only git dep, and the
+          # CPU `parakeet` link mode).
+          buildNoDefaultFeatures = true;
+          buildFeatures = [ "parakeet-cuda" "vulkan" ];
+
+          pnpmDeps = pkgs.fetchPnpmDeps {
+            inherit (finalAttrs) pname version src;
+            fetcherVersion = 3;
+            hash = "sha256-dDxzWfpqs2wuT6rSojfP7r0neOnCbkB3ha2fA45Icws=";
+          };
+
+          nativeBuildInputs = with pkgs; [
+            cargo-tauri.hook
+            nodejs
+            pnpmConfigHook
+            pnpm
+            pkg-config
+            cmake
+            git
+            llvmPackages.libclang
+            shaderc # glslc — compiles whisper.cpp's Vulkan shaders
+            wrapGAppsHook4
+            makeWrapper
+          ];
+
+          buildInputs = with pkgs; [
+            openssl
+            webkitgtk_4_1
+            glib
+            glib-networking
+            libsecret
+            libappindicator-gtk3
+            alsa-lib
+            librsvg
+            libx11
+            libxcursor
+            libxrandr
+            libxi
+            vulkan-loader
+            vulkan-headers
+            shaderc
+            sherpaOnnxCuda # Parakeet C API, linked via SHERPA_ONNX_LIB_DIR
+          ];
+
+          env = {
+            LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+            WEBKIT_DISABLE_COMPOSITING_MODE = "1";
+            SHERPA_ONNX_LIB_DIR = "${sherpaOnnxCuda}/lib";
+          };
+
+          # whisper-rs-sys bindgen needs the cc-wrapper libc flags + clang headers
+          # (issue #64); `$(< … )` must run at build time, so it lives here.
+          preConfigure = bindgenHook;
+
+          # No updater signing key in the sandbox.
+          preBuild = ''
+            substituteInPlace src-tauri/tauri.conf.json \
+              --replace-fail '"createUpdaterArtifacts": true' '"createUpdaterArtifacts": false'
+          '';
+
+          postFixup = ''
+            wrapProgram $out/bin/thoth \
+              --prefix PATH : ${pkgs.lib.makeBinPath [
+                pkgs.wl-clipboard      # wl-copy / wl-paste
+                pkgs.wtype             # Wayland keyboard simulation
+                pkgs.glib.bin          # gsettings (theme detection)
+                pkgs.libcanberra-gtk3  # canberra-gtk-play (sound feedback)
+              ]} \
+              --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath runtimeLibs}:/run/opengl-driver/lib \
+              --set WEBKIT_DISABLE_COMPOSITING_MODE 1
+          '';
+
+          doCheck = false; # tests need audio hardware
+
+          meta = with pkgs.lib; {
+            description = "Privacy-first, offline-capable voice transcription (GPU Parakeet + Whisper)";
+            homepage = "https://github.com/poodle64/thoth";
+            license = licenses.mit;
+            platforms = [ "x86_64-linux" ];
+            mainProgram = "thoth";
+          };
+        });
+
       in {
+        # `nix build` / `inputs.thoth.packages.${system}.default`
+        packages.default = thothPackage;
+        packages.thoth = thothPackage;
+
         devShells.default = mkThothShell { };
         devShells.cuda = mkThothShell { gpuParakeet = true; };
       });
