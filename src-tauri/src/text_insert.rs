@@ -120,7 +120,31 @@ impl TextInsertService {
     fn insert_by_paste(&self, text: &str) -> Result<(), String> {
         debug!("Inserting {} characters by paste", text.len());
 
-        // Set clipboard to new text
+        // On Wayland, arboard doesn't reliably serve clipboard content to other
+        // clients, and wtype/enigo paste keystrokes don't land in many apps on
+        // wlroots compositors. Use wl-copy for the clipboard and the compositor's
+        // own paste dispatch (hyprctl on Hyprland) instead.
+        #[cfg(target_os = "linux")]
+        if is_wayland() {
+            if !Self::wl_copy_set_clipboard(text) {
+                return Err("Failed to set clipboard via wl-copy".to_string());
+            }
+            let pasted = if is_hyprland() {
+                Self::paste_with_hyprctl()
+            } else {
+                Self::try_paste_with_wtype() || Self::paste_with_enigo().is_ok()
+            };
+            if pasted {
+                info!(
+                    "Inserted {} characters via wl-copy + Wayland paste",
+                    text.len()
+                );
+                return Ok(());
+            }
+            return Err("Failed to paste on Wayland".to_string());
+        }
+
+        // macOS / Linux X11: arboard clipboard + keystroke paste.
         let mut clipboard =
             arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
 
@@ -399,6 +423,117 @@ impl TextInsertService {
         debug!("Pasted via enigo (Ctrl+Shift+V)");
         Ok(())
     }
+
+    /// Set the Wayland clipboard via `wl-copy` (serves content to all clients,
+    /// unlike arboard's ownership-based clipboard which other apps can't read).
+    #[cfg(target_os = "linux")]
+    fn wl_copy_set_clipboard(text: &str) -> bool {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let mut child = match Command::new("wl-copy")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("Failed to spawn wl-copy: {}", e);
+                return false;
+            }
+        };
+
+        if let Some(mut stdin) = child.stdin.take() {
+            if stdin.write_all(text.as_bytes()).is_err() {
+                return false;
+            }
+        }
+
+        let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+        if ok {
+            thread::sleep(Duration::from_millis(20));
+        }
+        ok
+    }
+
+    /// Paste on Hyprland: GUI apps via `hyprctl dispatch sendshortcut CTRL,v`
+    /// (avoids the layout-change notification a synthetic keypress can trigger);
+    /// terminals via `wtype` Ctrl+Shift+V (their paste binding).
+    #[cfg(target_os = "linux")]
+    fn paste_with_hyprctl() -> bool {
+        use std::process::{Command, Stdio};
+
+        if Self::active_window_is_terminal() {
+            Command::new("wtype")
+                .args([
+                    "-M", "ctrl", "-M", "shift", "v", "-m", "shift", "-m", "ctrl",
+                ])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        } else {
+            Command::new("hyprctl")
+                .args(["dispatch", "sendshortcut", "CTRL,v,activewindow"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        }
+    }
+
+    /// Whether the active Hyprland window is a terminal emulator (terminals
+    /// paste with Ctrl+Shift+V, GUI apps with Ctrl+V).
+    #[cfg(target_os = "linux")]
+    fn active_window_is_terminal() -> bool {
+        use std::process::Command;
+
+        let output = match Command::new("hyprctl")
+            .args(["activewindow", "-j"])
+            .output()
+        {
+            Ok(o) if o.status.success() => o.stdout,
+            _ => return false,
+        };
+        let json: serde_json::Value = match serde_json::from_slice(&output) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+        let class = json
+            .get("class")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_lowercase();
+        [
+            "kitty",
+            "alacritty",
+            "foot",
+            "wezterm",
+            "terminal",
+            "konsole",
+            "xterm",
+            "terminator",
+            "ghostty",
+        ]
+        .iter()
+        .any(|t| class.contains(t))
+    }
+}
+
+/// Whether the current session is Wayland (Linux only).
+#[cfg(target_os = "linux")]
+fn is_wayland() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_some()
+        || std::env::var("XDG_SESSION_TYPE")
+            .map(|s| s.eq_ignore_ascii_case("wayland"))
+            .unwrap_or(false)
+}
+
+/// Whether the compositor is Hyprland (Linux only).
+#[cfg(target_os = "linux")]
+fn is_hyprland() -> bool {
+    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
 }
 
 impl Default for TextInsertService {
