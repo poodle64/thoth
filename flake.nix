@@ -221,10 +221,17 @@
 
           cargoRoot = "src-tauri";
           buildAndTestSubdir = "src-tauri";
-          # TODO(one-time): run `nix build .#packages.x86_64-linux.default`, then
-          # paste the `got:` hash it reports here. (Couldn't be pre-computed where
-          # this was authored — crates.io rate-limited the vendor fetch.)
-          cargoHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+          # crates.io rate-limits the bulk vendor fetch (random 403s), so use
+          # cargoLock instead of cargoHash: each crate becomes its own fetchurl
+          # derivation — cached individually and retried by nix — so a throttled
+          # `nix build --max-jobs 2` makes steady progress through the limit.
+          # Registry checksums come from Cargo.lock; only the git dep needs a hash.
+          cargoLock = {
+            lockFile = ./src-tauri/Cargo.lock;
+            outputHashes = {
+              "fluidaudio-rs-0.10.0" = "sha256-z7c8tibtfevefrYAwh3hJM/sr/OWnbSrxjDS4Tda8+k=";
+            };
+          };
 
           # GPU Parakeet (sherpa-onnx CUDA via SHERPA_ONNX_LIB_DIR) + Whisper (Vulkan).
           # No default features (drops fluidaudio, a macOS-only git dep, and the
