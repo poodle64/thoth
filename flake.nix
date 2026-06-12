@@ -129,8 +129,14 @@
               cudaPackages.cuda_cccl
               cudaPackages.libcublas
             ] ++ pkgs.lib.optionals gpuParakeet [
-              sherpaOnnxCuda       # libsherpa-onnx-c-api.so + onnxruntime CUDA EP
-              cudaPackages.cudnn   # libcudnn.so.9 the CUDA EP needs
+              sherpaOnnxCuda           # libsherpa-onnx-c-api.so + onnxruntime CUDA EP
+              cudaPackages.cudnn       # libcudnn.so.9
+              # The onnxruntime CUDA execution provider dlopen()s the full CUDA
+              # math-library set; a single missing one makes it abort (no CPU
+              # fallback), so provide all of them.
+              cudaPackages.libcurand   # libcurand.so.10
+              cudaPackages.libcufft    # libcufft.so.11
+              cudaPackages.libcusparse # libcusparse.so.12
             ]) + ":/run/opengl-driver/lib");  # NVIDIA driver (libcuda.so)
 
           # Workaround for webkit2gtk Wayland issues (Linux only)
