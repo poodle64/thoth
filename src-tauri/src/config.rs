@@ -325,6 +325,10 @@ pub struct GeneralConfig {
     pub show_recording_indicator: bool,
     /// Visual style for the recording indicator
     pub indicator_style: IndicatorStyle,
+    /// Show native window decorations (Linux). When off, a custom in-app close
+    /// button is shown instead. macOS uses native traffic lights regardless.
+    #[serde(default = "default_true")]
+    pub window_decorations: bool,
     /// App version recorded on the most recent run.
     ///
     /// Used to detect that an update has been applied: when this differs from
@@ -345,6 +349,7 @@ impl Default for GeneralConfig {
             check_for_updates: true,
             show_recording_indicator: true,
             indicator_style: IndicatorStyle::default(),
+            window_decorations: true,
             last_run_version: None,
         }
     }
@@ -998,6 +1003,7 @@ mod tests {
                 check_for_updates: true,
                 show_recording_indicator: true,
                 indicator_style: IndicatorStyle::CursorDot,
+                window_decorations: true,
                 last_run_version: None,
             },
             recorder: RecorderConfig {
