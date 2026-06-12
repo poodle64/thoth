@@ -278,6 +278,17 @@ pub fn run() {
                 #[cfg(target_os = "linux")]
                 text_insert::emit_linux_typing_advisory(&app_handle);
 
+                // Linux: apply the saved window-decoration preference at startup.
+                // With decorations off, the custom in-app close button (the
+                // WindowControls component) takes over.
+                #[cfg(target_os = "linux")]
+                if !cfg.general.window_decorations {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.set_decorations(false);
+                        tracing::info!("Window decorations disabled per config");
+                    }
+                }
+
                 // Start the Local Control API if enabled in config. The API and
                 // MCP server default on, so a fresh config arrives here enabled
                 // but with no token — generate and persist one so it just works

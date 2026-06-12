@@ -7,6 +7,7 @@
    */
   import { onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { getVersion } from '@tauri-apps/api/app';
   import { enable, disable, isEnabled } from '@tauri-apps/plugin-autostart';
@@ -97,6 +98,10 @@
   let showInDock = $state(false);
   let dockLoading = $state(false);
 
+  /** Window decorations (Linux): native titlebar vs. custom close button */
+  const isLinux = /Linux/.test(navigator.userAgent);
+  let windowDecorations = $state(configStore.general.windowDecorations ?? true);
+
   /** Permission states */
   let microphonePermission = $state<'unknown' | 'granted' | 'denied' | 'not_determined'>('unknown');
   let accessibilityPermission = $state<'unknown' | 'granted' | 'denied' | 'stale'>('unknown');
@@ -172,6 +177,18 @@
       console.error('Failed to toggle dock visibility:', error);
     } finally {
       dockLoading = false;
+    }
+  }
+
+  async function handleDecorationToggle(checked: boolean) {
+    windowDecorations = checked;
+    try {
+      await getCurrentWindow().setDecorations(checked);
+      configStore.general.windowDecorations = checked;
+      await configStore.save();
+    } catch (error) {
+      console.error('Failed to toggle window decorations:', error);
+      windowDecorations = !checked; // revert on failure
     }
   }
 
@@ -763,6 +780,12 @@
         <span class="text-sm text-muted-foreground">Show in Dock</span>
         <Switch checked={showInDock} disabled={dockLoading} onCheckedChange={handleDockToggle} />
       </div>
+      {#if isLinux}
+        <div class="flex items-center justify-between py-1.5">
+          <span class="text-sm text-muted-foreground">Window Decorations</span>
+          <Switch checked={windowDecorations} onCheckedChange={handleDecorationToggle} />
+        </div>
+      {/if}
     </div>
   </details>
 {:else if stats}
@@ -1029,6 +1052,12 @@
           <span class="status-label">Show in Dock</span>
           <Switch checked={showInDock} disabled={dockLoading} onCheckedChange={handleDockToggle} />
         </div>
+        {#if isLinux}
+          <div class="autostart-row">
+            <span class="status-label">Window Decorations</span>
+            <Switch checked={windowDecorations} onCheckedChange={handleDecorationToggle} />
+          </div>
+        {/if}
       </div>
     </div>
   </section>
