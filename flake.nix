@@ -26,6 +26,14 @@
           extensions = [ "rust-src" "rust-analyzer" ];
         };
 
+        # Build the package with this newer toolchain too — nixpkgs' default rustc
+        # (from the pinned nixpkgs) is too old for some deps (e.g. libsqlite3-sys
+        # uses the `cfg_select!` macro).
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rustToolchain;
+          rustc = rustToolchain;
+        };
+
         # CUDA packages for whisper.cpp GPU acceleration
         cudaPackages = pkgs.cudaPackages_12;
 
@@ -214,7 +222,7 @@
         # set both to lib.fakeHash, run `nix build`, paste the reported pnpmDeps
         # hash, run again, paste the cargoHash, run once more to compile.
         # ---------------------------------------------------------------------
-        thothPackage = pkgs.rustPlatform.buildRustPackage (finalAttrs: {
+        thothPackage = rustPlatform.buildRustPackage (finalAttrs: {
           pname = "thoth";
           version = "2026.6.3";
           src = ./.;
