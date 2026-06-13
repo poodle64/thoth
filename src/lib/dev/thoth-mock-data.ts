@@ -59,7 +59,6 @@ const MOCK_CONFIG = {
     api_enabled: false,
     api_port: 8765,
     mcp_enabled: false,
-    api_token: null,
   },
 };
 

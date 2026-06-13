@@ -68,8 +68,6 @@ export interface IntegrationsConfig {
   apiPort: number;
   /** Whether the MCP server is enabled */
   mcpEnabled: boolean;
-  /** API bearer token (null until first generated) */
-  apiToken: string | null;
 }
 
 /** AI enhancement configuration */
@@ -206,7 +204,6 @@ interface ConfigRaw {
     api_enabled: boolean;
     api_port: number;
     mcp_enabled: boolean;
-    api_token: string | null;
   };
 }
 
@@ -266,7 +263,6 @@ function parseConfig(raw: ConfigRaw): Config {
       apiEnabled: raw.integrations?.api_enabled ?? false,
       apiPort: raw.integrations?.api_port ?? 8765,
       mcpEnabled: raw.integrations?.mcp_enabled ?? false,
-      apiToken: raw.integrations?.api_token ?? null,
     },
   };
 }
@@ -327,7 +323,6 @@ function serialiseConfig(config: Config): ConfigRaw {
       api_enabled: config.integrations.apiEnabled,
       api_port: config.integrations.apiPort,
       mcp_enabled: config.integrations.mcpEnabled,
-      api_token: config.integrations.apiToken,
     },
   };
 }
@@ -388,7 +383,6 @@ function getDefaultConfig(): Config {
       apiEnabled: false,
       apiPort: 8765,
       mcpEnabled: false,
-      apiToken: null,
     },
   };
 }

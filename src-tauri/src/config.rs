@@ -20,7 +20,7 @@ const CURRENT_VERSION: u32 = 1;
 static CONFIG: OnceLock<RwLock<Config>> = OnceLock::new();
 
 /// Integrations configuration (Local Control API, MCP server)
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct IntegrationsConfig {
     /// Whether the Local Control API HTTP server is enabled
@@ -32,27 +32,10 @@ pub struct IntegrationsConfig {
     /// Whether the MCP server is enabled
     #[serde(default)]
     pub mcp_enabled: bool,
-    /// Bearer token for authenticating API requests (None = not yet generated)
-    #[serde(default)]
-    pub api_token: Option<String>,
 }
 
 fn default_api_port() -> u16 {
     8765
-}
-
-impl std::fmt::Debug for IntegrationsConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("IntegrationsConfig")
-            .field("api_enabled", &self.api_enabled)
-            .field("api_port", &self.api_port)
-            .field("mcp_enabled", &self.mcp_enabled)
-            .field(
-                "api_token",
-                &self.api_token.as_ref().map(|_| "***redacted***"),
-            )
-            .finish()
-    }
 }
 
 impl Default for IntegrationsConfig {
@@ -61,11 +44,10 @@ impl Default for IntegrationsConfig {
             // Control API and MCP server default ON. They bind 127.0.0.1 only and
             // require the bearer token, so they are not network-exposed; defaulting
             // on means MCP-capable assistants work out of the box. The token is
-            // auto-generated on first run when missing (see lib.rs startup).
+            // held in a dedicated reset-proof store (control_api::token_store).
             api_enabled: true,
             api_port: default_api_port(),
             mcp_enabled: true,
-            api_token: None,
         }
     }
 }
@@ -408,7 +390,7 @@ pub fn get_config_path() -> PathBuf {
 }
 
 /// Get the path to the config directory (~/.thoth)
-fn get_config_dir() -> PathBuf {
+pub(crate) fn get_config_dir() -> PathBuf {
     home_dir_or_fallback().join(".thoth")
 }
 
@@ -636,16 +618,6 @@ pub fn set_config(mut config: Config) -> Result<(), Error> {
                 current.shortcuts.copy_last
             );
             config.shortcuts.copy_last = current.shortcuts.copy_last.clone();
-        }
-
-        // Preserve api_token if the incoming config has None but the cached config has
-        // a token. The frontend settings panel does not echo the token back (it only
-        // shows a masked representation), so a generic config save must not wipe it.
-        // Use rotate_api_token or set_api_enabled (which generates one) for intentional
-        // token changes.
-        if config.integrations.api_token.is_none() && current.integrations.api_token.is_some() {
-            tracing::debug!("Preserving api_token (incoming config had None)");
-            config.integrations.api_token = current.integrations.api_token.clone();
         }
 
         // Preserve enhancement.api_key if the incoming config has None but the cached

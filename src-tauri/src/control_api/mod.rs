@@ -1,7 +1,8 @@
 //! Local Control API — loopback HTTP server for external integrations
 //!
 //! Binds ONLY to 127.0.0.1 (never 0.0.0.0). Protected by static bearer-token auth.
-//! Off by default; opt-in via `integrations.apiEnabled` config.
+//! Enabled by default; toggle via `integrations.apiEnabled`. The bearer token is
+//! held in a dedicated, reset-proof store (see [`token_store`]), not config.json.
 
 use axum::{
     Json, Router,
@@ -19,6 +20,8 @@ use tower_http::validate_request::ValidateRequestHeaderLayer;
 use uuid::Uuid;
 
 use crate::error::Error;
+
+pub(crate) mod token_store;
 
 // ---------------------------------------------------------------------------
 // Token generation
@@ -562,7 +565,7 @@ pub async fn get_integrations_status() -> Result<IntegrationsStatus, Error> {
         api_running: running,
         api_port: cfg.integrations.api_port,
         mcp_enabled: cfg.integrations.mcp_enabled,
-        has_token: cfg.integrations.api_token.is_some(),
+        has_token: token_store::read_token().is_some(),
     })
 }
 
@@ -575,20 +578,13 @@ pub async fn set_api_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(),
     let _ = app; // AppHandle reserved for future event emission
     let mut cfg = crate::config::get_config()?;
     cfg.integrations.api_enabled = enabled;
+    let port = cfg.integrations.api_port;
+    let mcp = cfg.integrations.mcp_enabled;
+    crate::config::set_config(cfg)?;
 
     if enabled {
-        // Generate a token on first enable.
-        if cfg.integrations.api_token.is_none() {
-            cfg.integrations.api_token = Some(generate_token());
-        }
-        let token = cfg.integrations.api_token.clone().unwrap();
-        let port = cfg.integrations.api_port;
-        let mcp = cfg.integrations.mcp_enabled;
-
-        crate::config::set_config(cfg)?;
-        start(port, token, mcp).await?;
+        start(port, token_store::get_or_create_token(), mcp).await?;
     } else {
-        crate::config::set_config(cfg)?;
         stop().await;
     }
     Ok(())
@@ -608,13 +604,9 @@ pub async fn set_mcp_enabled(enabled: bool) -> Result<(), Error> {
     // Enabling MCP implies the Control API must be on to host the /mcp route.
     if enabled {
         cfg.integrations.api_enabled = true;
-        if cfg.integrations.api_token.is_none() {
-            cfg.integrations.api_token = Some(generate_token());
-        }
     }
 
     let port = cfg.integrations.api_port;
-    let token = cfg.integrations.api_token.clone();
     let api_enabled = cfg.integrations.api_enabled;
     crate::config::set_config(cfg)?;
 
@@ -622,9 +614,7 @@ pub async fn set_mcp_enabled(enabled: bool) -> Result<(), Error> {
     // Awaiting start() means the bind has completed before we return, so the
     // status the UI reads immediately afterwards is accurate.
     if api_enabled {
-        if let Some(t) = token {
-            start(port, t, enabled).await?;
-        }
+        start(port, token_store::get_or_create_token(), enabled).await?;
     }
     Ok(())
 }
@@ -632,8 +622,7 @@ pub async fn set_mcp_enabled(enabled: bool) -> Result<(), Error> {
 /// Return the current API token for display/copy in the settings panel.
 #[tauri::command]
 pub async fn get_api_token() -> Result<Option<String>, Error> {
-    let cfg = crate::config::get_config()?;
-    Ok(cfg.integrations.api_token)
+    Ok(Some(token_store::get_or_create_token()))
 }
 
 /// Generate a new token, persist it, and restart the server if running.
@@ -642,13 +631,11 @@ pub async fn get_api_token() -> Result<Option<String>, Error> {
 #[tauri::command]
 pub async fn rotate_api_token(app: tauri::AppHandle) -> Result<String, Error> {
     let _ = app;
-    let new_token = generate_token();
-    let mut cfg = crate::config::get_config()?;
-    cfg.integrations.api_token = Some(new_token.clone());
+    let new_token = token_store::rotate();
+    let cfg = crate::config::get_config()?;
     let was_running = is_running().await;
     let port = cfg.integrations.api_port;
     let mcp = cfg.integrations.mcp_enabled;
-    crate::config::set_config(cfg)?;
 
     if was_running {
         start(port, new_token.clone(), mcp).await?;
@@ -663,14 +650,11 @@ pub async fn set_api_port(app: tauri::AppHandle, port: u16) -> Result<(), Error>
     let mut cfg = crate::config::get_config()?;
     cfg.integrations.api_port = port;
     let was_running = is_running().await;
-    let token = cfg.integrations.api_token.clone();
     let mcp = cfg.integrations.mcp_enabled;
     crate::config::set_config(cfg)?;
 
     if was_running {
-        if let Some(t) = token {
-            start(port, t, mcp).await?;
-        }
+        start(port, token_store::get_or_create_token(), mcp).await?;
     }
     Ok(())
 }

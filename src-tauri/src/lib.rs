@@ -279,23 +279,12 @@ pub fn run() {
                 text_insert::emit_linux_typing_advisory(&app_handle);
 
                 // Start the Local Control API if enabled in config. The API and
-                // MCP server default on, so a fresh config arrives here enabled
-                // but with no token — generate and persist one so it just works
-                // rather than warning and skipping (the cause of the "had to
-                // toggle it off and on" startup friction).
+                // MCP server default on. The bearer token lives in its own
+                // reset-proof store (control_api::token_store), generated once
+                // and migrated from any legacy config.json token, so it never
+                // rotates across reinstalls or config resets.
                 if cfg.integrations.api_enabled {
-                    let token = match cfg.integrations.api_token.clone() {
-                        Some(t) => t,
-                        None => {
-                            let t = control_api::generate_token();
-                            let mut updated = cfg.clone();
-                            updated.integrations.api_token = Some(t.clone());
-                            if let Err(e) = config::set_config(updated) {
-                                tracing::error!("Failed to persist generated API token: {}", e);
-                            }
-                            t
-                        }
-                    };
+                    let token = control_api::token_store::get_or_create_token();
                     let port = cfg.integrations.api_port;
                     let mcp = cfg.integrations.mcp_enabled;
                     tauri::async_runtime::spawn(async move {
