@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.4] - 2026-06-13
+
+### Changed
+
+- **Dictated text is no longer chopped into paragraphs at arbitrary points.** Thoth used to force a blank-line paragraph break into the text it typed out roughly every 50 words, landing on whatever full stop happened to be nearest — so a long dictation came out split mid-thought, with breaks that had nothing to do with what you were saying. That word-counter behaviour is gone. Your transcription is already punctuated and capitalised by the transcriber, so it is now inserted as the continuous text you actually spoke. (The breaks were only ever added to the typed-out text, never to your saved history, which is why they appeared "as it printed out".)
+
+### Added
+
+- **Voice formatting commands.** Say "new paragraph" to start a new paragraph (a blank line) or "new line" for a single line break, while dictating — the same convention macOS Dictation, Dragon and Talon use. Commands are recognised only when spoken as a standalone instruction between sentences, so ordinary phrases like "a new line of code" are left untouched. On by default; toggle it under Transcribe → Output Filtering → "Voice formatting commands". The breaks now apply to both the inserted text and your saved history, so the two match.
+
 ## [2026.6.3] - 2026-06-08
 
 ### Fixed
