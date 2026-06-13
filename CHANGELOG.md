@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.5] - 2026-06-13
+
+### Fixed
+
+- **The MCP / Control-API bearer token no longer changes on every install or restart.** The token was only ever held in `config.json`, which is rewritten at startup, so in practice it was regenerated each launch and never durably saved — forcing you to re-point MCP clients at a new token each time. The token now lives in its own dedicated file (`~/.thoth/control_api_token`, owner-only) that survives reinstalls, updates and settings resets; it is generated once and never changes unless you explicitly rotate it from the Integrations pane. One-time note: because no token was previously saved to disk, this update sets a fresh token once — update your MCP client to it (Integrations pane) after installing, after which it is permanent.
+- **The Overview pane (and general UI navigation) no longer lags.** A permission-status poll ran twice a second indefinitely whenever the optional Input Monitoring permission wasn't granted — which is the common case, and the case after every update (updates reset macOS permissions) — firing native permission checks continuously and janking the UI. The poll now stops once the required permissions (microphone, accessibility) are granted, treats Input Monitoring as optional, and is hard-capped so it can never run away.
+
 ## [2026.6.4] - 2026-06-13
 
 ### Changed
