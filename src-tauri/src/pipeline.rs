@@ -66,6 +66,9 @@ pub struct PipelineConfig {
     pub cleanup_punctuation: bool,
     /// Whether to capitalise the first word of each sentence
     pub sentence_case: bool,
+    /// Whether to convert spoken formatting commands ("new paragraph" / "new
+    /// line") into line breaks
+    pub voice_formatting_commands: bool,
     /// Whether AI enhancement is enabled
     pub enhancement_enabled: bool,
     /// Ollama model for enhancement
@@ -91,6 +94,7 @@ impl Default for PipelineConfig {
             normalise_whitespace: true,
             cleanup_punctuation: true,
             sentence_case: false,
+            voice_formatting_commands: true,
             enhancement_enabled: false,
             enhancement_model: "llama3.2".to_string(),
             enhancement_prompt: DEFAULT_ENHANCEMENT_PROMPT.to_string(),
@@ -556,6 +560,7 @@ async fn run_transcription_pipeline(
                 normalise_whitespace: config.normalise_whitespace,
                 cleanup_punctuation: config.cleanup_punctuation,
                 sentence_case: config.sentence_case,
+                voice_formatting_commands: config.voice_formatting_commands,
                 // The dictionary is applied separately below, gated by
                 // config.apply_dictionary. Disable it inside the filter so it
                 // runs exactly once and honours the user's dictionary setting
@@ -636,8 +641,9 @@ async fn process_audio(
     let output = run_transcription_pipeline(app, audio_path, config).await?;
 
     // 4. Output (clipboard/paste)
-    // Apply paragraph formatting for output only (not stored in database)
-    let mut output_text = transcription::filter::format_paragraphs(&output.text);
+    // The filtered text already carries any spoken-command line breaks (applied
+    // in OutputFilter so history and the pasted text stay consistent).
+    let mut output_text = output.text.clone();
 
     // Ensure consecutive transcriptions don't run together when inserted at
     // the cursor. Add a sentence-ending period if the text has no trailing

@@ -39,6 +39,8 @@ export interface TranscriptionConfig {
   cleanupPunctuation: boolean;
   /** Whether to capitalise the first word of each sentence */
   sentenceCase: boolean;
+  /** Whether to convert spoken formatting commands ("new paragraph" / "new line") into line breaks */
+  voiceFormattingCommands: boolean;
 }
 
 /** Recording mode options */
@@ -168,6 +170,7 @@ interface ConfigRaw {
     normalise_whitespace: boolean;
     cleanup_punctuation: boolean;
     sentence_case: boolean;
+    voice_formatting_commands: boolean;
   };
   shortcuts: {
     toggle_recording: string;
@@ -227,6 +230,7 @@ function parseConfig(raw: ConfigRaw): Config {
       normaliseWhitespace: raw.transcription.normalise_whitespace ?? true,
       cleanupPunctuation: raw.transcription.cleanup_punctuation ?? true,
       sentenceCase: raw.transcription.sentence_case ?? false,
+      voiceFormattingCommands: raw.transcription.voice_formatting_commands ?? true,
     },
     shortcuts: {
       toggleRecording: raw.shortcuts.toggle_recording,
@@ -287,6 +291,7 @@ function serialiseConfig(config: Config): ConfigRaw {
       normalise_whitespace: config.transcription.normaliseWhitespace,
       cleanup_punctuation: config.transcription.cleanupPunctuation,
       sentence_case: config.transcription.sentenceCase,
+      voice_formatting_commands: config.transcription.voiceFormattingCommands,
     },
     shortcuts: {
       toggle_recording: config.shortcuts.toggleRecording,
@@ -347,6 +352,7 @@ function getDefaultConfig(): Config {
       normaliseWhitespace: true,
       cleanupPunctuation: true,
       sentenceCase: false,
+      voiceFormattingCommands: true,
     },
     shortcuts: {
       toggleRecording: 'F13',

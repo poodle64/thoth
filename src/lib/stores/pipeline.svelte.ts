@@ -52,6 +52,8 @@ export interface PipelineConfig {
   cleanupPunctuation: boolean;
   /** Whether to capitalise the first word of each sentence */
   sentenceCase: boolean;
+  /** Whether to convert spoken formatting commands ("new paragraph" / "new line") into line breaks */
+  voiceFormattingCommands: boolean;
   /** Whether AI enhancement is enabled */
   enhancementEnabled: boolean;
   /** Ollama model for enhancement */
@@ -136,6 +138,7 @@ async function getDefaultConfig(): Promise<PipelineConfig> {
     normaliseWhitespace: config.transcription.normaliseWhitespace,
     cleanupPunctuation: config.transcription.cleanupPunctuation,
     sentenceCase: config.transcription.sentenceCase,
+    voiceFormattingCommands: config.transcription.voiceFormattingCommands,
     enhancementEnabled: config.enhancement.enabled,
     enhancementModel: config.enhancement.model,
     enhancementPrompt,

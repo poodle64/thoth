@@ -20,6 +20,7 @@
     sentence_case: boolean;
     australian_spelling: boolean;
     spoken_numbers_to_digits: boolean;
+    voice_formatting_commands: boolean;
   }
 
   interface Props {
@@ -41,6 +42,7 @@
     sentence_case: false,
     australian_spelling: false,
     spoken_numbers_to_digits: false,
+    voice_formatting_commands: true,
   };
 
   /** Current filter options state - intentionally captures initialOptions once */
@@ -107,7 +109,8 @@
       options.cleanup_punctuation !== defaultOptions.cleanup_punctuation ||
       options.sentence_case !== defaultOptions.sentence_case ||
       options.australian_spelling !== defaultOptions.australian_spelling ||
-      options.spoken_numbers_to_digits !== defaultOptions.spoken_numbers_to_digits
+      options.spoken_numbers_to_digits !== defaultOptions.spoken_numbers_to_digits ||
+      options.voice_formatting_commands !== defaultOptions.voice_formatting_commands
   );
 
   /** Filter option definitions for rendering */
@@ -142,6 +145,11 @@
       key: 'spoken_numbers_to_digits' as const,
       label: 'Convert spoken numbers to digits',
       description: 'Converts number words to digits (twenty three→23, one hundred→100)',
+    },
+    {
+      key: 'voice_formatting_commands' as const,
+      label: 'Voice formatting commands',
+      description: "Say 'new paragraph' or 'new line' to insert line breaks",
     },
   ];
 

@@ -55,6 +55,7 @@
     sentence_case: boolean;
     australian_spelling: boolean;
     spoken_numbers_to_digits: boolean;
+    voice_formatting_commands: boolean;
   }
 
   /** Available settings panes matching Swift app */
@@ -201,6 +202,7 @@
     configStore.updateTranscription('normaliseWhitespace', options.normalise_whitespace);
     configStore.updateTranscription('cleanupPunctuation', options.cleanup_punctuation);
     configStore.updateTranscription('sentenceCase', options.sentence_case);
+    configStore.updateTranscription('voiceFormattingCommands', options.voice_formatting_commands);
     await configStore.save();
   }
 
@@ -664,6 +666,7 @@
                   sentence_case: configStore.transcription.sentenceCase,
                   australian_spelling: configStore.transcription.australianSpelling,
                   spoken_numbers_to_digits: configStore.transcription.spokenNumbersToDigits,
+                  voice_formatting_commands: configStore.transcription.voiceFormattingCommands,
                 }}
                 onchange={handleFilterChange}
                 onOpenDictionary={() => (activePane = 'dictionary')}

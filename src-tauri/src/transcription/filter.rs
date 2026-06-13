@@ -30,9 +30,18 @@ pub struct FilterOptions {
     /// Convert spoken number words to digits ("twenty three" → "23")
     #[serde(default)]
     pub spoken_numbers_to_digits: bool,
+    /// Convert spoken formatting commands ("new paragraph" / "new line") into
+    /// the corresponding line breaks. Defaults on — this is the dictation
+    /// convention used by macOS Dictation, Dragon and Talon.
+    #[serde(default = "default_voice_formatting_commands")]
+    pub voice_formatting_commands: bool,
 }
 
 fn default_apply_dictionary() -> bool {
+    true
+}
+
+fn default_voice_formatting_commands() -> bool {
     true
 }
 
@@ -46,6 +55,7 @@ impl Default for FilterOptions {
             apply_dictionary: true,
             australian_spelling: false,
             spoken_numbers_to_digits: false,
+            voice_formatting_commands: true,
         }
     }
 }
@@ -83,6 +93,18 @@ static MISSING_SPACE_AFTER_PUNCT_PATTERN: LazyLock<Regex> =
 /// Sentence start pattern (for capitalisation)
 static SENTENCE_START_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(^|[.!?]\s+)([a-z])").unwrap());
+
+/// Spoken formatting command pattern. Matches a standalone "new paragraph" or
+/// "new line" dictation command: it must begin a clause (string start, or right
+/// after a sentence terminator or comma) AND be closed by a trailing terminator,
+/// comma, or end-of-text. That double boundary leaves embedded prose like
+/// "a new line of code" untouched while catching "...idea. New paragraph. Next...".
+/// Group 1 = the preceding boundary char (re-emitted when it ends a sentence);
+/// group 2 = "paragraph" | "line".
+static VOICE_COMMAND_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(\A|[.!?]|,)[ \t]*\bnew[ \t]+(paragraph|line)\b[ \t]*([.!?,]|\z)[ \t]*")
+        .unwrap()
+});
 
 /// Output filter for transcription text
 #[derive(Debug, Default)]
@@ -136,6 +158,12 @@ impl OutputFilter {
             result = apply_sentence_case(&result);
         }
 
+        // Voice formatting commands run last so they own the final line breaks:
+        // the earlier whitespace pass is spaces-only and cannot collapse them.
+        if self.options.voice_formatting_commands {
+            result = apply_voice_commands(&result);
+        }
+
         result
     }
 }
@@ -167,50 +195,33 @@ pub fn cleanup_punctuation(text: &str) -> String {
         .to_string()
 }
 
-/// Approximate word count threshold before paragraph breaks are inserted.
-const PARAGRAPH_WORD_THRESHOLD: usize = 50;
-
-/// Format long text into paragraphs by inserting double-newline breaks at
-/// sentence boundaries approximately every ~50 words.
+/// Convert standalone spoken formatting commands into line breaks.
 ///
-/// Short texts (fewer than ~50 words) are returned unchanged.
-pub fn format_paragraphs(text: &str) -> String {
-    let words: Vec<&str> = text.split_whitespace().collect();
-    if words.len() < PARAGRAPH_WORD_THRESHOLD {
-        return text.to_string();
-    }
+/// "new paragraph" becomes a blank line, "new line" a single break. Only
+/// phrases that stand alone as their own clause are converted (see
+/// [`VOICE_COMMAND_PATTERN`]), so dictated prose such as "a new line of code" is
+/// left untouched. Any break that lands at the very start or end of the text is
+/// trimmed away.
+pub fn apply_voice_commands(text: &str) -> String {
+    let replaced = VOICE_COMMAND_PATTERN.replace_all(text, |caps: &regex::Captures| {
+        let lead = caps.get(1).map_or("", |m| m.as_str());
+        let kind = caps.get(2).map_or("", |m| m.as_str());
+        // Re-emit the preceding char only when it ends the previous sentence; a
+        // comma before the command was just the spoken pause, so it is dropped.
+        let keep = if matches!(lead, "." | "!" | "?") {
+            lead
+        } else {
+            ""
+        };
+        let break_str = if kind.eq_ignore_ascii_case("paragraph") {
+            "\n\n"
+        } else {
+            "\n"
+        };
+        format!("{keep}{break_str}")
+    });
 
-    // Rebuild the text, inserting paragraph breaks at sentence-ending
-    // punctuation nearest to each ~50-word boundary.
-    let mut result = String::with_capacity(text.len() + 32);
-    let mut word_count: usize = 0;
-    let mut looking_for_break = false;
-
-    for (i, word) in words.iter().enumerate() {
-        if i > 0 {
-            if looking_for_break && ends_sentence(words[i - 1]) {
-                result.push_str("\n\n");
-                looking_for_break = false;
-                word_count = 0;
-            } else {
-                result.push(' ');
-            }
-        }
-
-        result.push_str(word);
-        word_count += 1;
-
-        if word_count >= PARAGRAPH_WORD_THRESHOLD && !looking_for_break {
-            looking_for_break = true;
-        }
-    }
-
-    result
-}
-
-/// Check whether a word ends with sentence-terminating punctuation.
-fn ends_sentence(word: &str) -> bool {
-    matches!(word.as_bytes().last(), Some(b'.' | b'?' | b'!'))
+    replaced.trim().to_string()
 }
 
 // ── Australian/British spelling normalisation ─────────────────────────────
@@ -933,6 +944,7 @@ mod tests {
             apply_dictionary: false, // Disable for test isolation
             australian_spelling: false,
             spoken_numbers_to_digits: false,
+            voice_formatting_commands: false,
         });
 
         let input = "um, I was like  thinking...what do you think ??";
@@ -953,6 +965,7 @@ mod tests {
             apply_dictionary: false,
             australian_spelling: false,
             spoken_numbers_to_digits: false,
+            voice_formatting_commands: false,
         });
 
         let input = "um  hello...";
@@ -972,6 +985,7 @@ mod tests {
         assert!(options.cleanup_punctuation);
         assert!(!options.sentence_case);
         assert!(options.apply_dictionary);
+        assert!(options.voice_formatting_commands);
     }
 
     #[test]
@@ -984,6 +998,7 @@ mod tests {
             apply_dictionary: false,
             australian_spelling: false,
             spoken_numbers_to_digits: false,
+            voice_formatting_commands: false,
         });
 
         let input = "I um think so";
@@ -1000,6 +1015,7 @@ mod tests {
             apply_dictionary: false,
             australian_spelling: false,
             spoken_numbers_to_digits: false,
+            voice_formatting_commands: false,
         });
 
         let input = "  hello   world  ";
@@ -1016,112 +1032,117 @@ mod tests {
             apply_dictionary: false,
             australian_spelling: false,
             spoken_numbers_to_digits: false,
+            voice_formatting_commands: false,
         });
         assert_eq!(filter.filter(""), "");
     }
 
-    // Paragraph formatting tests
+    // Voice formatting command tests
 
     #[test]
-    fn test_format_paragraphs_short_text_unchanged() {
-        let text = "This is a short sentence. It has fewer than fifty words.";
-        assert_eq!(format_paragraphs(text), text);
+    fn test_voice_new_paragraph_inserts_blank_line() {
+        let input = "First idea. New paragraph. Second idea.";
+        assert_eq!(apply_voice_commands(input), "First idea.\n\nSecond idea.");
     }
 
     #[test]
-    fn test_format_paragraphs_empty_string() {
-        assert_eq!(format_paragraphs(""), "");
+    fn test_voice_new_line_inserts_single_break() {
+        let input = "First item. New line. Second item.";
+        assert_eq!(apply_voice_commands(input), "First item.\nSecond item.");
     }
 
     #[test]
-    fn test_format_paragraphs_exactly_at_threshold() {
-        // Build a text with exactly 49 words (below threshold)
-        let words: Vec<&str> = (0..49).map(|_| "word").collect();
-        let text = words.join(" ");
-        assert_eq!(format_paragraphs(&text), text);
+    fn test_voice_case_insensitive() {
+        let input = "Done. NEW PARAGRAPH. Next.";
+        assert_eq!(apply_voice_commands(input), "Done.\n\nNext.");
     }
 
     #[test]
-    fn test_format_paragraphs_inserts_break_at_sentence_boundary() {
-        // Build text: 50+ words with a sentence ending around word 50
-        let mut parts = Vec::new();
-        // First ~52 words ending in a period
-        for i in 0..52 {
-            if i == 51 {
-                parts.push("end.");
-            } else {
-                parts.push("word");
-            }
-        }
-        // More words after
-        parts.extend(std::iter::repeat_n("more", 10));
-        let text = parts.join(" ");
-        let result = format_paragraphs(&text);
+    fn test_voice_command_at_start_trims_leading_break() {
+        let input = "New paragraph. Hello there.";
+        assert_eq!(apply_voice_commands(input), "Hello there.");
+    }
 
-        assert!(
-            result.contains("\n\n"),
-            "Should contain paragraph break, got: {result}"
+    #[test]
+    fn test_voice_command_at_end_trims_trailing_break() {
+        let input = "All done. New paragraph.";
+        assert_eq!(apply_voice_commands(input), "All done.");
+    }
+
+    #[test]
+    fn test_voice_multiple_paragraph_breaks() {
+        let input = "One. New paragraph. Two. New paragraph. Three.";
+        assert_eq!(apply_voice_commands(input), "One.\n\nTwo.\n\nThree.");
+    }
+
+    #[test]
+    fn test_voice_comma_boundary_is_dropped() {
+        // A comma before the command was just the spoken pause, so it is dropped.
+        let input = "First, new line, second";
+        assert_eq!(apply_voice_commands(input), "First\nsecond");
+    }
+
+    #[test]
+    fn test_voice_embedded_phrase_not_converted() {
+        // "new line" mid-sentence is prose, not a standalone command.
+        let input = "I need to add a new line of code here.";
+        assert_eq!(apply_voice_commands(input), input);
+    }
+
+    #[test]
+    fn test_voice_clause_start_but_no_closing_boundary_not_converted() {
+        // Begins a clause but continues as a sentence (no closing terminator), so
+        // it is real prose and must be left alone.
+        let input = "We are done. New line of poetry follows.";
+        assert_eq!(apply_voice_commands(input), input);
+    }
+
+    #[test]
+    fn test_voice_plural_not_converted() {
+        let input = "Start. New paragraphs are nice.";
+        assert_eq!(apply_voice_commands(input), input);
+    }
+
+    #[test]
+    fn test_voice_no_command_passthrough() {
+        let input = "Just an ordinary sentence with no commands.";
+        assert_eq!(apply_voice_commands(input), input);
+    }
+
+    #[test]
+    fn test_voice_filter_integration_default_on() {
+        let filter = OutputFilter::new(FilterOptions {
+            remove_fillers: false,
+            normalise_whitespace: true,
+            cleanup_punctuation: true,
+            sentence_case: false,
+            apply_dictionary: false,
+            australian_spelling: false,
+            spoken_numbers_to_digits: false,
+            voice_formatting_commands: true,
+        });
+        assert_eq!(
+            filter.filter("First thought. New paragraph. Second thought."),
+            "First thought.\n\nSecond thought."
         );
-        // The break should come after "end."
-        let break_pos = result.find("\n\n").unwrap();
-        let before_break = &result[..break_pos];
-        assert!(
-            before_break.ends_with("end."),
-            "Break should come after sentence-ending punctuation, before: '{before_break}'"
-        );
     }
 
     #[test]
-    fn test_format_paragraphs_no_sentence_boundary_no_break() {
-        // 60+ words with NO sentence-ending punctuation at all
-        let words: Vec<&str> = (0..70).map(|_| "word").collect();
-        let text = words.join(" ");
-        let result = format_paragraphs(&text);
-        // No sentence boundary → no break inserted
-        assert!(
-            !result.contains("\n\n"),
-            "Should not insert break without sentence boundary"
+    fn test_voice_disabled_leaves_command_text() {
+        let filter = OutputFilter::new(FilterOptions {
+            remove_fillers: false,
+            normalise_whitespace: true,
+            cleanup_punctuation: true,
+            sentence_case: false,
+            apply_dictionary: false,
+            australian_spelling: false,
+            spoken_numbers_to_digits: false,
+            voice_formatting_commands: false,
+        });
+        assert_eq!(
+            filter.filter("First thought. New paragraph. Second thought."),
+            "First thought. New paragraph. Second thought."
         );
-    }
-
-    #[test]
-    fn test_format_paragraphs_multiple_breaks() {
-        // ~150 words with sentence boundaries at ~50 and ~100
-        let mut parts = Vec::new();
-        for i in 0..150 {
-            if i == 51 || i == 102 {
-                parts.push("stop.");
-            } else {
-                parts.push("word");
-            }
-        }
-        let text = parts.join(" ");
-        let result = format_paragraphs(&text);
-
-        let break_count = result.matches("\n\n").count();
-        assert!(
-            break_count >= 2,
-            "Should have at least 2 paragraph breaks for ~150 words, got {break_count}"
-        );
-    }
-
-    #[test]
-    fn test_format_paragraphs_question_and_exclamation() {
-        // Verify ? and ! also trigger paragraph breaks
-        let mut parts = Vec::new();
-        for i in 0..110 {
-            if i == 51 {
-                parts.push("right?");
-            } else if i == 103 {
-                parts.push("great!");
-            } else {
-                parts.push("word");
-            }
-        }
-        let text = parts.join(" ");
-        let result = format_paragraphs(&text);
-
-        assert!(result.contains("\n\n"), "Should break at ? or ! boundaries");
     }
 
     #[test]
@@ -1134,6 +1155,7 @@ mod tests {
             apply_dictionary: false, // Disable for test isolation
             australian_spelling: false,
             spoken_numbers_to_digits: false,
+            voice_formatting_commands: false,
         });
 
         let input = "um so like I was thinking you know about the project...and uh I think we should like move forward with it what do you think ??";
@@ -1480,6 +1502,7 @@ mod tests {
             apply_dictionary: false,
             australian_spelling: true,
             spoken_numbers_to_digits: false,
+            voice_formatting_commands: false,
         });
         assert_eq!(
             filter.filter("I love the color and flavor"),
@@ -1497,6 +1520,7 @@ mod tests {
             apply_dictionary: false,
             australian_spelling: false,
             spoken_numbers_to_digits: true,
+            voice_formatting_commands: false,
         });
         assert_eq!(
             filter.filter("I have twenty three items"),

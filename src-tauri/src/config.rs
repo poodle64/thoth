@@ -176,6 +176,11 @@ pub struct TranscriptionConfig {
     /// Whether to capitalise the first word of each sentence
     #[serde(default)]
     pub sentence_case: bool,
+    /// Whether to convert spoken formatting commands ("new paragraph" / "new
+    /// line") into line breaks. Defaults on — the dictation convention used by
+    /// macOS Dictation, Dragon and Talon.
+    #[serde(default = "default_true")]
+    pub voice_formatting_commands: bool,
 }
 
 fn default_true() -> bool {
@@ -196,6 +201,7 @@ impl Default for TranscriptionConfig {
             normalise_whitespace: true,
             cleanup_punctuation: true,
             sentence_case: false,
+            voice_formatting_commands: true,
         }
     }
 }
@@ -974,6 +980,7 @@ mod tests {
                 normalise_whitespace: true,
                 cleanup_punctuation: true,
                 sentence_case: false,
+                voice_formatting_commands: true,
             },
             shortcuts: ShortcutConfig {
                 toggle_recording: "F12".to_string(),

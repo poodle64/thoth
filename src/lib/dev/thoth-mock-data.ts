@@ -32,6 +32,7 @@ const MOCK_CONFIG = {
     remove_fillers: true,
     australian_spelling: true,
     spoken_numbers_to_digits: false,
+    voice_formatting_commands: true,
   },
   shortcuts: {
     toggle_recording: 'F13',
