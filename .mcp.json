@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "quartermaster": {
-      "command": "${HOME}/micromamba/envs/mcp-servers/bin/python",
+      "command": "${HOME}/Nextcloud/programming/projects/repos/mcp-servers/.venv/bin/python",
       "args": [
         "-m",
         "quartermaster_mcp.server",
