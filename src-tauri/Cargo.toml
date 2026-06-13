@@ -43,10 +43,14 @@ sherpa-onnx = { version = "1.13", optional = true }
 # WHY fork, not crates.io: the upstream crate lacks platform compile-guards (fails to
 # build on Linux/Windows); the fork wraps the implementation in
 # `#[cfg(all(target_os = "macos", target_arch = "aarch64"))]` so CI builds pass.
-# The fork is also ahead of upstream on the FluidAudio Swift dependency (0.15.0) and
-# configures melChunkContext=false (silence-aligned chunking), which is load-bearing
-# for the tail-truncation fix — do not replace with the upstream crate until all three
-# are available and verified via the live app. The 0.15.0 rewrite already constructs a
+# The fork is also ahead of upstream on the FluidAudio Swift dependency (0.15.0; upstream
+# still ships 0.14.1) and configures melChunkContext=false (silence-aligned chunking).
+# melChunkContext is now redundant belt-and-braces, NOT load-bearing: app-side segmentation
+# (plan_segments) keeps every padded unit under FluidAudio's 15 s single-shot limit, so the
+# chunked decoder never fires (verified at max 14.85 s across the real recording corpus). The
+# fork is retained for the platform compile-guards and to stay ahead of upstream on FluidAudio
+# 0.15 — do not replace with the upstream crate until the guards AND a 0.15+ bump are upstream
+# and verified via the live app. The 0.15.0 rewrite already constructs a
 # fresh TdtDecoderState per one-shot call (the cross-call decoder-state reset upstream
 # PR #15 adds), so there is nothing to cherry-pick (#79). Pinned by tag, not bare rev.
 fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", tag = "v0.15.0-thoth.1", optional = true }
