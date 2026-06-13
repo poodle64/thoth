@@ -109,6 +109,16 @@
       inputMonitoringPermission === 'granted'
   );
 
+  /**
+   * Whether the REQUIRED permissions are granted. Input Monitoring is optional
+   * (only needed for modifier-key recording triggers), so it must not keep the
+   * permission poll alive indefinitely — otherwise Overview fires native IPC
+   * permission checks twice a second forever for anyone who hasn't granted it.
+   */
+  let requiredPermissionsGranted = $derived(
+    microphonePermission === 'granted' && accessibilityPermission === 'granted'
+  );
+
   /** TCC reset state */
   let resettingPermissions = $state(false);
   let resetError = $state<string | null>(null);
@@ -280,15 +290,26 @@
    * the moment all permissions are granted.
    */
   const POLL_MS = 500;
+  /**
+   * Hard cap on how long the permission poll may run. macOS grants happen within
+   * seconds of the user acting in System Settings; a poll that never terminates
+   * is a busy-loop, so it is bounded as a backstop and reset each time a
+   * permission is actively requested.
+   */
+  const MAX_POLL_MS = 120_000;
   let permissionPollTimer: ReturnType<typeof setInterval> | null = null;
+  let permissionPollStartedAt = 0;
 
   function startPermissionPoll() {
+    permissionPollStartedAt = Date.now();
     if (permissionPollTimer !== null) return;
     permissionPollTimer = setInterval(async () => {
       await checkPermissions();
       if (allPermissionsGranted) {
         stopPermissionPoll();
         invoke('refresh_tray_menu').catch(() => {});
+      } else if (Date.now() - permissionPollStartedAt >= MAX_POLL_MS) {
+        stopPermissionPoll();
       }
     }, POLL_MS);
   }
@@ -417,11 +438,12 @@
 
     await checkPermissions();
 
-    if (allPermissionsGranted) {
+    if (requiredPermissionsGranted) {
       invoke('refresh_tray_menu').catch(() => {});
     } else {
-      // Start adaptive polling — the standard macOS pattern for detecting
-      // TCC changes. Stops automatically when all permissions are granted.
+      // Start adaptive polling only while a REQUIRED permission is outstanding.
+      // Optional Input Monitoring being ungranted must not trigger a perpetual
+      // background poll on every Overview visit (the source of the UI lag).
       startPermissionPoll();
     }
     const [statsResult, readyResult, downloadedResult, gpuResult] = await Promise.allSettled([
