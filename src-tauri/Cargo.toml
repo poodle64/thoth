@@ -36,9 +36,12 @@ webrtc-vad = "0.4"
 symphonia = { version = "0.6", features = ["mp3", "aac", "ogg", "vorbis", "flac", "wav", "pcm", "isomp4"] }
 
 # Transcription
-# Official k2-fsa crate; static + auto-download by default; macOS Parakeet TDT fallback
-# (Linux CI builds without the parakeet feature).
-sherpa-onnx = { version = "1.13", optional = true }
+# Official k2-fsa crate. default-features = false drops its built-in `static`
+# marker; sherpa-onnx-sys still defaults to static linking when no link feature
+# is set (= the `parakeet` feature → CPU, unchanged). The `parakeet-cuda` feature
+# switches it to `shared` so a GPU build can link a CUDA-enabled sherpa-onnx via
+# the SHERPA_ONNX_LIB_DIR env var. (Linux CI builds without the parakeet feature.)
+sherpa-onnx = { version = "1.13", default-features = false, optional = true }
 # fluidaudio-rs: Apple Neural Engine backend via CoreML (macOS-only, Apple Silicon).
 # WHY fork, not crates.io: the upstream crate lacks platform compile-guards (fails to
 # build on Linux/Windows); the fork wraps the implementation in
@@ -131,6 +134,12 @@ objc2-core-foundation = { version = "0.3", features = ["CFString"] }
 [features]
 default = ["parakeet", "fluidaudio"]
 parakeet = ["dep:sherpa-onnx"]
+# GPU Parakeet (NVIDIA): links a CUDA-enabled sherpa-onnx (shared). Build with
+#   cargo build --no-default-features --features "parakeet-cuda,vulkan"
+# and point SHERPA_ONNX_LIB_DIR at the k2-fsa CUDA prebuilt's lib dir. At runtime
+# the recognizer requests the `cuda` provider and falls back to CPU if the EP
+# isn't available. See flake.nix's `cuda` dev shell which wires this up.
+parakeet-cuda = ["parakeet", "sherpa-onnx/shared"]
 fluidaudio = ["dep:fluidaudio-rs"]
 # GPU acceleration for whisper.cpp (mutually exclusive, only use one)
 # Use: cargo build --features cuda      for NVIDIA GPUs

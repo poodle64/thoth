@@ -91,8 +91,16 @@ pub fn get_display_server() -> DisplayServer {
 /// the frontend via the `wayland-shortcuts-status` event.
 pub fn init_global_shortcuts(app: &AppHandle) {
     if get_display_server() == DisplayServer::Wayland {
-        tracing::info!("Wayland session: setting up the XDG GlobalShortcuts portal");
-        super::wayland_portal::setup(app);
+        // On Hyprland the XDG GlobalShortcuts portal registers a shortcut but
+        // never binds a key (the binding comes back empty), so hotkeys never
+        // fire. Use native hyprctl binds + a FIFO there instead of the portal.
+        if super::hyprland::is_hyprland() {
+            tracing::info!("Hyprland detected: using native hyprctl binds (skipping portal)");
+            super::hyprland::setup(app);
+        } else {
+            tracing::info!("Wayland session: setting up the XDG GlobalShortcuts portal");
+            super::wayland_portal::setup(app);
+        }
     }
 }
 

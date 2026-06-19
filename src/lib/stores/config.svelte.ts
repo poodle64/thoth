@@ -105,6 +105,8 @@ export interface GeneralConfig {
   showRecordingIndicator: boolean;
   /** Visual style for the recording indicator */
   indicatorStyle: IndicatorStyle;
+  /** Show native window decorations (Linux); custom close button when off */
+  windowDecorations: boolean;
 }
 
 /** Recorder window position options */
@@ -193,6 +195,7 @@ interface ConfigRaw {
     check_for_updates: boolean;
     show_recording_indicator: boolean;
     indicator_style: IndicatorStyle;
+    window_decorations: boolean;
   };
   recorder: {
     position: RecorderPosition;
@@ -252,6 +255,7 @@ function parseConfig(raw: ConfigRaw): Config {
       checkForUpdates: raw.general.check_for_updates,
       showRecordingIndicator: raw.general.show_recording_indicator,
       indicatorStyle: raw.general.indicator_style,
+      windowDecorations: raw.general.window_decorations ?? true,
     },
     recorder: {
       position: raw.recorder.position,
@@ -312,6 +316,7 @@ function serialiseConfig(config: Config): ConfigRaw {
       check_for_updates: config.general.checkForUpdates,
       show_recording_indicator: config.general.showRecordingIndicator,
       indicator_style: config.general.indicatorStyle,
+      window_decorations: config.general.windowDecorations,
     },
     recorder: {
       position: config.recorder.position,
@@ -372,6 +377,7 @@ function getDefaultConfig(): Config {
       checkForUpdates: true,
       showRecordingIndicator: true,
       indicatorStyle: 'cursor-dot',
+      windowDecorations: true,
     },
     recorder: {
       position: 'top-right',

@@ -85,7 +85,27 @@ impl TranscriptionService {
             }
         };
 
-        #[cfg(not(target_os = "macos"))]
+        // Linux/Windows: with the `parakeet-cuda` feature, try the CUDA execution
+        // provider (NVIDIA GPU) first and fall back to CPU. Without it, CPU only.
+        // Note: onnxruntime silently falls back to CPU if the CUDA EP/libs aren't
+        // present, so confirm real GPU use via `nvidia-smi` during a transcription.
+        #[cfg(all(not(target_os = "macos"), feature = "parakeet-cuda"))]
+        let recognizer = {
+            tracing::info!("Attempting CUDA provider for GPU acceleration");
+            match OfflineRecognizer::create(&build_config(Some("cuda".into()))) {
+                Some(r) => {
+                    tracing::info!("CUDA provider initialised (verify GPU use with nvidia-smi)");
+                    r
+                }
+                None => {
+                    tracing::warn!("CUDA provider failed, falling back to CPU");
+                    OfflineRecognizer::create(&build_config(Some("cpu".into())))
+                        .ok_or_else(|| anyhow!("Failed to create Parakeet recognizer with CPU"))?
+                }
+            }
+        };
+
+        #[cfg(all(not(target_os = "macos"), not(feature = "parakeet-cuda")))]
         let recognizer = {
             tracing::info!("Using CPU provider");
             OfflineRecognizer::create(&build_config(Some("cpu".into())))
