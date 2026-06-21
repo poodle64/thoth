@@ -114,10 +114,11 @@ pub struct TranscribeStatusParams {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Build a successful text result from a serialisable value (pretty JSON).
+/// Build a successful text result from a serialisable value (compact JSON, no
+/// whitespace) to keep MCP responses token-cheap, matching FastMCP servers.
 fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, McpError> {
-    let text = serde_json::to_string_pretty(value)
-        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+    let text =
+        serde_json::to_string(value).map_err(|e| McpError::internal_error(e.to_string(), None))?;
     Ok(CallToolResult::success(vec![Content::text(text)]))
 }
 
