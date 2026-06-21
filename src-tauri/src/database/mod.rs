@@ -40,7 +40,17 @@ impl From<std::io::Error> for DatabaseError {
 }
 
 /// Returns the path to the Thoth database directory (~/.thoth).
+///
+/// `THOTH_DATA_DIR` overrides the location when set to a non-empty path. This
+/// lets tests point the database at a throwaway directory, and lets users
+/// relocate their data, without touching `~/.thoth`.
 fn get_thoth_directory() -> Result<PathBuf, DatabaseError> {
+    if let Ok(dir) = std::env::var("THOTH_DATA_DIR") {
+        if !dir.is_empty() {
+            return Ok(PathBuf::from(dir));
+        }
+    }
+
     let home = dirs::home_dir().ok_or_else(|| {
         DatabaseError::DirectoryCreation(std::io::Error::new(
             std::io::ErrorKind::NotFound,
