@@ -193,6 +193,7 @@ fn discard_silent_wav(result: &Result<PipelineResult, String>, audio_path: &str)
         "Pipeline: Silent recording, deleting orphan WAV: {}",
         audio_path
     );
+    tracing::info!(target: "telemetry", event = "recording_silent_dropped", "recording_silent_dropped");
     if let Err(del_err) = std::fs::remove_file(audio_path) {
         tracing::warn!(
             "Pipeline: Failed to delete silent WAV {}: {}",
@@ -255,6 +256,7 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, Error> {
         if !transcription::download::check_model_downloaded(None) {
             PIPELINE_RUNNING.store(false, Ordering::SeqCst);
             tracing::warn!("Pipeline: No transcription model downloaded, blocking recording");
+            tracing::warn!(target: "telemetry", reason = "no_model_downloaded", "model_load_failure");
             let _ = crate::recording_indicator::hide_recording_indicator(app.clone());
             return Err(
                 "No transcription model downloaded. Open Settings \u{2192} Models to get started."
@@ -278,6 +280,7 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, Error> {
     match crate::audio::start_recording() {
         Ok(path) => {
             tracing::info!("Pipeline: Recording started at {}", path);
+            tracing::info!(target: "telemetry", event = "recording_started", "recording_started");
 
             // Now that start_recording has resolved (and stored) the device name,
             // emit a follow-up progress event that includes it for the UI.
@@ -309,6 +312,7 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, Error> {
         }
         Err(e) => {
             PIPELINE_RUNNING.store(false, Ordering::SeqCst);
+            tracing::warn!(target: "telemetry", reason = "audio_start_failed", "audio_device_failure");
             emit_progress(
                 &app,
                 PipelineState::Failed,
@@ -365,6 +369,14 @@ pub async fn pipeline_stop_and_process(
     // Capture has stopped — release PIPELINE_RUNNING so a new recording can start
     // immediately while this task processes.
     PIPELINE_RUNNING.store(false, Ordering::SeqCst);
+
+    // Recording duration from the WAV header; 0.0 if unavailable.
+    let rec_duration = get_audio_duration(&audio_path).unwrap_or(0.0);
+    tracing::info!(
+        target: "telemetry",
+        duration_seconds = rec_duration,
+        "recording_stopped"
+    );
 
     tracing::info!(
         "Pipeline: Recording stopped, spawning detached process task for {}",
@@ -506,6 +518,7 @@ async fn run_transcription_pipeline(
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         while !transcription::is_transcription_ready() {
             if std::time::Instant::now() > deadline {
+                tracing::warn!(target: "telemetry", reason = "load_timeout_60s", "model_load_failure");
                 return Err("Transcription model failed to load within 60 seconds".to_string());
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -533,6 +546,30 @@ async fn run_transcription_pipeline(
     if raw_text.trim().is_empty() {
         tracing::warn!("Pipeline: Transcription produced no text");
         return Err(NO_SPEECH_ERROR.to_string());
+    }
+
+    // Content-free telemetry — no transcript text, only metrics.
+    {
+        let audio_secs = audio_path
+            .parse::<f64>()
+            .ok()
+            .or_else(|| get_audio_duration(audio_path))
+            .unwrap_or(0.0);
+        let speed_factor = if transcription_duration_seconds > 0.0 {
+            audio_secs / transcription_duration_seconds
+        } else {
+            0.0
+        };
+        let model_label = transcription_model_name.as_deref().unwrap_or("unknown");
+        tracing::info!(
+            target: "telemetry",
+            backend = %model_label,
+            audio_seconds = audio_secs,
+            processing_seconds = transcription_duration_seconds,
+            speed_factor = speed_factor,
+            char_count = raw_text.len(),
+            "transcription_complete"
+        );
     }
 
     tracing::info!(
@@ -607,10 +644,26 @@ async fn run_transcription_pipeline(
                     text.len(),
                     elapsed
                 );
+                // Deliberately no prompt text/id: the telemetry stream is
+                // content-free, and enhancement-by-prompt analytics already
+                // live in the Insights dashboard (from the DB column).
+                tracing::info!(
+                    target: "telemetry",
+                    model = %config.enhancement_model,
+                    duration_seconds = elapsed,
+                    ok = true,
+                    "enhancement_complete"
+                );
                 true
             }
             Err(e) => {
                 tracing::warn!("Pipeline: Enhancement failed, using original text: {}", e);
+                tracing::warn!(
+                    target: "telemetry",
+                    model = %config.enhancement_model,
+                    ok = false,
+                    "enhancement_complete"
+                );
                 false
             }
         }

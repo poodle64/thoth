@@ -27,6 +27,7 @@ pub mod recording_indicator;
 pub mod shortcuts;
 pub mod sound;
 pub mod storage;
+pub mod telemetry;
 pub mod text_insert;
 #[cfg(target_os = "macos")]
 mod traffic_lights;
@@ -158,14 +159,76 @@ pub(crate) fn ensure_crypto_provider() {
     });
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    ensure_crypto_provider();
+/// Bridge between `init_logging` and the Tauri `setup` hook.
+///
+/// `init_logging` registers the Loki layer with the subscriber and stores the
+/// `BackgroundTask` here. The Tauri `setup` hook takes it out and spawns it on
+/// the async runtime once that runtime is available.
+static LOKI_TASK_STORE: std::sync::Mutex<Option<tracing_loki::BackgroundTask>> =
+    std::sync::Mutex::new(None);
 
-    // Set up file-based logging for debugging (local time for readability)
+/// Build a `tracing-loki` `(Layer, BackgroundTask)` pair from `LoggingConfig`.
+///
+/// Returns `None` on any error (bad URL, bad label name, etc.) so the caller
+/// gracefully falls back to local-only logging.
+fn build_loki_components(
+    cfg: &config::LoggingConfig,
+) -> Option<(tracing_loki::Layer, tracing_loki::BackgroundTask)> {
+    let url = cfg.loki_url.parse::<url::Url>().ok()?;
+
+    // hostname crate gives us the machine name without pulling in system deps beyond
+    // what is already in the tree.
+    let host = hostname::get()
+        .ok()
+        .map(|h| h.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let mut builder = tracing_loki::builder()
+        .label("app", "thoth")
+        .ok()?
+        .label("host", host)
+        .ok()?
+        .label("version", env!("CARGO_PKG_VERSION"))
+        .ok()?;
+
+    for pair in &cfg.loki_labels {
+        builder = builder.label(pair[0].as_str(), pair[1].as_str()).ok()?;
+    }
+
+    // Authorization header — value is intentionally not logged anywhere.
+    if !cfg.loki_auth.0.is_empty() {
+        builder = builder
+            .http_header("Authorization", cfg.loki_auth.0.as_str())
+            .ok()?;
+    }
+
+    if let Some(tenant) = &cfg.loki_tenant {
+        builder = builder.http_header("X-Scope-OrgID", tenant.as_str()).ok()?;
+    }
+
+    builder.build_url(url).ok()
+}
+
+/// Initialise the layered tracing subscriber.
+///
+/// Layers:
+/// - **File**: daily rolling appender (`~/.thoth/logs/thoth-YYYY-MM-DD.log`), retaining
+///   `local_retention_days` files before pruning the oldest.
+/// - **Stdout**: unchanged dev convenience.
+/// - **Loki (optional)**: built only when `logging.remote_enabled` is true and a URL is set.
+///   Filtered to `target == "telemetry"` events only — the structural privacy boundary that
+///   prevents transcript content from ever reaching the remote endpoint.
+///   The Loki `BackgroundTask` is stored in `LOKI_COMPONENTS` and spawned in the Tauri `setup`
+///   hook once the async runtime is available. The `Layer` itself is registered here so events
+///   queue into its channel from first use; the task just needs to start before the first flush.
+///
+/// Configuration is read synchronously from disk so the subscriber is ready before any event
+/// fires. Changes require a restart (documented in the UI).
+fn init_logging() {
+    use tracing_subscriber::Layer;
     use tracing_subscriber::prelude::*;
 
-    /// Format timestamps using the system's local time via chrono
+    /// Local-time timestamp formatter using chrono
     struct LocalTimer;
     impl tracing_subscriber::fmt::time::FormatTime for LocalTimer {
         fn format_time(
@@ -180,33 +243,80 @@ pub fn run() {
         }
     }
 
+    let logging_cfg = config::read_logging_config_early();
+
     let log_dir = dirs::home_dir()
         .map(|h| h.join(".thoth").join("logs"))
         .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
     let _ = std::fs::create_dir_all(&log_dir);
-    let log_file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_dir.join("thoth-debug.log"))
-        .ok();
 
-    if let Some(file) = log_file {
-        let file_layer = tracing_subscriber::fmt::layer()
-            .with_writer(std::sync::Mutex::new(file))
-            .with_timer(LocalTimer)
-            .with_ansi(false);
-        let stdout_layer = tracing_subscriber::fmt::layer().with_timer(LocalTimer);
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-            )
-            .with(stdout_layer)
-            .with(file_layer)
-            .init();
-    } else {
-        tracing_subscriber::fmt().with_timer(LocalTimer).init();
+    // Daily rolling appender with bounded retention. Falls back to a no-op writer on
+    // error (e.g. permission denied) so the app still starts without logging to disk.
+    let (appender, guard) = match tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("thoth")
+        .filename_suffix("log")
+        .max_log_files(logging_cfg.local_retention_days as usize)
+        .build(&log_dir)
+    {
+        Ok(a) => tracing_appender::non_blocking(a),
+        Err(_) => tracing_appender::non_blocking(std::io::sink()),
+    };
+    // Leak the WorkerGuard so the background writer lives for the process lifetime
+    // and flushes on shutdown.
+    std::mem::forget(guard);
+
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(appender)
+        .with_timer(LocalTimer)
+        .with_ansi(false);
+
+    let stdout_layer = tracing_subscriber::fmt::layer().with_timer(LocalTimer);
+
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+
+    let registry = tracing_subscriber::registry()
+        .with(env_filter)
+        .with(stdout_layer)
+        .with(file_layer);
+
+    if logging_cfg.remote_enabled && !logging_cfg.loki_url.is_empty() {
+        if let Some((loki_layer, loki_task)) = build_loki_components(&logging_cfg) {
+            // The Loki layer is filtered to `target == "telemetry"` only — the
+            // allow-list boundary that makes content leakage structurally impossible.
+            let telemetry_filter =
+                tracing_subscriber::filter::filter_fn(|meta| meta.target() == "telemetry");
+
+            // Store only the background task; the layer is consumed by registry.with().
+            // The Tauri setup hook takes the task out of LOKI_TASK_STORE and spawns it.
+            {
+                let mut stored = LOKI_TASK_STORE.lock().unwrap_or_else(|e| e.into_inner());
+                *stored = Some(loki_task);
+            }
+
+            registry
+                .with(loki_layer.with_filter(telemetry_filter))
+                .init();
+            return;
+        }
+        // Log after init so the warning reaches the file layer — call init first.
+        registry.init();
+        tracing::warn!(
+            "Loki remote logging enabled but layer could not be built (bad URL or label?); \
+             falling back to local-only logging"
+        );
+        return;
     }
+
+    registry.init();
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    ensure_crypto_provider();
+
+    init_logging();
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -235,6 +345,31 @@ pub fn run() {
     builder
         .setup(|app| {
             tracing::info!("Thoth starting");
+
+            // Spawn the Loki background task if the remote logging layer was built.
+            // init_logging() registered the layer and stored the task here; the async
+            // runtime is now live so we can spawn it. Events queued before this point
+            // are buffered in the layer's channel and drained once the task starts.
+            if let Some(task) = LOKI_TASK_STORE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+            {
+                tauri::async_runtime::spawn(task);
+                tracing::info!("Loki telemetry background task started");
+
+                // Emit app-start telemetry event now that the task is live.
+                let gpu_label = platform::get_gpu_info()
+                    .map(|g| g.gpu_name.unwrap_or_else(|| g.compiled_backend.clone()))
+                    .unwrap_or_else(|_| "unknown".to_string());
+                tracing::info!(
+                    target: "telemetry",
+                    version = env!("CARGO_PKG_VERSION"),
+                    os = std::env::consts::OS,
+                    gpu = %gpu_label,
+                    "app_start"
+                );
+            }
 
             // Store the app handle for the few deep paths that emit user-facing
             // events without a handle of their own (e.g. audio device fallback).
@@ -609,6 +744,8 @@ pub fn run() {
             control_api::get_api_token,
             control_api::rotate_api_token,
             control_api::set_api_port,
+            // Logging / telemetry
+            telemetry::test_loki_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

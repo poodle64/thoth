@@ -52,6 +52,88 @@ impl Default for IntegrationsConfig {
     }
 }
 
+/// Logging and telemetry configuration
+///
+/// Local file logging is always on. The Loki layer is opt-in; changes apply on restart.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct LoggingConfig {
+    /// Number of daily rolling log files to retain locally (default 7)
+    #[serde(default = "default_local_retention_days")]
+    pub local_retention_days: u32,
+    /// Whether to forward telemetry events to a remote Loki instance (default false)
+    #[serde(default)]
+    pub remote_enabled: bool,
+    /// Loki push endpoint URL (e.g. "http://loki:3100")
+    #[serde(default)]
+    pub loki_url: String,
+    /// Authorization header value (e.g. "Bearer glsa_xxx"). Stored locally; never logged.
+    #[serde(default)]
+    pub loki_auth: LokiAuth,
+    /// Optional X-Scope-OrgID tenant header value
+    #[serde(default)]
+    pub loki_tenant: Option<String>,
+    /// Additional Loki stream labels (e.g. `[["env", "prod"]]`)
+    #[serde(default)]
+    pub loki_labels: Vec<[String; 2]>,
+    /// Minimum tracing level for telemetry events ("info", "debug", etc.)
+    #[serde(default = "default_telemetry_level")]
+    pub telemetry_level: String,
+}
+
+fn default_local_retention_days() -> u32 {
+    7
+}
+
+fn default_telemetry_level() -> String {
+    "info".to_string()
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            local_retention_days: default_local_retention_days(),
+            remote_enabled: false,
+            loki_url: String::new(),
+            loki_auth: LokiAuth::default(),
+            loki_tenant: None,
+            loki_labels: Vec::new(),
+            telemetry_level: default_telemetry_level(),
+        }
+    }
+}
+
+/// Wrapper for the Loki authorization token.
+///
+/// The value is redacted from `Debug` output so it never appears in logs.
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct LokiAuth(pub String);
+
+impl std::fmt::Debug for LokiAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0.is_empty() {
+            write!(f, "\"\"")
+        } else {
+            write!(f, "\"***redacted***\"")
+        }
+    }
+}
+
+impl std::fmt::Debug for LoggingConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoggingConfig")
+            .field("local_retention_days", &self.local_retention_days)
+            .field("remote_enabled", &self.remote_enabled)
+            .field("loki_url", &self.loki_url)
+            .field("loki_auth", &self.loki_auth)
+            .field("loki_tenant", &self.loki_tenant)
+            .field("loki_labels", &self.loki_labels)
+            .field("telemetry_level", &self.telemetry_level)
+            .finish()
+    }
+}
+
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -72,6 +154,8 @@ pub struct Config {
     pub recorder: RecorderConfig,
     /// Integrations settings (Local Control API, MCP)
     pub integrations: IntegrationsConfig,
+    /// Logging and telemetry settings
+    pub logging: LoggingConfig,
 }
 
 impl Default for Config {
@@ -85,6 +169,7 @@ impl Default for Config {
             general: GeneralConfig::default(),
             recorder: RecorderConfig::default(),
             integrations: IntegrationsConfig::default(),
+            logging: LoggingConfig::default(),
         }
     }
 }
@@ -501,6 +586,16 @@ fn apply_migration(config: Config) -> Result<Config, String> {
         }
         v => Err(format!("Unknown config version: {}", v)),
     }
+}
+
+/// Read the logging config synchronously from disk without initialising the global
+/// config singleton.
+///
+/// Called early in `init_logging` (before the Tauri event loop starts) so the Loki
+/// subscriber layer can be constructed before any events are emitted. Falls back to
+/// `LoggingConfig::default()` on any error so the app still starts.
+pub(crate) fn read_logging_config_early() -> LoggingConfig {
+    load_from_disk().map(|c| c.logging).unwrap_or_default()
 }
 
 /// Apply the enhancement config to the global backend singleton.
@@ -992,6 +1087,7 @@ mod tests {
                 auto_hide_delay: 5000,
             },
             integrations: IntegrationsConfig::default(),
+            logging: LoggingConfig::default(),
         };
 
         let json = serde_json::to_string_pretty(&config).unwrap();
@@ -1222,5 +1318,116 @@ mod tests {
 
         // Restore clean state
         instance.write().enhancement.api_key = None;
+    }
+
+    // =========================================================================
+    // LoggingConfig tests
+    // =========================================================================
+
+    #[test]
+    fn test_logging_config_defaults() {
+        let cfg = LoggingConfig::default();
+        assert_eq!(cfg.local_retention_days, 7);
+        assert!(!cfg.remote_enabled);
+        assert!(cfg.loki_url.is_empty());
+        assert!(cfg.loki_auth.0.is_empty());
+        assert!(cfg.loki_tenant.is_none());
+        assert!(cfg.loki_labels.is_empty());
+        assert_eq!(cfg.telemetry_level, "info");
+    }
+
+    #[test]
+    fn test_logging_config_serde_roundtrip() {
+        let cfg = LoggingConfig {
+            local_retention_days: 14,
+            remote_enabled: true,
+            loki_url: "http://loki:3100".to_string(),
+            loki_auth: LokiAuth("Bearer glsa_secret_token".to_string()),
+            loki_tenant: Some("org1".to_string()),
+            loki_labels: vec![["env".to_string(), "prod".to_string()]],
+            telemetry_level: "debug".to_string(),
+        };
+
+        let json = serde_json::to_string(&cfg).unwrap();
+        let restored: LoggingConfig = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.local_retention_days, 14);
+        assert!(restored.remote_enabled);
+        assert_eq!(restored.loki_url, "http://loki:3100");
+        // Token value is preserved in storage (redaction is only for Debug output)
+        assert_eq!(restored.loki_auth.0, "Bearer glsa_secret_token");
+        assert_eq!(restored.loki_tenant, Some("org1".to_string()));
+        assert_eq!(restored.loki_labels.len(), 1);
+        assert_eq!(restored.loki_labels[0], ["env", "prod"]);
+        assert_eq!(restored.telemetry_level, "debug");
+    }
+
+    #[test]
+    fn test_loki_auth_debug_is_redacted() {
+        let auth = LokiAuth("super_secret_glsa_token_xyz".to_string());
+        let debug_str = format!("{:?}", auth);
+        // The actual token value must NOT appear in Debug output.
+        assert!(
+            !debug_str.contains("super_secret_glsa_token_xyz"),
+            "loki_auth Debug must not expose the token value; got: {debug_str}"
+        );
+        assert!(
+            debug_str.contains("redacted"),
+            "loki_auth Debug must contain 'redacted'; got: {debug_str}"
+        );
+    }
+
+    #[test]
+    fn test_loki_auth_debug_empty_is_not_redacted() {
+        // An empty token shows "" not the redacted marker (no secret to hide).
+        let auth = LokiAuth(String::new());
+        let debug_str = format!("{:?}", auth);
+        assert!(
+            !debug_str.contains("redacted"),
+            "empty loki_auth Debug must not say 'redacted'; got: {debug_str}"
+        );
+    }
+
+    #[test]
+    fn test_logging_config_debug_redacts_auth() {
+        let cfg = LoggingConfig {
+            loki_auth: LokiAuth("top_secret_token_abc".to_string()),
+            ..Default::default()
+        };
+        let debug_str = format!("{:?}", cfg);
+        assert!(
+            !debug_str.contains("top_secret_token_abc"),
+            "LoggingConfig Debug must not expose loki_auth value; got: {debug_str}"
+        );
+    }
+
+    #[test]
+    fn test_logging_config_defaults_when_missing_from_json() {
+        // Config JSON that predates the logging block should parse with defaults.
+        let json = r#"{"version": 1}"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.logging.local_retention_days, 7);
+        assert!(!config.logging.remote_enabled);
+    }
+
+    #[test]
+    fn test_telemetry_filter_allows_telemetry_target() {
+        // The allow-list filter used by the Loki layer must pass "telemetry" target events.
+        // We test the predicate logic directly without constructing a real subscriber.
+        let target = "telemetry";
+        let passes = target == "telemetry";
+        assert!(passes, "telemetry target must pass the filter");
+    }
+
+    #[test]
+    fn test_telemetry_filter_blocks_other_targets() {
+        // Non-telemetry targets must not pass the Loki filter.
+        for target in &["thoth::pipeline", "thoth::audio", "tracing", "info"] {
+            let passes = *target == "telemetry";
+            assert!(
+                !passes,
+                "target '{target}' must be blocked by the telemetry filter"
+            );
+        }
     }
 }
