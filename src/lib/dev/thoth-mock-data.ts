@@ -232,6 +232,153 @@ const MOCK_CLIPBOARD_SETTINGS = {
 };
 
 // ---------------------------------------------------------------------------
+// Insights mock data
+// ---------------------------------------------------------------------------
+
+/** Build ~90 days of realistic activity ending today */
+function buildMockActivity(): Array<{ day: string; count: number; words: number }> {
+  const activity = [];
+  const today = new Date();
+  // Seed the RNG deterministically so the heatmap looks the same each load
+  let seed = 42;
+  const rand = () => {
+    seed = (seed * 1664525 + 1013904223) & 0xffffffff;
+    return (seed >>> 0) / 0xffffffff;
+  };
+
+  for (let i = 89; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const day = d.toISOString().slice(0, 10);
+    // Realistic pattern: weekdays heavier, occasional weekends, some gaps
+    const dow = d.getDay();
+    const isWeekend = dow === 0 || dow === 6;
+    const base = isWeekend ? 2 : 8;
+    const r = rand();
+    if (r < 0.15) {
+      // Day off
+      continue;
+    }
+    const count = Math.round(base * r * 2 + 1);
+    const words = count * Math.round(30 + rand() * 80);
+    activity.push({ day, count, words });
+  }
+  return activity;
+}
+
+const MOCK_INSIGHTS_DATA = {
+  totals: {
+    totalCount: 1842,
+    totalAudioSeconds: 28560,
+    totalWords: 183400,
+    enhancedCount: 312,
+    typingTimeSavedSeconds: 275100, // 183400 words / 40 wpm * 60s
+    firstRecordingAt: new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString(),
+  },
+  activity: buildMockActivity(),
+  currentStreak: 14,
+  longestStreak: 31,
+  throughput: [
+    {
+      name: 'FluidAudio',
+      count: 1200,
+      avgAudioDuration: 8.2,
+      avgProcessingTime: 0.12,
+      speedFactor: 67,
+    },
+    {
+      name: 'Whisper',
+      count: 580,
+      avgAudioDuration: 11.4,
+      avgProcessingTime: 0.67,
+      speedFactor: 17,
+    },
+    {
+      name: 'Parakeet',
+      count: 62,
+      avgAudioDuration: 6.1,
+      avgProcessingTime: 1.05,
+      speedFactor: 5.8,
+    },
+  ],
+  modelUsage: {
+    backendCounts: [
+      { name: 'FluidAudio (Parakeet v3)', count: 1200 },
+      { name: 'Whisper Small', count: 580 },
+      { name: 'Parakeet TDT v3', count: 62 },
+    ],
+    enhancementPrompts: [
+      { prompt: 'Fix grammar and punctuation', count: 210 },
+      { prompt: 'Summarise', count: 102 },
+    ],
+    enhancedPct: 17,
+  },
+  lengthHistogram: [
+    { bucketLabel: '0–5s', count: 412 },
+    { bucketLabel: '5–15s', count: 680 },
+    { bucketLabel: '15–30s', count: 420 },
+    { bucketLabel: '30–60s', count: 210 },
+    { bucketLabel: '1–2m', count: 88 },
+    { bucketLabel: '2m+', count: 32 },
+  ],
+  timeOfDay: [
+    2, 0, 0, 0, 0, 1, 4, 18, 72, 95, 112, 98, 85, 76, 88, 102, 94, 68, 42, 28, 14, 8, 4, 2,
+  ],
+  storage: {
+    recordingsBytes: 412 * 1024 * 1024,
+    modelsBytes: 155 * 1024 * 1024,
+    dbBytes: 2.4 * 1024 * 1024,
+    totalBytes: (412 + 155 + 2.4) * 1024 * 1024,
+    oldestRecordingAt: new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString(),
+  },
+};
+
+// Realistic cruft: low-density recordings (chars/sec well below the ~1.0
+// threshold) — a silent forgotten-toggle and two silence-hallucinations.
+const MOCK_CRUFT_CANDIDATES = [
+  {
+    id: 'cruft-1',
+    createdAt: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString(),
+    textPreview: '',
+    durationSeconds: 47.2,
+    density: 0.0,
+    audioPath: '/Users/dev/.thoth/Recordings/thoth_recording_20240617_050312.wav',
+    fileBytes: 1510400,
+    rms: 0.015,
+  },
+  {
+    id: 'cruft-2',
+    createdAt: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString(),
+    textPreview: 'Thank you.',
+    durationSeconds: 16.4,
+    density: 0.6,
+    audioPath: '/Users/dev/.thoth/Recordings/thoth_recording_20240619_091033.wav',
+    fileBytes: 524800,
+    rms: 0.041,
+  },
+  {
+    id: 'cruft-3',
+    createdAt: new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString(),
+    textPreview: 'Okay.',
+    durationSeconds: 23.1,
+    density: 0.2,
+    audioPath: '/Users/dev/.thoth/Recordings/thoth_recording_20240621_152244.wav',
+    fileBytes: 739200,
+    rms: null,
+  },
+];
+
+const MOCK_TRASH_ENTRIES: Array<{
+  id: string;
+  textPreview: string;
+  createdAt: string;
+  deletedAt: string;
+  durationSeconds: number;
+  fileBytes: number;
+  audioMoved: boolean;
+}> = [];
+
+// ---------------------------------------------------------------------------
 // Command map
 // ---------------------------------------------------------------------------
 
@@ -277,6 +424,51 @@ export const thothMockCommands: CommandMap = {
 
   // -- Storage pane --
   get_storage_usage: () => MOCK_STORAGE_USAGE,
+
+  // -- Insights pane --
+  get_insights: () => MOCK_INSIGHTS_DATA,
+  get_cruft_candidates: () => MOCK_CRUFT_CANDIDATES,
+  quarantine_recordings: (args) => {
+    const ids = (args as { ids?: string[] } | undefined)?.ids ?? [];
+    // Move matched candidates into the mock trash
+    const moved = MOCK_CRUFT_CANDIDATES.filter((c) => ids.includes(c.id));
+    for (const m of moved) {
+      MOCK_TRASH_ENTRIES.push({
+        id: m.id,
+        textPreview: m.textPreview,
+        createdAt: m.createdAt,
+        deletedAt: new Date().toISOString(),
+        durationSeconds: m.durationSeconds,
+        fileBytes: m.fileBytes,
+        audioMoved: true,
+      });
+      const idx = MOCK_CRUFT_CANDIDATES.findIndex((c) => c.id === m.id);
+      if (idx !== -1) MOCK_CRUFT_CANDIDATES.splice(idx, 1);
+    }
+    return moved.length;
+  },
+  restore_recordings: (args) => {
+    const ids = (args as { ids?: string[] } | undefined)?.ids ?? [];
+    ids.forEach((id) => {
+      const idx = MOCK_TRASH_ENTRIES.findIndex((e) => e.id === id);
+      if (idx !== -1) MOCK_TRASH_ENTRIES.splice(idx, 1);
+    });
+    return ids.length;
+  },
+  purge_trash: (args) => {
+    const ids = (args as { ids?: string[] } | undefined)?.ids;
+    if (!ids || ids.length === 0) {
+      MOCK_TRASH_ENTRIES.splice(0, MOCK_TRASH_ENTRIES.length);
+    } else {
+      ids.forEach((id) => {
+        const idx = MOCK_TRASH_ENTRIES.findIndex((e) => e.id === id);
+        if (idx !== -1) MOCK_TRASH_ENTRIES.splice(idx, 1);
+      });
+    }
+    return undefined;
+  },
+  list_trash: () => [...MOCK_TRASH_ENTRIES],
+  compute_audio_rms: () => 0.18,
 
   // -- Permissions pane --
   check_accessibility: () => true,
