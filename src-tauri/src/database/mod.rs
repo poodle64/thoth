@@ -7,6 +7,7 @@ pub mod insights;
 pub mod migrations;
 pub mod schema;
 pub mod transcription;
+pub mod trash;
 
 use rusqlite::Connection;
 use std::path::PathBuf;
@@ -116,6 +117,14 @@ pub fn initialise_database() -> Result<(), DatabaseError> {
     let mut conn = open_connection()?;
     run_migrations(&mut conn)?;
 
+    // Remove trash entries that have exceeded the retention window.
+    // Failures are logged but not fatal — a missed purge is recoverable next startup.
+    match trash::auto_purge_expired(&mut conn) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("Auto-purged {} expired trash entries", n),
+        Err(e) => tracing::warn!("auto_purge_expired failed (non-fatal): {}", e),
+    }
+
     tracing::info!("Database initialised successfully");
     Ok(())
 }
@@ -163,6 +172,9 @@ pub use transcription::{
     get_transcription_stats_cmd, list_all_transcriptions, reconcile_orphaned_recordings_cmd,
     save_transcription, search_transcriptions_text,
 };
+
+// Re-export trash Tauri commands
+pub use trash::{list_trash, purge_trash, quarantine_recordings, restore_recordings};
 
 #[cfg(test)]
 mod tests {

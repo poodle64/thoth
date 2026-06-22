@@ -503,6 +503,11 @@ pub fn run() {
             database::insights::get_insights,
             database::insights::get_cruft_candidates,
             database::insights::compute_audio_rms,
+            // Trash / quarantine
+            database::trash::quarantine_recordings,
+            database::trash::restore_recordings,
+            database::trash::purge_trash,
+            database::trash::list_trash,
             // Export
             export::search_history,
             export::export_to_json,

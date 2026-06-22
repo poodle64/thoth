@@ -47,3 +47,27 @@ pub const ALTER_ADD_ENHANCEMENT_MODEL_NAME: &str =
 
 pub const ALTER_ADD_ENHANCEMENT_DURATION: &str =
     "ALTER TABLE transcriptions ADD COLUMN enhancement_duration_seconds REAL;";
+
+/// SQL statement to create the trash table (v3 migration).
+///
+/// Snapshots the full `transcriptions` row plus quarantine metadata so
+/// the entry can be fully restored.
+pub const CREATE_TRASH_TABLE: &str = r#"
+CREATE TABLE IF NOT EXISTS trash (
+    id TEXT PRIMARY KEY,
+    text TEXT NOT NULL,
+    raw_text TEXT,
+    duration_seconds REAL,
+    created_at TEXT NOT NULL,
+    audio_path TEXT,
+    is_enhanced INTEGER NOT NULL DEFAULT 0,
+    enhancement_prompt TEXT,
+    transcription_model_name TEXT,
+    transcription_duration_seconds REAL,
+    enhancement_model_name TEXT,
+    enhancement_duration_seconds REAL,
+    original_path TEXT,
+    deleted_at TEXT NOT NULL,
+    audio_moved INTEGER NOT NULL DEFAULT 0
+);
+"#;
