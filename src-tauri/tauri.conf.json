@@ -15,8 +15,10 @@
       {
         "label": "main",
         "title": "Thoth",
-        "width": 900,
+        "width": 1100,
         "height": 1000,
+        "minWidth": 980,
+        "minHeight": 700,
         "visible": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true
