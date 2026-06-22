@@ -500,6 +500,9 @@ pub fn run() {
             database::transcription::search_transcriptions_text,
             database::transcription::count_transcriptions_filtered,
             database::transcription::get_transcription_stats_cmd,
+            database::insights::get_insights,
+            database::insights::get_cruft_candidates,
+            database::insights::compute_audio_rms,
             // Export
             export::search_history,
             export::export_to_json,

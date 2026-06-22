@@ -3,6 +3,7 @@
 //! Provides SQLite database connection management and migrations.
 //! Database is stored at `~/.thoth/thoth.db`.
 
+pub mod insights;
 pub mod migrations;
 pub mod schema;
 pub mod transcription;
