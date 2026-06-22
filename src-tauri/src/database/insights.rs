@@ -177,7 +177,7 @@ fn get_insights_with_conn(
                     COUNT(*),
                     COALESCE(SUM(duration_seconds), 0.0),
                     COALESCE(SUM(LENGTH(text)), 0),
-                    SUM(CASE WHEN is_enhanced = 1 THEN 1 ELSE 0 END),
+                    COALESCE(SUM(CASE WHEN is_enhanced = 1 THEN 1 ELSE 0 END), 0),
                     MIN(created_at)
                 FROM transcriptions
                 WHERE created_at >= ?1
@@ -200,7 +200,7 @@ fn get_insights_with_conn(
                     COUNT(*),
                     COALESCE(SUM(duration_seconds), 0.0),
                     COALESCE(SUM(LENGTH(text)), 0),
-                    SUM(CASE WHEN is_enhanced = 1 THEN 1 ELSE 0 END),
+                    COALESCE(SUM(CASE WHEN is_enhanced = 1 THEN 1 ELSE 0 END), 0),
                     MIN(created_at)
                 FROM transcriptions
                 "#,
