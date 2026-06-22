@@ -60,6 +60,15 @@ const MOCK_CONFIG = {
     api_port: 8765,
     mcp_enabled: false,
   },
+  logging: {
+    local_retention_days: 7,
+    remote_enabled: false,
+    loki_url: '',
+    loki_auth: '',
+    loki_tenant: null,
+    loki_labels: [] as [string, string][],
+    telemetry_level: 'info',
+  },
 };
 
 const MOCK_MODELS = [
@@ -577,6 +586,16 @@ export const thothMockCommands: CommandMap = {
   remove_quarantine: () => undefined,
   start_audio_preview: () => undefined,
   stop_audio_preview: () => undefined,
+
+  // -- Logging & Telemetry --
+  test_loki_connection: (args) => {
+    const url = (args as { url?: string } | undefined)?.url ?? '';
+    // Simulate failure for obviously-bogus URLs (empty or localhost placeholder)
+    if (!url || url === 'http://loki:3100/loki/api/v1/push') {
+      throw new Error('Connection refused — is Loki reachable?');
+    }
+    return undefined;
+  },
 
   // -- Integrations (Local Control API + MCP server) --
   get_integrations_status: () => ({
