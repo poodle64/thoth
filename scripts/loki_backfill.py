@@ -14,10 +14,20 @@ Timestamps: the log changed format partway through its life, so both are
 parsed — early ``2026-02-16T03:07:24.701243Z`` (UTC) and later
 ``2026-06-22 09:40:23.914`` (local). Both convert to epoch-nanoseconds.
 
+Local-format timestamps (``2026-06-22 09:40:23.914``) are parsed as naive
+datetimes and interpreted in the **running machine's local timezone**. For
+accurate results, run this script on the same host that produced the logs, or
+set the ``TZ`` environment variable to match the log-producing host's timezone
+before running.
+
 Loki ingest: pushes oldest->newest per stream (Loki enforces a per-stream
 out-of-order window). The file is already chronological, so file order is
 preserved per stream. Relax ``reject_old_samples_max_age`` on the Loki
 instance before running a months-old backfill.
+
+IMPORTANT — no idempotency: re-running this script pushes duplicate entries
+into Loki. Clear the target Loki stream before re-running, or use ``--dry-run``
+to preview without pushing.
 
 Usage:
     # preview what would ship — needs no endpoint, sends nothing
@@ -54,17 +64,28 @@ LOCAL_RE = re.compile(
     r"(?P<level>TRACE|DEBUG|INFO|WARN|ERROR)\s+(?P<rest>.*)$"
 )
 
-# Hard DENY: the verbatim-transcript marker. Any line containing this is
-# dropped regardless of level. This is the structural privacy guarantee.
-TRANSCRIPT_MARKERS = ("characters: '", 'characters: "')
+# Hard DENY: any line containing one of these substrings is dropped regardless
+# of level. This is the structural privacy guarantee.
+#
+# Covered patterns (verified against src-tauri/src/transcription/):
+#   "Transcribed N characters: '<text>'"   — characters: '  / characters: "
+#   "Transcription result: '<text>'"       — whisper.rs:228, parakeet.rs:188
+TRANSCRIPT_MARKERS = (
+    "characters: '",
+    'characters: "',
+    "Transcription result:",
+)
 
 # ALLOW-LIST: substrings of valuable, content-free observability/performance
 # events. WARN/ERROR lines are allowed wholesale (minus the DENY net) because
 # operational failures are the point of the export.
+#
+# Verified against actual format strings in src-tauri/src/transcription/:
+#   whisper.rs / parakeet.rs: "Transcribed {:.2}s audio in {:.2}s (RTF: {:.3})"
+#   fluidaudio.rs:            "FluidAudio transcript: {} chars, {} words from {} segment(s) in {:.3}s"
 ALLOW_SUBSTRINGS = (
-    "Transcription took",
-    "transcribed",  # "FluidAudio transcribed Ns audio in Ns (RTFx: N)" — speed factor
-    "RTFx",
+    "Transcribed",  # whisper.rs / parakeet.rs timing line (capital T)
+    "FluidAudio transcript:",  # fluidaudio.rs timing/word-count line
     "Recording started",
     "Recording stopped",
     "Silent recording",
@@ -80,7 +101,16 @@ ALLOW_SUBSTRINGS = (
     "Thoth starting",
 )
 
-HOME_RE = re.compile(r"/Users/[^/\s]+/")
+# Matches macOS (/Users/<user>/) and Linux (/home/<user>/) home paths.
+HOME_RE = re.compile(r"(?:/Users/|/home/)[^/\s]+/")
+
+# Matches the full cpal device-id token (backend:name:serial:index).
+# The human-readable name can contain spaces, so the stop set is only closing
+# delimiters (], ', ") — NOT whitespace. This ensures the USB serial in ids
+# like "coreaudio:AppleUSBAudioEngine:Plantronics:Plantronics Blackwire
+# 3220 Series:DD03779C482045FC88A303FF48A8B6CA:1" is fully consumed.
+# The entire token is replaced with <device-id>.
+DEVICE_ID_RE = re.compile(r"(?:coreaudio|alsa|wasapi):[^\]'\"]+")
 
 
 def to_epoch_ns(ts: str) -> int:
@@ -89,7 +119,7 @@ def to_epoch_ns(ts: str) -> int:
         dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))  # aware UTC
     else:
         dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S.%f")  # naive -> local
-    return int(dt.timestamp()) * 1_000_000_000 + dt.microsecond * 1000
+    return round(dt.timestamp() * 1_000_000_000)
 
 
 def classify(rest: str, level: str) -> bool:
@@ -102,8 +132,16 @@ def classify(rest: str, level: str) -> bool:
 
 
 def redact(rest: str) -> str:
-    """Tidy home-directory paths so the literal username is not shipped."""
-    return HOME_RE.sub("~/", rest)
+    """Remove PII-adjacent identifiers before shipping a log line.
+
+    - Home paths: replaces /Users/<user>/ and /home/<user>/ with ~/
+    - Device IDs: replaces opaque cpal id suffixes (USB serials, MAC-like ids)
+      with <device-id> so the backend name survives but the hardware fingerprint
+      does not ship.
+    """
+    rest = HOME_RE.sub("~/", rest)
+    rest = DEVICE_ID_RE.sub("<device-id>", rest)
+    return rest
 
 
 def iter_matches(log_path: str, max_lines: int | None):
@@ -172,6 +210,11 @@ def main() -> int:
         raise SystemExit(f"Log not found: {args.log_path}")
 
     if args.dry_run:
+        print(
+            "WARNING: this script has no idempotency guard. Re-running against a live "
+            "endpoint pushes duplicate entries. Clear the Loki stream first.",
+            file=sys.stderr,
+        )
         by_level = Counter()
         templates = Counter()
         first_ns = last_ns = None
@@ -194,6 +237,11 @@ def main() -> int:
             print(f"  {n:>8}  {tmpl}")
         return 0
 
+    print(
+        "WARNING: no idempotency guard — re-running pushes duplicate entries. "
+        "Clear the target Loki stream before re-running.",
+        file=sys.stderr,
+    )
     url = os.environ.get("LOKI_PUSH_URL")
     if not url:
         raise SystemExit("Set LOKI_PUSH_URL (and optionally LOKI_AUTH, LOKI_TENANT)")
