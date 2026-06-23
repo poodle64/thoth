@@ -189,8 +189,10 @@
             aria-label="Loki bearer token"
           />
           <p class="text-xs text-muted-foreground">
-            Just the token — <span class="font-mono">Bearer</span> is added automatically. Paste a full
-            <span class="font-mono">Bearer …</span> or <span class="font-mono">Basic …</span> value to override.
+            Just the token — <span class="font-mono">Bearer</span> is added automatically. Paste a
+            full
+            <span class="font-mono">Bearer …</span> or <span class="font-mono">Basic …</span> value to
+            override.
           </p>
         </div>
 
@@ -225,10 +227,11 @@
       </div>
     {/if}
 
-    <!-- Privacy note -->
+    <!-- Privacy + save note -->
     <p class="text-xs text-muted-foreground px-1">
-      Only content-free operational events are sent (timings, errors, model names) — never your
-      transcript text. Changes apply after restart.
+      Settings save automatically — there's no save button. Only content-free operational events are
+      sent (timings, errors, model names) — never your transcript text. Remote forwarding takes
+      effect after the next app restart.
     </p>
   </div>
 </section>
