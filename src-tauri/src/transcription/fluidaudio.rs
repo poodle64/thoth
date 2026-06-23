@@ -155,7 +155,7 @@ impl TranscriptionService {
             }
         }
 
-        let joined = parts.join(" ");
+        let joined = join_segments(&parts);
         tracing::info!(
             "FluidAudio transcript: {} chars, {} words from {} segment(s) in {:.3}s",
             joined.len(),
@@ -330,6 +330,113 @@ fn write_padded_wav(samples: &[f32], spec: &hound::WavSpec, path: &Path) -> Resu
     Ok(())
 }
 
+/// Join segment transcripts into a single string, correcting spurious mid-sentence
+/// capitals that arise at segment seams.
+///
+/// FluidAudio transcribes each segment independently and truecases the first word
+/// of each as if it were a new sentence. At a seam where the previous segment did
+/// NOT end with terminal punctuation (`.`, `!`, `?`), the join is mid-sentence and
+/// the capital is spurious. This function lowercases only that single leading
+/// character, unless a guard applies:
+///
+/// - The token is `I` or starts with `I'` (English pronoun).
+/// - The token is all-uppercase with length ≥ 2 (acronym: `API`, `USB`).
+/// - The token contains an uppercase letter after position 0 (proper noun: `FluidAudio`).
+/// - The first character is not an ASCII uppercase letter (nothing to change).
+///
+/// Trailing closing punctuation (`"'")]}`) is stripped when checking whether the
+/// previous part ended with a sentence-terminal character.
+pub(crate) fn join_segments(parts: &[String]) -> String {
+    if parts.is_empty() {
+        return String::new();
+    }
+    if parts.len() == 1 {
+        return parts[0].clone();
+    }
+
+    let mut out = String::with_capacity(parts.iter().map(|p| p.len() + 1).sum());
+    out.push_str(&parts[0]);
+
+    for part in &parts[1..] {
+        // Determine whether the previous emitted text ended with terminal
+        // punctuation. This must be checked BEFORE appending the separating space,
+        // otherwise the trailing space masks the previous part's final character.
+        // Strip trailing closing brackets/quotes before checking the final character.
+        let prev_trimmed = out.trim_end_matches(|c| {
+            matches!(
+                c,
+                '"' | '\'' | ')' | ']' | '}' | '\u{201C}' | '\u{201D}' | '\u{2018}' | '\u{2019}'
+            )
+        });
+        let prev_ends_terminal = prev_trimmed
+            .chars()
+            .next_back()
+            .map(|c| matches!(c, '.' | '!' | '?'))
+            .unwrap_or(false);
+
+        out.push(' ');
+
+        if prev_ends_terminal {
+            // Sentence boundary — keep the capitalisation the model produced.
+            out.push_str(part);
+        } else {
+            // Mid-sentence seam — lowercase the first alphabetic character unless a
+            // guard protects it.
+            let first_token = part.split_whitespace().next().unwrap_or("");
+            let should_lowercase = first_token_needs_lowercase(first_token);
+
+            if should_lowercase {
+                // Lower only the very first char; append the rest unchanged.
+                let mut chars = part.chars();
+                if let Some(first) = chars.next() {
+                    out.push(first.to_lowercase().next().unwrap_or(first));
+                    out.push_str(chars.as_str());
+                }
+            } else {
+                out.push_str(part);
+            }
+        }
+    }
+
+    out
+}
+
+/// Return true if the first character of a seam word should be lowercased.
+///
+/// Guards that suppress lowercasing (any one is sufficient):
+/// - Not an ASCII uppercase letter at position 0 (nothing to do).
+/// - Token is `I` or starts with `I'` (English first-person pronoun).
+/// - Token is entirely uppercase letters, length ≥ 2 (acronym).
+/// - Token contains an uppercase letter after position 0 (CamelCase / proper noun).
+fn first_token_needs_lowercase(token: &str) -> bool {
+    let mut chars = token.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+
+    // Guard: first character must be ASCII uppercase.
+    if !first.is_ascii_uppercase() {
+        return false;
+    }
+
+    // Guard: English first-person pronoun `I` or contractions like `I'm`.
+    if token == "I" || token.starts_with("I'") {
+        return false;
+    }
+
+    // Guard: all-uppercase token of length ≥ 2 (acronym).
+    if token.len() >= 2 && token.chars().all(|c| c.is_ascii_uppercase()) {
+        return false;
+    }
+
+    // Guard: contains an uppercase letter after position 0 (CamelCase / proper noun).
+    if chars.any(|c| c.is_uppercase()) {
+        return false;
+    }
+
+    true
+}
+
 /// Check if FluidAudio model cache has content (models already compiled)
 ///
 /// When cached, `init_asr()` takes ~1s instead of 20-30s.
@@ -492,5 +599,144 @@ mod tests {
             Ok(_service) => println!("FluidAudio service created successfully"),
             Err(e) => println!("FluidAudio service creation failed: {}", e),
         }
+    }
+
+    // --- join_segments tests ---
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|&x| x.to_string()).collect()
+    }
+
+    /// Empty input returns empty string.
+    #[test]
+    fn test_join_segments_empty() {
+        assert_eq!(join_segments(&[]), "");
+    }
+
+    /// Single part is returned unchanged (no seam to correct).
+    #[test]
+    fn test_join_segments_single_part_unchanged() {
+        assert_eq!(
+            join_segments(&s(&["Going through the repo"])),
+            "Going through the repo"
+        );
+    }
+
+    /// Spurious mid-sentence capital at a seam is lowercased.
+    #[test]
+    fn test_join_segments_spurious_cap_lowercased() {
+        let parts = s(&["I'm talking about", "Going through the repo"]);
+        let result = join_segments(&parts);
+        assert!(
+            result.contains("about going through"),
+            "expected 'about going through', got: {result}"
+        );
+    }
+
+    /// Terminal punctuation signals a real sentence boundary; capital is kept.
+    #[test]
+    fn test_join_segments_terminal_punctuation_preserves_cap() {
+        let parts = s(&["That's the plan.", "Going forward we build."]);
+        let result = join_segments(&parts);
+        assert!(
+            result.contains("plan. Going forward"),
+            "expected 'plan. Going forward', got: {result}"
+        );
+    }
+
+    /// Pronoun guard: `I` at a seam is never lowercased.
+    #[test]
+    fn test_join_segments_pronoun_i_preserved() {
+        let parts = s(&["and then", "I went home"]);
+        let result = join_segments(&parts);
+        assert!(
+            result.contains("then I went"),
+            "expected 'then I went', got: {result}"
+        );
+    }
+
+    /// Pronoun contraction guard: `I'm`, `I'll`, etc. are never lowercased.
+    #[test]
+    fn test_join_segments_pronoun_contraction_preserved() {
+        let parts = s(&["and then", "I'm not sure"]);
+        let result = join_segments(&parts);
+        assert!(
+            result.contains("then I'm not"),
+            "expected 'then I'm not', got: {result}"
+        );
+    }
+
+    /// Acronym guard: all-uppercase token of length ≥ 2 is kept uppercase.
+    #[test]
+    fn test_join_segments_acronym_preserved() {
+        let parts = s(&["it hits the", "API and fails"]);
+        let result = join_segments(&parts);
+        assert!(
+            result.contains("the API and"),
+            "expected 'the API and', got: {result}"
+        );
+    }
+
+    /// CamelCase guard: token with internal uppercase is left unchanged.
+    #[test]
+    fn test_join_segments_camel_case_preserved() {
+        let parts = s(&["it broke", "FluidAudio crashed"]);
+        let result = join_segments(&parts);
+        assert!(
+            result.contains("broke FluidAudio"),
+            "expected 'broke FluidAudio', got: {result}"
+        );
+    }
+
+    /// Closing quote after terminal punctuation still counts as terminal.
+    #[test]
+    fn test_join_segments_closing_quote_terminal() {
+        let parts = s(&["\"done.\"", "Next thing we do"]);
+        let result = join_segments(&parts);
+        assert!(
+            result.contains("\"done.\" Next thing"),
+            "expected '\"done.\" Next thing', got: {result}"
+        );
+    }
+
+    /// `!` counts as terminal punctuation.
+    #[test]
+    fn test_join_segments_exclamation_terminal() {
+        let parts = s(&["Great!", "Now let's proceed"]);
+        let result = join_segments(&parts);
+        assert!(
+            result.contains("Great! Now"),
+            "expected 'Great! Now', got: {result}"
+        );
+    }
+
+    /// `?` counts as terminal punctuation.
+    #[test]
+    fn test_join_segments_question_mark_terminal() {
+        let parts = s(&["Is that right?", "Seems so"]);
+        let result = join_segments(&parts);
+        assert!(
+            result.contains("right? Seems"),
+            "expected 'right? Seems', got: {result}"
+        );
+    }
+
+    /// Comma is NOT terminal; capital after comma is lowercased.
+    #[test]
+    fn test_join_segments_comma_not_terminal() {
+        let parts = s(&["well, anyway,", "That's the situation"]);
+        let result = join_segments(&parts);
+        assert!(
+            result.contains("anyway, that's"),
+            "expected 'anyway, that's', got: {result}"
+        );
+    }
+
+    /// Three or more parts are all joined correctly.
+    #[test]
+    fn test_join_segments_multiple_parts() {
+        let parts = s(&["first part", "Second part", "Third part"]);
+        let result = join_segments(&parts);
+        assert_eq!(result, "first part second part third part");
     }
 }
