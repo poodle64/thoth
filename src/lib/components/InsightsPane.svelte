@@ -103,7 +103,7 @@
     textPreview: string;
     createdAt: string;
     deletedAt: string;
-    durationSeconds: number;
+    durationSeconds: number | null;
     fileBytes: number;
     audioMoved: boolean;
   }
@@ -127,8 +127,9 @@
   let trashOpen = $state(false);
   let trashLoading = $state(false);
 
-  // Track whether we've done the initial load so $effect doesn't double-fire
-  let initialLoadDone = $state(false);
+  // Track whether we've done the initial load so $effect doesn't double-fire.
+  // Plain let (not $state) so reading it inside $effect doesn't create a tracked dep.
+  let initialLoadDone = false;
 
   const RANGES: Array<{ value: Range; label: string }> = [
     { value: 'allTime', label: 'All time' },
@@ -201,7 +202,11 @@
         if (cursor > today) {
           week.push(null);
         } else {
-          const key = cursor.toISOString().slice(0, 10);
+          const key = [
+            cursor.getFullYear(),
+            String(cursor.getMonth() + 1).padStart(2, '0'),
+            String(cursor.getDate()).padStart(2, '0'),
+          ].join('-');
           week.push(byDay.get(key) ?? { day: key, count: 0, words: 0 });
         }
         cursor.setDate(cursor.getDate() + 1);
@@ -380,7 +385,7 @@
   $effect(() => {
     // Re-fetch when range changes, but not on initial mount (onMount handles that)
     if (!initialLoadDone) return;
-    void range;
+    void range; // intentional reactive read — makes the effect re-run when range changes
     loadInsights();
   });
 </script>

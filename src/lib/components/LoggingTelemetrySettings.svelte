@@ -21,8 +21,15 @@
   // unintentionally clearing the stored token with the mask value.
   let lokiAuthDirty = $state(false);
 
-  async function saveSettings(): Promise<void> {
-    await configStore.save();
+  // Returns true on success, false on failure (after toasting the error).
+  async function saveSettings(): Promise<boolean> {
+    const ok = await configStore.save();
+    if (!ok) {
+      toast.error('Failed to save settings', {
+        description: configStore.error ?? 'Unknown error',
+      });
+    }
+    return ok;
   }
 
   async function handleSave(): Promise<void> {
@@ -34,12 +41,14 @@
         await invoke('set_loki_auth', { token: configStore.logging.lokiAuth || null });
         lokiAuthDirty = false;
       }
-      await saveSettings();
-      toast.success('Logging settings saved', {
-        description: configStore.logging.remoteEnabled
-          ? 'Remote forwarding applies after the next app restart.'
-          : undefined,
-      });
+      const ok = await saveSettings();
+      if (ok) {
+        toast.success('Logging settings saved', {
+          description: configStore.logging.remoteEnabled
+            ? 'Remote forwarding applies after the next app restart.'
+            : undefined,
+        });
+      }
     } catch (e) {
       toast.error('Failed to save logging settings', {
         description: e instanceof Error ? e.message : String(e),
@@ -70,6 +79,11 @@
   }
 
   async function handleLokiUrlBlur(): Promise<void> {
+    // Flush the dirty token first so it goes via set_loki_auth (not the generic
+    // set_config path which the backend's preservation guard would pass through
+    // with the plaintext value). Bail if the flush failed to avoid a second toast.
+    const flushed = await handleLokiAuthBlur();
+    if (!flushed) return;
     await saveSettings();
   }
 
@@ -79,18 +93,21 @@
     configStore.updateLogging('lokiAuth', input.value);
   }
 
-  async function handleLokiAuthBlur(): Promise<void> {
-    if (!lokiAuthDirty) return;
-    lokiAuthDirty = false;
+  // Returns true if the flush succeeded (or was a no-op), false if it failed.
+  async function handleLokiAuthBlur(): Promise<boolean> {
+    if (!lokiAuthDirty) return true;
     const token = configStore.logging.lokiAuth;
     // Use the dedicated command so the preservation guard in set_config doesn't
     // block intentional token changes (including clearing).
     try {
       await invoke('set_loki_auth', { token: token || null });
+      lokiAuthDirty = false;
+      return true;
     } catch (e) {
       toast.error('Failed to save Loki token', {
         description: e instanceof Error ? e.message : String(e),
       });
+      return false;
     }
   }
 
@@ -100,6 +117,8 @@
   }
 
   async function handleLokiTenantBlur(): Promise<void> {
+    const flushed = await handleLokiAuthBlur();
+    if (!flushed) return;
     await saveSettings();
   }
 
@@ -107,10 +126,10 @@
     isTesting = true;
     try {
       // Test the on-screen values directly so the user can verify before saving.
-      // If the token field shows the mask sentinel, pass empty string so Loki
-      // attempts an unauthenticated push (the real token stays server-side).
+      // When the field shows the mask sentinel, pass null so the backend falls
+      // back to the real stored token rather than testing unauthenticated.
       const authToTest =
-        configStore.logging.lokiAuth === LOKI_AUTH_MASK ? '' : configStore.logging.lokiAuth;
+        configStore.logging.lokiAuth === LOKI_AUTH_MASK ? null : configStore.logging.lokiAuth;
       await invoke('test_loki_connection', {
         url: configStore.logging.lokiUrl,
         auth: authToTest,
@@ -127,7 +146,7 @@
   }
 
   onMount(async () => {
-    await configStore.load();
+    if (!configStore.isInitialised) await configStore.load();
   });
 </script>
 
@@ -279,7 +298,8 @@
 
   <!-- Privacy note -->
   <p class="mt-2 px-1 text-xs text-muted-foreground">
-    Only content-free operational events are sent (timings, errors, model names) — never your
-    transcript text. Remote forwarding takes effect after the next app restart.
+    Only content-free operational events are sent: timings, errors, model names, and a
+    non-identifying device ID. Transcript text is never included. Remote forwarding takes effect
+    after the next app restart.
   </p>
 </section>

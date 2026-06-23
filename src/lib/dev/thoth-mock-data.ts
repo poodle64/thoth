@@ -259,7 +259,11 @@ function buildMockActivity(): Array<{ day: string; count: number; words: number 
   for (let i = 364; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
-    const day = d.toISOString().slice(0, 10);
+    const day = [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, '0'),
+      String(d.getDate()).padStart(2, '0'),
+    ].join('-');
     // Realistic pattern: weekdays heavier, occasional weekends, some gaps
     const dow = d.getDay();
     const isWeekend = dow === 0 || dow === 6;
@@ -383,7 +387,7 @@ const MOCK_TRASH_ENTRIES: Array<{
   textPreview: string;
   createdAt: string;
   deletedAt: string;
-  durationSeconds: number;
+  durationSeconds: number | null;
   fileBytes: number;
   audioMoved: boolean;
 }> = [];
@@ -478,7 +482,6 @@ export const thothMockCommands: CommandMap = {
     return undefined;
   },
   list_trash: () => [...MOCK_TRASH_ENTRIES],
-  compute_audio_rms: () => 0.18,
 
   // -- Permissions pane --
   check_accessibility: () => true,
