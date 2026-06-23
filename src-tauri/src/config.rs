@@ -521,6 +521,73 @@ impl Default for RecorderConfig {
     }
 }
 
+/// Recursively merge `patch` into `target` (objects merged key-wise; other values replaced).
+///
+/// Used by the MCP `setting update` handler and the HTTP PATCH `/settings` handler so
+/// both partial-update paths share one implementation.
+pub(crate) fn merge_json(target: &mut serde_json::Value, patch: &serde_json::Value) {
+    match (target, patch) {
+        (serde_json::Value::Object(t), serde_json::Value::Object(p)) => {
+            for (k, v) in p {
+                merge_json(t.entry(k.clone()).or_insert(serde_json::Value::Null), v);
+            }
+        }
+        (t, p) => *t = p.clone(),
+    }
+}
+
+/// Recursively convert every object key in `value` from camelCase to snake_case.
+///
+/// The config always serialises to snake_case (no `rename_all` on the structs; the
+/// `alias` annotations only add camelCase as a second *input* name). An MCP or HTTP
+/// caller that sends `{"localRetentionDays": 14}` adds a key that serde never
+/// matches to `local_retention_days` but also doesn't remove the existing one, so
+/// the merged `Value` ends up with both keys and serde errors on "duplicate field".
+///
+/// Canonicalising before the merge resolves this: every incoming key is
+/// normalised to the same form the config serialises to, so the merge updates the
+/// existing key in-place. The transform is idempotent (snake_case → snake_case
+/// passes through unchanged) and handles nested objects recursively.
+///
+/// Arrays are also recursed so future array-of-objects config fields (e.g.
+/// `loki_labels`) have their nested object keys canonicalised too.
+pub(crate) fn canonicalise_patch_keys(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let new_map = map
+                .into_iter()
+                .map(|(k, v)| (camel_to_snake(&k), canonicalise_patch_keys(v)))
+                .collect();
+            serde_json::Value::Object(new_map)
+        }
+        serde_json::Value::Array(arr) => {
+            serde_json::Value::Array(arr.into_iter().map(canonicalise_patch_keys).collect())
+        }
+        other => other,
+    }
+}
+
+/// Convert a single camelCase identifier to snake_case.
+///
+/// Inserts an underscore before each uppercase ASCII letter and lowercases it.
+/// All-lowercase and already-snake_case identifiers pass through unchanged.
+/// A leading underscore (which would appear if the first char were uppercase)
+/// is stripped so inputs like `"URL"` → `"u_r_l"` rather than `"_u_r_l"`.
+fn camel_to_snake(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for ch in s.chars() {
+        if ch.is_ascii_uppercase() {
+            out.push('_');
+            out.push(ch.to_ascii_lowercase());
+        } else {
+            out.push(ch);
+        }
+    }
+    // A key that starts with an uppercase letter would produce a leading '_';
+    // strip it so the result is a valid identifier.
+    out.trim_start_matches('_').to_string()
+}
+
 /// Get the path to the config file (~/.thoth/config.json)
 pub fn get_config_path() -> PathBuf {
     home_dir_or_fallback().join(".thoth").join("config.json")
@@ -1736,5 +1803,224 @@ mod tests {
         assert_eq!(restored.logging.loki_labels.len(), 1);
         assert_eq!(restored.logging.loki_labels[0], ["env", "test"]);
         assert_eq!(restored.logging.telemetry_level, "debug");
+    }
+
+    // =========================================================================
+    // canonicalise_patch_keys / merge_json tests (Bug 1 + Bug 2)
+    // =========================================================================
+
+    #[test]
+    fn test_camel_to_snake_identity_on_snake_case() {
+        // Already-snake_case keys must pass through unchanged (idempotent).
+        for key in &[
+            "local_retention_days",
+            "loki_url",
+            "remote_enabled",
+            "api_enabled",
+            "mcp_enabled",
+        ] {
+            assert_eq!(
+                camel_to_snake(key),
+                *key,
+                "snake_case key must be unchanged: {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_camel_to_snake_converts_known_field_aliases() {
+        // Every field that carries a camelCase alias must round-trip to exactly the
+        // snake_case canonical name that serde serialises it as.
+        let pairs = [
+            ("localRetentionDays", "local_retention_days"),
+            ("remoteEnabled", "remote_enabled"),
+            ("lokiUrl", "loki_url"),
+            ("lokiAuth", "loki_auth"),
+            ("lokiTenant", "loki_tenant"),
+            ("lokiLabels", "loki_labels"),
+            ("telemetryLevel", "telemetry_level"),
+            ("apiEnabled", "api_enabled"),
+            ("apiPort", "api_port"),
+            ("mcpEnabled", "mcp_enabled"),
+        ];
+        for (camel, snake) in pairs {
+            assert_eq!(
+                camel_to_snake(camel),
+                snake,
+                "camelCase alias {camel} must convert to {snake}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_canonicalise_patch_keys_flat_camel_patch() {
+        // A flat camelCase patch must deserialise successfully after canonicalisation.
+        let patch_json = serde_json::json!({
+            "localRetentionDays": 14_u32,
+            "remoteEnabled": true,
+            "lokiUrl": "http://loki:3100"
+        });
+        let canon = canonicalise_patch_keys(patch_json);
+        // Keys must now be snake_case.
+        let obj = canon.as_object().unwrap();
+        assert!(
+            obj.contains_key("local_retention_days"),
+            "key canonicalised"
+        );
+        assert!(obj.contains_key("remote_enabled"), "key canonicalised");
+        assert!(obj.contains_key("loki_url"), "key canonicalised");
+        assert!(!obj.contains_key("localRetentionDays"), "old key removed");
+    }
+
+    #[test]
+    fn test_canonicalise_patch_keys_nested_camel_patch() {
+        // Nested camelCase patch (e.g. {"logging": {"localRetentionDays": 14}})
+        // must be fully canonicalised.
+        let patch_json = serde_json::json!({
+            "logging": {
+                "localRetentionDays": 30_u32,
+                "remoteEnabled": false
+            }
+        });
+        let canon = canonicalise_patch_keys(patch_json);
+        let logging = canon.get("logging").unwrap().as_object().unwrap();
+        assert!(logging.contains_key("local_retention_days"));
+        assert!(logging.contains_key("remote_enabled"));
+        assert!(!logging.contains_key("localRetentionDays"));
+    }
+
+    #[test]
+    fn test_camel_patch_merges_and_deserialises_without_duplicate_field_error() {
+        // Simulates Bug 1: a camelCase MCP patch must merge onto the serialised config
+        // and deserialise back to Config without a "duplicate field" error.
+        let current_cfg = Config::default();
+        let mut current_val = serde_json::to_value(&current_cfg).unwrap();
+
+        let patch = serde_json::json!({ "logging": { "localRetentionDays": 30_u32 } });
+        let patch = canonicalise_patch_keys(patch);
+        merge_json(&mut current_val, &patch);
+
+        let result: Result<Config, _> = serde_json::from_value(current_val);
+        assert!(
+            result.is_ok(),
+            "camelCase patch must deserialise without error: {:?}",
+            result.err()
+        );
+        assert_eq!(result.unwrap().logging.local_retention_days, 30);
+    }
+
+    #[test]
+    fn test_snake_patch_merges_and_deserialises_correctly() {
+        // snake_case patch must also work (idempotent canonicalisation).
+        let current_cfg = Config::default();
+        let mut current_val = serde_json::to_value(&current_cfg).unwrap();
+
+        let patch = serde_json::json!({ "logging": { "local_retention_days": 21_u32 } });
+        let patch = canonicalise_patch_keys(patch);
+        merge_json(&mut current_val, &patch);
+
+        let result: Result<Config, _> = serde_json::from_value(current_val);
+        assert!(
+            result.is_ok(),
+            "snake_case patch must deserialise: {:?}",
+            result.err()
+        );
+        assert_eq!(result.unwrap().logging.local_retention_days, 21);
+    }
+
+    #[test]
+    fn test_partial_patch_preserves_untouched_fields() {
+        // Simulates Bug 2: a partial patch that only sets one field must leave all
+        // other fields at their prior values.
+        let mut prior = Config::default();
+        prior.logging.local_retention_days = 42;
+        prior.logging.loki_url = "http://prior:3100".to_string();
+
+        let mut current_val = serde_json::to_value(&prior).unwrap();
+
+        // Patch only changes remote_enabled; local_retention_days and loki_url must survive.
+        let patch = serde_json::json!({ "logging": { "remoteEnabled": true } });
+        let patch = canonicalise_patch_keys(patch);
+        merge_json(&mut current_val, &patch);
+
+        let result: Config = serde_json::from_value(current_val).unwrap();
+        assert!(result.logging.remote_enabled, "patched field must be set");
+        assert_eq!(
+            result.logging.local_retention_days, 42,
+            "unpatched field must be preserved"
+        );
+        assert_eq!(
+            result.logging.loki_url, "http://prior:3100",
+            "unpatched field must be preserved"
+        );
+    }
+
+    // =========================================================================
+    // loki_auth preservation through the merge pipeline (HIGH invariant)
+    //
+    // The merge base comes from get_config(), which masks loki_auth as "***".
+    // set_config()'s guard treats both empty and the mask sentinel as "keep the
+    // stored token". These tests pin that invariant at the merge-pipeline level.
+    // =========================================================================
+
+    #[test]
+    fn test_merge_pipeline_loki_auth_omitted_carries_mask_sentinel() {
+        // When a patch omits loki_auth entirely, the merge base's masked value
+        // ("***") survives unchanged into the merged Value. set_config will then
+        // recognise it as the sentinel and restore the real stored token.
+        // This test verifies the merge step itself — not set_config's guard —
+        // by asserting the sentinel is still present after the merge.
+        let mut base = Config::default();
+        // Simulate what get_config() returns: real token replaced by sentinel.
+        base.logging.loki_auth = LokiAuth(LOKI_AUTH_MASK.to_string());
+        let mut base_val = serde_json::to_value(&base).unwrap();
+
+        // Patch that deliberately does NOT include loki_auth.
+        let patch = serde_json::json!({ "logging": { "remote_enabled": true } });
+        let patch = canonicalise_patch_keys(patch);
+        merge_json(&mut base_val, &patch);
+
+        let merged: Config = serde_json::from_value(base_val).unwrap();
+        assert_eq!(
+            merged.logging.loki_auth.0, LOKI_AUTH_MASK,
+            "mask sentinel must survive the merge when patch omits loki_auth"
+        );
+        // set_config's guard will see LOKI_AUTH_MASK and restore the real token.
+        assert!(merged.logging.loki_auth.is_masked_or_empty());
+    }
+
+    #[test]
+    fn test_merge_pipeline_loki_auth_sent_as_sentinel_still_masked() {
+        // When a patch explicitly sends the mask sentinel for loki_auth (e.g. the
+        // MCP client echoed back what get_config returned), the merged Value still
+        // carries the sentinel and set_config's guard preserves the real token.
+        let mut base = Config::default();
+        base.logging.loki_auth = LokiAuth(LOKI_AUTH_MASK.to_string());
+        let mut base_val = serde_json::to_value(&base).unwrap();
+
+        let patch = serde_json::json!({
+            "logging": { "loki_auth": LOKI_AUTH_MASK }
+        });
+        let patch = canonicalise_patch_keys(patch);
+        merge_json(&mut base_val, &patch);
+
+        let merged: Config = serde_json::from_value(base_val).unwrap();
+        assert_eq!(
+            merged.logging.loki_auth.0, LOKI_AUTH_MASK,
+            "sentinel patch must keep the sentinel in the merged value"
+        );
+        assert!(merged.logging.loki_auth.is_masked_or_empty());
+    }
+
+    #[test]
+    fn test_camel_to_snake_no_leading_underscore_on_uppercase_start() {
+        // An input that starts with uppercase must not produce a leading underscore.
+        assert_eq!(camel_to_snake("URL"), "u_r_l");
+        assert_eq!(&camel_to_snake("URL")[..1], "u");
+        // No current config field starts uppercase, but the guard must hold.
+        assert!(
+            !camel_to_snake("Foo").starts_with('_'),
+            "leading underscore must be stripped"
+        );
     }
 }
