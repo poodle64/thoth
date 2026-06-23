@@ -8,11 +8,14 @@
   import { Input } from '$components/ui/input';
   import { Label } from '$components/ui/label';
   import { Badge } from '$components/ui/badge';
+  import * as Tooltip from '$components/ui/tooltip';
+  import Info from '@lucide/svelte/icons/info';
 
   // The API mask sentinel — must match LOKI_AUTH_MASK in config.rs.
   const LOKI_AUTH_MASK = '***';
 
   let isTesting = $state(false);
+  let isSaving = $state(false);
   // Tracks whether the token field has been edited in this session.
   // When dirty, we save via set_loki_auth on blur; otherwise skip to avoid
   // unintentionally clearing the stored token with the mask value.
@@ -20,6 +23,30 @@
 
   async function saveSettings(): Promise<void> {
     await configStore.save();
+  }
+
+  async function handleSave(): Promise<void> {
+    isSaving = true;
+    try {
+      // Persist the token via the dedicated command (bypasses the preservation
+      // guard) when edited, then save the rest of the config.
+      if (lokiAuthDirty) {
+        await invoke('set_loki_auth', { token: configStore.logging.lokiAuth || null });
+        lokiAuthDirty = false;
+      }
+      await saveSettings();
+      toast.success('Logging settings saved', {
+        description: configStore.logging.remoteEnabled
+          ? 'Remote forwarding applies after the next app restart.'
+          : undefined,
+      });
+    } catch (e) {
+      toast.error('Failed to save logging settings', {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      isSaving = false;
+    }
   }
 
   async function handleRetentionInput(event: Event): Promise<void> {
@@ -113,9 +140,11 @@
     </p>
   </div>
 
-  <div class="flex flex-col gap-2">
-    <!-- Local logging row (always on) -->
-    <div class="flex flex-col gap-3 rounded-md border border-border bg-card p-3">
+  <!-- One consolidated card: local logging, remote toggle, connection details,
+       and the test/save actions, separated by internal dividers. -->
+  <div class="divide-y divide-border rounded-md border border-border bg-card">
+    <!-- Local logging (always on) -->
+    <div class="flex flex-col gap-3 p-3">
       <div class="flex items-center justify-between gap-4">
         <div class="flex flex-1 flex-col gap-1">
           <span class="text-sm font-medium text-foreground">Local logging</span>
@@ -145,10 +174,8 @@
       </div>
     </div>
 
-    <!-- Forward to Loki toggle row -->
-    <div
-      class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3"
-    >
+    <!-- Forward to Loki -->
+    <div class="flex items-center justify-between gap-4 p-3">
       <div class="flex flex-1 flex-col gap-1">
         <span class="text-sm font-medium text-foreground">Forward telemetry to Loki</span>
         <span class="text-xs text-muted-foreground">
@@ -160,7 +187,7 @@
 
     <!-- Loki connection details — shown only when remote is enabled -->
     {#if configStore.logging.remoteEnabled}
-      <div class="flex flex-col gap-3 rounded-md border border-border bg-card p-3">
+      <div class="flex flex-col gap-3 p-3">
         <!-- Loki URL -->
         <div class="flex flex-col gap-1.5">
           <Label class="text-sm font-medium">Loki URL</Label>
@@ -196,42 +223,63 @@
           </p>
         </div>
 
-        <!-- Tenant ID (optional) -->
+        <!-- Tenant ID (optional, with explanation) -->
         <div class="flex flex-col gap-1.5">
-          <Label class="text-sm font-medium">
-            Tenant ID
-            <span class="ml-1 text-xs font-normal text-muted-foreground">(optional)</span>
-          </Label>
+          <div class="flex items-center gap-1.5">
+            <Label class="text-sm font-medium">Tenant ID</Label>
+            <span class="text-xs font-normal text-muted-foreground">(optional)</span>
+            <Tooltip.Provider delayDuration={150}>
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  class="text-muted-foreground transition-colors hover:text-foreground"
+                  aria-label="What is the Tenant ID?"
+                >
+                  <Info class="h-3.5 w-3.5" />
+                </Tooltip.Trigger>
+                <Tooltip.Content class="max-w-xs">
+                  <p class="text-xs leading-snug">
+                    Only for multi-tenant Loki (e.g. Grafana Cloud): sets the
+                    <span class="font-mono">X-Scope-OrgID</span> header to select a tenant. Leave it blank
+                    for a single-tenant instance such as a self-hosted Loki.
+                  </p>
+                </Tooltip.Content>
+              </Tooltip.Root>
+            </Tooltip.Provider>
+          </div>
           <Input
             type="text"
             class="font-mono text-sm"
             value={configStore.logging.lokiTenant ?? ''}
             oninput={handleLokiTenantInput}
             onblur={handleLokiTenantBlur}
-            placeholder="X-Scope-OrgID header value"
+            placeholder="Leave blank unless multi-tenant"
             aria-label="Loki tenant ID"
           />
-        </div>
-
-        <!-- Test connection -->
-        <div class="flex items-center gap-2 mt-1">
-          <Button
-            variant="outline"
-            size="sm"
-            onclick={handleTestConnection}
-            disabled={isTesting || !configStore.logging.lokiUrl}
-          >
-            {isTesting ? 'Testing…' : 'Test connection'}
-          </Button>
         </div>
       </div>
     {/if}
 
-    <!-- Privacy + save note -->
-    <p class="text-xs text-muted-foreground px-1">
-      Settings save automatically — there's no save button. Only content-free operational events are
-      sent (timings, errors, model names) — never your transcript text. Remote forwarding takes
-      effect after the next app restart.
-    </p>
+    <!-- Actions: test + save, co-located -->
+    <div class="flex items-center gap-2 p-3">
+      {#if configStore.logging.remoteEnabled}
+        <Button
+          variant="outline"
+          size="sm"
+          onclick={handleTestConnection}
+          disabled={isTesting || !configStore.logging.lokiUrl}
+        >
+          {isTesting ? 'Testing…' : 'Test connection'}
+        </Button>
+      {/if}
+      <Button size="sm" onclick={handleSave} disabled={isSaving}>
+        {isSaving ? 'Saving…' : 'Save'}
+      </Button>
+    </div>
   </div>
+
+  <!-- Privacy note -->
+  <p class="mt-2 px-1 text-xs text-muted-foreground">
+    Only content-free operational events are sent (timings, errors, model names) — never your
+    transcript text. Remote forwarding takes effect after the next app restart.
+  </p>
 </section>
