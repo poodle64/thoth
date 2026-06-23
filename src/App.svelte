@@ -64,7 +64,7 @@
           debug('Model downloaded:', modelDownloaded);
 
           if (modelDownloaded) {
-            await invoke('init_transcription', { model_path: modelDir });
+            await invoke('init_transcription', { modelPath: modelDir });
             debug('Transcription service ready');
           }
         }
