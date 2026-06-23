@@ -174,25 +174,51 @@ static LOKI_TASK_STORE: std::sync::Mutex<Option<tracing_loki::BackgroundTask>> =
 fn build_loki_components(
     cfg: &config::LoggingConfig,
 ) -> Option<(tracing_loki::Layer, tracing_loki::BackgroundTask)> {
+    use sha2::Digest;
+
     let url = cfg.loki_url.parse::<url::Url>().ok()?;
 
-    // hostname crate gives us the machine name without pulling in system deps beyond
-    // what is already in the tree.
-    let host = hostname::get()
-        .ok()
-        .map(|h| h.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "unknown".to_string());
+    // Derive a stable, non-identifying device id from the hostname via SHA-256.
+    // The raw hostname on macOS often embeds the operator's name (e.g.
+    // "Pauls-MacBook-Pro.local"); we never send that to Loki.
+    let host_id = {
+        let raw = hostname::get()
+            .ok()
+            .map(|h| h.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "unknown".to_string());
+        let digest = sha2::Sha256::digest(raw.as_bytes());
+        // 12 hex chars (48 bits) is enough for collision resistance across a
+        // household fleet and is short enough to be readable in Loki queries.
+        // GenericArray doesn't impl LowerHex, so encode byte-by-byte.
+        let hex: String = digest.iter().map(|b| format!("{:02x}", b)).collect();
+        hex[..12].to_string()
+    };
 
     let mut builder = tracing_loki::builder()
         .label("app", "thoth")
         .ok()?
-        .label("host", host)
+        .label("host", host_id)
         .ok()?
         .label("version", env!("CARGO_PKG_VERSION"))
         .ok()?;
 
     for pair in &cfg.loki_labels {
-        builder = builder.label(pair[0].as_str(), pair[1].as_str()).ok()?;
+        // Clone before the call: `.label()` consumes the builder regardless of
+        // whether it succeeds, so we keep a fallback to restore on error.
+        let prev = builder.clone();
+        match builder.label(pair[0].as_str(), pair[1].as_str()) {
+            Ok(b) => builder = b,
+            Err(e) => {
+                tracing::warn!(
+                    "Loki label rejected (key={:?}, value={:?}): {}; skipping this label",
+                    pair[0],
+                    pair[1],
+                    e
+                );
+                // Restore the pre-call builder so the remaining labels still apply.
+                builder = prev;
+            }
+        }
     }
 
     // Authorization header — bare token gets a Bearer prefix. Never logged.
@@ -273,8 +299,22 @@ fn init_logging() {
 
     let stdout_layer = tracing_subscriber::fmt::layer().with_timer(LocalTimer);
 
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    // When remote logging is enabled, guarantee that the "telemetry" target is
+    // always allowed through the global filter regardless of RUST_LOG directives.
+    // A crate-scoped directive like `thoth=debug` does NOT match the bare
+    // "telemetry" target and would silently drop Loki events. We append
+    // `,telemetry=info` so the telemetry target is always at least INFO-visible.
+    // When RUST_LOG is unset we fall back to "info" as before, so this only
+    // matters when the user sets RUST_LOG explicitly.
+    let env_filter = if logging_cfg.remote_enabled && !logging_cfg.loki_url.is_empty() {
+        let base = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+        let directive = format!("{},telemetry=info", base);
+        tracing_subscriber::EnvFilter::try_new(&directive)
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,telemetry=info"))
+    } else {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+    };
 
     let registry = tracing_subscriber::registry()
         .with(env_filter)
@@ -285,8 +325,15 @@ fn init_logging() {
         if let Some((loki_layer, loki_task)) = build_loki_components(&logging_cfg) {
             // The Loki layer is filtered to `target == "telemetry"` only — the
             // allow-list boundary that makes content leakage structurally impossible.
-            let telemetry_filter =
-                tracing_subscriber::filter::filter_fn(|meta| meta.target() == "telemetry");
+            // Additionally gate on the configured telemetry_level so the field
+            // actually controls Loki verbosity (default INFO on parse failure).
+            let level_filter: tracing_subscriber::filter::LevelFilter = logging_cfg
+                .telemetry_level
+                .parse()
+                .unwrap_or(tracing_subscriber::filter::LevelFilter::INFO);
+            let telemetry_filter = tracing_subscriber::filter::filter_fn(move |meta| {
+                telemetry::is_telemetry_event(meta) && *meta.level() <= level_filter
+            });
 
             // Store only the background task; the layer is consumed by registry.with().
             // The Tauri setup hook takes the task out of LOKI_TASK_STORE and spawns it.
@@ -637,7 +684,6 @@ pub fn run() {
             database::transcription::get_transcription_stats_cmd,
             database::insights::get_insights,
             database::insights::get_cruft_candidates,
-            database::insights::compute_audio_rms,
             // Trash / quarantine
             database::trash::quarantine_recordings,
             database::trash::restore_recordings,

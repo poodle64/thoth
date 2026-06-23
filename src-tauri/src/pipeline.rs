@@ -550,24 +550,23 @@ async fn run_transcription_pipeline(
 
     // Content-free telemetry — no transcript text, only metrics.
     {
-        let audio_secs = audio_path
-            .parse::<f64>()
-            .ok()
-            .or_else(|| get_audio_duration(audio_path))
-            .unwrap_or(0.0);
-        let speed_factor = if transcription_duration_seconds > 0.0 {
-            audio_secs / transcription_duration_seconds
-        } else {
-            0.0
+        // audio_path is a WAV file path, not a number; parse::<f64>() always
+        // fails and was dead code. Use get_audio_duration directly.
+        let audio_secs = get_audio_duration(audio_path);
+        let speed_factor = match audio_secs {
+            Some(secs) if transcription_duration_seconds > 0.0 => {
+                secs / transcription_duration_seconds
+            }
+            _ => 0.0,
         };
         let model_label = transcription_model_name.as_deref().unwrap_or("unknown");
         tracing::info!(
             target: "telemetry",
             backend = %model_label,
-            audio_seconds = audio_secs,
+            audio_seconds = audio_secs.unwrap_or(0.0),
             processing_seconds = transcription_duration_seconds,
             speed_factor = speed_factor,
-            char_count = raw_text.len(),
+            char_count = raw_text.chars().count(),
             "transcription_complete"
         );
     }

@@ -741,6 +741,21 @@ fn get_config_instance() -> &'static RwLock<Config> {
     })
 }
 
+/// Return the real (unmasked) stored loki_auth token for internal use only.
+///
+/// This bypasses the masking applied by `get_config()` and must NEVER be
+/// forwarded to the frontend, logged, or included in any IPC response.
+/// Used exclusively by `test_loki_connection` to resolve the effective token
+/// when the frontend passes back the mask sentinel.
+pub(crate) fn get_raw_loki_auth() -> String {
+    get_config_instance().read().logging.loki_auth.0.clone()
+}
+
+/// Return the stored loki_tenant for internal use only.
+pub(crate) fn get_raw_loki_tenant() -> Option<String> {
+    get_config_instance().read().logging.loki_tenant.clone()
+}
+
 // --- IPC Commands ---
 
 /// Get the current configuration
@@ -1562,19 +1577,19 @@ mod tests {
     #[test]
     fn test_telemetry_filter_allows_telemetry_target() {
         // The allow-list filter used by the Loki layer must pass "telemetry" target events.
-        // We test the predicate logic directly without constructing a real subscriber.
-        let target = "telemetry";
-        let passes = target == "telemetry";
-        assert!(passes, "telemetry target must pass the filter");
+        // Calls the live predicate via its target-string shim so a rename would break this test.
+        assert!(
+            crate::telemetry::is_telemetry_event_by_target("telemetry"),
+            "telemetry target must pass the filter"
+        );
     }
 
     #[test]
     fn test_telemetry_filter_blocks_other_targets() {
         // Non-telemetry targets must not pass the Loki filter.
         for target in &["thoth::pipeline", "thoth::audio", "tracing", "info"] {
-            let passes = *target == "telemetry";
             assert!(
-                !passes,
+                !crate::telemetry::is_telemetry_event_by_target(target),
                 "target '{target}' must be blocked by the telemetry filter"
             );
         }

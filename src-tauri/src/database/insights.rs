@@ -3,7 +3,7 @@
 //! Read-only aggregations over the `transcriptions` table for the Insights
 //! pane.  All heavy aggregation is SQL-side; no row text is loaded into Rust.
 
-use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone, Utc};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -148,14 +148,32 @@ pub struct CruftCandidate {
 // =============================================================================
 
 /// Returns the UTC lower bound for `range`, or `None` for `AllTime`.
+///
+/// The bound is snapped to the **start of the local calendar day** N days ago
+/// rather than a rolling UTC offset.  The activity and streak queries bucket
+/// by `date(created_at,'localtime')`, so a rolling UTC cutoff can silently
+/// exclude the partial current local day (up to UTC+10 = 10 hours in AEST).
 fn range_lower_bound(range: &InsightsRange) -> Option<DateTime<Utc>> {
-    let now = Utc::now();
-    match range {
-        InsightsRange::AllTime => None,
-        InsightsRange::Year => Some(now - Duration::days(365)),
-        InsightsRange::Month => Some(now - Duration::days(30)),
-        InsightsRange::Week => Some(now - Duration::days(7)),
-    }
+    let days = match range {
+        InsightsRange::AllTime => return None,
+        InsightsRange::Year => 365i64,
+        InsightsRange::Month => 30,
+        InsightsRange::Week => 7,
+    };
+
+    // Compute the local calendar date N days ago, then convert its midnight
+    // back to UTC so the SQL `created_at >=` comparison is exact.
+    let today_local = Local::now().date_naive();
+    let start_local = today_local - Duration::days(days);
+    // NaiveDate::and_hms_opt(0,0,0) gives local midnight; localtime_to_utc
+    // via chrono::Local.
+    let start_dt = start_local
+        .and_hms_opt(0, 0, 0)
+        .and_then(|naive| Local.from_local_datetime(&naive).earliest())
+        .map(|local_dt| local_dt.with_timezone(&Utc))
+        .unwrap_or_else(|| Utc::now() - Duration::days(days));
+
+    Some(start_dt)
 }
 
 // =============================================================================
@@ -853,15 +871,6 @@ pub fn get_cruft_candidates(density_threshold: Option<f64>) -> Result<Vec<CruftC
         tracing::error!("Failed to get cruft candidates: {}", e);
         format!("Failed to get cruft candidates: {}", e).into()
     })
-}
-
-/// Compute the normalised RMS for a single WAV file.
-///
-/// Returns `None` if the file is missing or cannot be decoded.
-#[tauri::command]
-pub fn compute_audio_rms(audio_path: String) -> Option<f64> {
-    let path = std::path::PathBuf::from(&audio_path);
-    compute_wav_rms(&path)
 }
 
 // =============================================================================

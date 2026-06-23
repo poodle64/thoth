@@ -367,8 +367,23 @@ pub(crate) fn restore_recordings_with_conn(
             // The restored row always references the original path.
             original_path.clone()
         } else {
-            // File was never moved; the recorded audio_path is the original.
-            audio_path_in_trash.clone()
+            // File was never moved; the recorded audio_path is the original location.
+            // Guard against the case where a sibling trash entry sharing the same
+            // audio_path was purged earlier (removing the WAV): if the file no
+            // longer exists, restore the row without an audio_path rather than
+            // pointing at a nonexistent file.
+            match &audio_path_in_trash {
+                Some(p) if !std::path::Path::new(p).exists() => {
+                    tracing::warn!(
+                        "restore_recordings: audio file missing for {} (path: {}); \
+                         restoring text only",
+                        id,
+                        p
+                    );
+                    None
+                }
+                other => other.clone(),
+            }
         };
 
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -462,9 +477,22 @@ pub(crate) fn purge_trash_with_conn(
                 match std::fs::remove_file(&path) {
                     Ok(()) => tracing::debug!("Purged audio: {}", path.display()),
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        // File already gone (e.g. crash between a previous
+                        // purge's remove_file and DELETE FROM trash). The DB
+                        // row is the zombie; proceed to delete it so the next
+                        // auto-purge doesn't retry forever.
                         tracing::warn!("Audio already gone during purge: {}", path.display());
                     }
-                    Err(e) => tracing::warn!("Failed to purge audio {}: {}", path.display(), e),
+                    Err(e) => {
+                        // Unexpected error: keep the DB row so the file can be
+                        // retried on the next purge rather than being orphaned.
+                        tracing::warn!(
+                            "Failed to purge audio {} (keeping trash row for retry): {}",
+                            path.display(),
+                            e
+                        );
+                        continue;
+                    }
                 }
             }
         }
@@ -683,11 +711,12 @@ mod tests {
     // Quarantine → restore round-trip
     // -------------------------------------------------------------------------
 
+    #[serial_test::serial]
     #[test]
     fn quarantine_and_restore_round_trip() {
         let dir = tempfile::tempdir().expect("tempdir");
-        // SAFETY: tests run single-threaded (cargo test default); env mutation is
-        // confined to the test binary and cleaned up before the test returns.
+        // SAFETY: `#[serial]` guarantees no other test in this binary modifies
+        // THOTH_DATA_DIR concurrently, making the mutation race-free.
         unsafe { std::env::set_var("THOTH_DATA_DIR", dir.path()) };
 
         let wav_path = dir.path().join("Recordings").join("test.wav");
@@ -767,11 +796,12 @@ mod tests {
     // Shared audio path: file NOT moved, other row intact
     // -------------------------------------------------------------------------
 
+    #[serial_test::serial]
     #[test]
     fn quarantine_shared_audio_does_not_move_file() {
         let dir = tempfile::tempdir().expect("tempdir");
-        // SAFETY: tests run single-threaded (cargo test default); env mutation is
-        // confined to the test binary and cleaned up before the test returns.
+        // SAFETY: `#[serial]` guarantees no other test in this binary modifies
+        // THOTH_DATA_DIR concurrently, making the mutation race-free.
         unsafe { std::env::set_var("THOTH_DATA_DIR", dir.path()) };
 
         let wav_path = dir.path().join("Recordings").join("shared.wav");
@@ -821,11 +851,12 @@ mod tests {
     // Purge: removes WAV and row
     // -------------------------------------------------------------------------
 
+    #[serial_test::serial]
     #[test]
     fn purge_removes_wav_and_row() {
         let dir = tempfile::tempdir().expect("tempdir");
-        // SAFETY: tests run single-threaded (cargo test default); env mutation is
-        // confined to the test binary and cleaned up before the test returns.
+        // SAFETY: `#[serial]` guarantees no other test in this binary modifies
+        // THOTH_DATA_DIR concurrently, making the mutation race-free.
         unsafe { std::env::set_var("THOTH_DATA_DIR", dir.path()) };
 
         let wav_path = dir.path().join("Recordings").join("purge.wav");
@@ -873,11 +904,12 @@ mod tests {
     // Auto-purge respects the retention cutoff
     // -------------------------------------------------------------------------
 
+    #[serial_test::serial]
     #[test]
     fn auto_purge_respects_retention_cutoff() {
         let dir = tempfile::tempdir().expect("tempdir");
-        // SAFETY: tests run single-threaded (cargo test default); env mutation is
-        // confined to the test binary and cleaned up before the test returns.
+        // SAFETY: `#[serial]` guarantees no other test in this binary modifies
+        // THOTH_DATA_DIR concurrently, making the mutation race-free.
         unsafe { std::env::set_var("THOTH_DATA_DIR", dir.path()) };
 
         let mut conn = make_test_db();

@@ -169,6 +169,7 @@ x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
 whisper-rs = { version = "0.16", default-features = false }
 [dev-dependencies]
 mockito = "1"
+serial_test = "3"
 
 [profile.release]
 panic = "abort"
