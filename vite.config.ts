@@ -55,8 +55,12 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ['**/src-tauri/**'],
+      // 3. ignore the Rust backend, plus directories that hold duplicate copies
+      //    of the frontend source: stale git worktrees under `.claude/`, the
+      //    direnv/flake source snapshot under `.direnv/`, and `.git`. Watching
+      //    those makes Vite fire spurious full page reloads (their duplicate
+      //    `src/app.html` etc. change), which reset the in-app navigation.
+      ignored: ['**/src-tauri/**', '**/.claude/**', '**/.direnv/**', '**/.git/**'],
     },
   },
 }));
