@@ -638,9 +638,14 @@
             ></div>
           {/each}
         </div>
-        <div class="flex justify-between mt-1">
-          {#each [0, 6, 12, 18] as tick}
-            <span class="text-[10px] text-muted-foreground">{formatHour(tick)}</span>
+        <!-- Labels share the bars' 24-cell flex layout so each tick sits
+             directly under its hour bar (a 4-up justify-between row drifts
+             out of alignment with the 24 bars). -->
+        <div class="flex gap-px mt-1">
+          {#each data.timeOfDay as _, i}
+            <span class="flex-1 text-center text-[10px] text-muted-foreground">
+              {i % 6 === 0 ? formatHour(i) : ''}
+            </span>
           {/each}
         </div>
       </div>
