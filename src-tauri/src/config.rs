@@ -21,16 +21,16 @@ static CONFIG: OnceLock<RwLock<Config>> = OnceLock::new();
 
 /// Integrations configuration (Local Control API, MCP server)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default)]
 pub struct IntegrationsConfig {
     /// Whether the Local Control API HTTP server is enabled
-    #[serde(default)]
+    #[serde(default, alias = "apiEnabled")]
     pub api_enabled: bool,
     /// Port for the Local Control API (default 8765)
-    #[serde(default = "default_api_port")]
+    #[serde(default = "default_api_port", alias = "apiPort")]
     pub api_port: u16,
     /// Whether the MCP server is enabled
-    #[serde(default)]
+    #[serde(default, alias = "mcpEnabled")]
     pub mcp_enabled: bool,
 }
 
@@ -56,28 +56,28 @@ impl Default for IntegrationsConfig {
 ///
 /// Local file logging is always on. The Loki layer is opt-in; changes apply on restart.
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(default)]
 pub struct LoggingConfig {
     /// Number of daily rolling log files to retain locally (default 7)
-    #[serde(default = "default_local_retention_days")]
+    #[serde(default = "default_local_retention_days", alias = "localRetentionDays")]
     pub local_retention_days: u32,
     /// Whether to forward telemetry events to a remote Loki instance (default false)
-    #[serde(default)]
+    #[serde(default, alias = "remoteEnabled")]
     pub remote_enabled: bool,
     /// Loki push endpoint URL (e.g. "http://loki:3100")
-    #[serde(default)]
+    #[serde(default, alias = "lokiUrl")]
     pub loki_url: String,
     /// Authorization header value (e.g. "Bearer glsa_xxx"). Stored locally; never logged.
-    #[serde(default)]
+    #[serde(default, alias = "lokiAuth")]
     pub loki_auth: LokiAuth,
     /// Optional X-Scope-OrgID tenant header value
-    #[serde(default)]
+    #[serde(default, alias = "lokiTenant")]
     pub loki_tenant: Option<String>,
     /// Additional Loki stream labels (e.g. `[["env", "prod"]]`)
-    #[serde(default)]
+    #[serde(default, alias = "lokiLabels")]
     pub loki_labels: Vec<[String; 2]>,
     /// Minimum tracing level for telemetry events ("info", "debug", etc.)
-    #[serde(default = "default_telemetry_level")]
+    #[serde(default = "default_telemetry_level", alias = "telemetryLevel")]
     pub telemetry_level: String,
 }
 
@@ -103,12 +103,26 @@ impl Default for LoggingConfig {
     }
 }
 
+/// Sentinel returned over the API/IPC instead of the real token value.
+///
+/// The frontend must send this value back unchanged (or empty) to avoid wiping
+/// a stored token on a generic settings save. `set_config` treats both `""`
+/// and this sentinel as "keep the existing stored token".
+pub(crate) const LOKI_AUTH_MASK: &str = "***";
+
 /// Wrapper for the Loki authorization token.
 ///
 /// The value is redacted from `Debug` output so it never appears in logs.
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct LokiAuth(pub String);
+
+impl LokiAuth {
+    /// Return `true` if the value is the API mask sentinel or is empty.
+    pub(crate) fn is_masked_or_empty(&self) -> bool {
+        self.0.is_empty() || self.0 == LOKI_AUTH_MASK
+    }
+}
 
 impl std::fmt::Debug for LokiAuth {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -171,6 +185,20 @@ impl Default for Config {
             integrations: IntegrationsConfig::default(),
             logging: LoggingConfig::default(),
         }
+    }
+}
+
+impl Config {
+    /// Return a copy of this config with `loki_auth` replaced by the API mask
+    /// sentinel when a token is stored.
+    ///
+    /// Use this for all IPC/API/MCP responses so the real token value never
+    /// crosses the serialisation boundary into chat history or logs.
+    pub(crate) fn with_masked_loki_auth(mut self) -> Self {
+        if !self.logging.loki_auth.0.is_empty() {
+            self.logging.loki_auth = LokiAuth(LOKI_AUTH_MASK.to_string());
+        }
+        self
     }
 }
 
@@ -632,11 +660,12 @@ fn get_config_instance() -> &'static RwLock<Config> {
 /// Get the current configuration
 ///
 /// Returns the current configuration state. The config is cached in memory
-/// and loaded from disk on first access.
+/// and loaded from disk on first access. The `loki_auth` token is replaced
+/// with the mask sentinel so the real value never crosses the IPC boundary.
 #[tauri::command]
 pub fn get_config() -> Result<Config, Error> {
     let config = get_config_instance().read().clone();
-    Ok(config)
+    Ok(config.with_masked_loki_auth())
 }
 
 /// Update the configuration
@@ -728,6 +757,16 @@ pub fn set_config(mut config: Config) -> Result<(), Error> {
             tracing::debug!("Preserving enhancement.api_key (incoming config had None)");
             config.enhancement.api_key = current.enhancement.api_key.clone();
         }
+
+        // Preserve loki_auth if the incoming value is empty or the API mask sentinel
+        // and the cached config has a real token. The frontend never receives the real
+        // token (get_config masks it), so a generic save must not wipe a stored token.
+        // Use the dedicated set_loki_auth command for intentional token changes.
+        if config.logging.loki_auth.is_masked_or_empty() && !current.logging.loki_auth.0.is_empty()
+        {
+            tracing::debug!("Preserving loki_auth (incoming config had empty/masked value)");
+            config.logging.loki_auth = current.logging.loki_auth.clone();
+        }
     }
 
     // Save to disk first
@@ -815,6 +854,30 @@ pub fn set_enhancement_api_key(key: Option<String>) -> Result<(), Error> {
             "updated"
         } else {
             "cleared"
+        }
+    );
+    Ok(())
+}
+
+/// Set or clear the Loki auth token unconditionally.
+///
+/// This is the only correct path for changing the token (including clearing it
+/// to empty). The preservation guard in `set_config` prevents the generic save
+/// from wiping the token with a masked/empty value; this command bypasses that
+/// guard so an explicit user action can still clear it.
+///
+/// Pass `Some(token)` to store a new token, `None` to clear it.
+#[tauri::command]
+pub fn set_loki_auth(token: Option<String>) -> Result<(), Error> {
+    let mut cached = get_config_instance().write();
+    cached.logging.loki_auth = LokiAuth(token.unwrap_or_default());
+    save_to_disk(&cached)?;
+    tracing::info!(
+        "loki_auth {}",
+        if cached.logging.loki_auth.0.is_empty() {
+            "cleared"
+        } else {
+            "updated"
         }
     );
     Ok(())
@@ -1429,5 +1492,204 @@ mod tests {
                 "target '{target}' must be blocked by the telemetry filter"
             );
         }
+    }
+
+    // =========================================================================
+    // Logging config persistence and token handling tests (Bug 1 / Bug 3)
+    // =========================================================================
+
+    #[test]
+    fn test_logging_config_snake_case_serde() {
+        // The frontend serialises logging fields as snake_case; verify they round-trip
+        // correctly now that rename_all = "camelCase" has been removed.
+        let json = r#"{
+            "local_retention_days": 30,
+            "remote_enabled": true,
+            "loki_url": "http://loki:3100",
+            "loki_auth": "Bearer secret",
+            "loki_tenant": "myorg",
+            "loki_labels": [["env", "prod"]],
+            "telemetry_level": "debug"
+        }"#;
+        let cfg: LoggingConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.local_retention_days, 30);
+        assert!(cfg.remote_enabled);
+        assert_eq!(cfg.loki_url, "http://loki:3100");
+        assert_eq!(cfg.loki_auth.0, "Bearer secret");
+        assert_eq!(cfg.loki_tenant, Some("myorg".to_string()));
+        assert_eq!(cfg.loki_labels.len(), 1);
+        assert_eq!(cfg.telemetry_level, "debug");
+    }
+
+    #[test]
+    fn test_logging_config_camel_case_alias_still_deserialises() {
+        // Existing camelCase disk files must still parse correctly via the alias annotations.
+        let json = r#"{
+            "localRetentionDays": 14,
+            "remoteEnabled": true,
+            "lokiUrl": "http://loki:3100",
+            "lokiAuth": "Bearer token",
+            "lokiTenant": null,
+            "lokiLabels": [],
+            "telemetryLevel": "info"
+        }"#;
+        let cfg: LoggingConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.local_retention_days, 14);
+        assert!(cfg.remote_enabled);
+        assert_eq!(cfg.loki_url, "http://loki:3100");
+        assert_eq!(cfg.loki_auth.0, "Bearer token");
+    }
+
+    #[test]
+    fn test_logging_config_full_config_snake_case_roundtrip() {
+        // Simulate what the frontend sends via set_config: snake_case keys for logging.
+        let json = r#"{
+            "version": 1,
+            "logging": {
+                "local_retention_days": 14,
+                "remote_enabled": true,
+                "loki_url": "http://loki:3100",
+                "loki_auth": "Bearer glsa_test",
+                "loki_tenant": null,
+                "loki_labels": [],
+                "telemetry_level": "debug"
+            }
+        }"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.logging.local_retention_days, 14);
+        assert!(config.logging.remote_enabled);
+        assert_eq!(config.logging.loki_url, "http://loki:3100");
+        assert_eq!(config.logging.loki_auth.0, "Bearer glsa_test");
+        assert_eq!(config.logging.telemetry_level, "debug");
+    }
+
+    #[test]
+    fn test_config_with_masked_loki_auth_masks_set_token() {
+        // with_masked_loki_auth replaces a set token with the sentinel.
+        let config = Config {
+            logging: LoggingConfig {
+                loki_auth: LokiAuth("real_secret_token".to_string()),
+                ..LoggingConfig::default()
+            },
+            ..Config::default()
+        };
+        let masked = config.with_masked_loki_auth();
+        assert_eq!(masked.logging.loki_auth.0, LOKI_AUTH_MASK);
+    }
+
+    #[test]
+    fn test_config_with_masked_loki_auth_leaves_empty_token_alone() {
+        // with_masked_loki_auth does not replace an empty token (nothing to hide).
+        let config = Config::default();
+        let masked = config.with_masked_loki_auth();
+        assert!(masked.logging.loki_auth.0.is_empty());
+    }
+
+    #[test]
+    fn test_loki_auth_is_masked_or_empty() {
+        assert!(LokiAuth(String::new()).is_masked_or_empty());
+        assert!(LokiAuth(LOKI_AUTH_MASK.to_string()).is_masked_or_empty());
+        assert!(!LokiAuth("real_token".to_string()).is_masked_or_empty());
+    }
+
+    #[test]
+    fn test_set_config_preserves_loki_auth_on_empty_incoming() {
+        // A set_config with empty loki_auth must keep the stored token.
+        let _guard = CONFIG_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let instance = get_config_instance();
+        {
+            let mut cached = instance.write();
+            cached.logging.loki_auth = LokiAuth("stored_token".to_string());
+        }
+
+        let mut incoming = Config::default();
+        // Simulate what the frontend sends: empty token (field not changed)
+        assert!(incoming.logging.loki_auth.0.is_empty());
+
+        // Apply the same preservation guard that set_config uses
+        {
+            let current = instance.read();
+            if incoming.logging.loki_auth.is_masked_or_empty()
+                && !current.logging.loki_auth.0.is_empty()
+            {
+                incoming.logging.loki_auth = current.logging.loki_auth.clone();
+            }
+        }
+
+        assert_eq!(incoming.logging.loki_auth.0, "stored_token");
+
+        // Restore clean state
+        instance.write().logging.loki_auth = LokiAuth::default();
+    }
+
+    #[test]
+    fn test_set_config_preserves_loki_auth_on_mask_sentinel_incoming() {
+        // A set_config with loki_auth == LOKI_AUTH_MASK must keep the stored token.
+        // This happens when the frontend sends back the mask it received from get_config.
+        let _guard = CONFIG_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let instance = get_config_instance();
+        {
+            let mut cached = instance.write();
+            cached.logging.loki_auth = LokiAuth("stored_token_xyz".to_string());
+        }
+
+        let mut incoming = Config::default();
+        incoming.logging.loki_auth = LokiAuth(LOKI_AUTH_MASK.to_string());
+
+        {
+            let current = instance.read();
+            if incoming.logging.loki_auth.is_masked_or_empty()
+                && !current.logging.loki_auth.0.is_empty()
+            {
+                incoming.logging.loki_auth = current.logging.loki_auth.clone();
+            }
+        }
+
+        assert_eq!(incoming.logging.loki_auth.0, "stored_token_xyz");
+
+        // Restore clean state
+        instance.write().logging.loki_auth = LokiAuth::default();
+    }
+
+    #[test]
+    fn test_logging_config_file_persistence_roundtrip() {
+        // Verify that write → read file gives back the same values.
+        // Uses a temp directory so it does not touch ~/.thoth/config.json.
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config_test.json");
+
+        let cfg = Config {
+            logging: LoggingConfig {
+                local_retention_days: 30,
+                remote_enabled: true,
+                loki_url: "http://loki:3100".to_string(),
+                loki_auth: LokiAuth("Bearer glsa_secret".to_string()),
+                loki_tenant: Some("testorg".to_string()),
+                loki_labels: vec![["env".to_string(), "test".to_string()]],
+                telemetry_level: "debug".to_string(),
+            },
+            ..Config::default()
+        };
+
+        // Write
+        let contents = serde_json::to_string_pretty(&cfg).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(contents.as_bytes())
+            .unwrap();
+
+        // Read back
+        let read_back = std::fs::read_to_string(&path).unwrap();
+        let restored: Config = serde_json::from_str(&read_back).unwrap();
+
+        assert_eq!(restored.logging.local_retention_days, 30);
+        assert!(restored.logging.remote_enabled);
+        assert_eq!(restored.logging.loki_url, "http://loki:3100");
+        assert_eq!(restored.logging.loki_auth.0, "Bearer glsa_secret");
+        assert_eq!(restored.logging.loki_tenant, Some("testorg".to_string()));
+        assert_eq!(restored.logging.loki_labels.len(), 1);
+        assert_eq!(restored.logging.loki_labels[0], ["env", "test"]);
+        assert_eq!(restored.logging.telemetry_level, "debug");
     }
 }

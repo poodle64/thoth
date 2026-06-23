@@ -9,7 +9,13 @@
   import { Label } from '$components/ui/label';
   import { Badge } from '$components/ui/badge';
 
+  // The API mask sentinel — must match LOKI_AUTH_MASK in config.rs.
+  const LOKI_AUTH_MASK = '***';
+
   let isTesting = $state(false);
+  // Tracks whether the token field has been edited in this session.
+  // When dirty, we save via set_loki_auth on blur; otherwise skip to avoid
+  // unintentionally clearing the stored token with the mask value.
   let lokiAuthDirty = $state(false);
 
   async function saveSettings(): Promise<void> {
@@ -49,7 +55,16 @@
   async function handleLokiAuthBlur(): Promise<void> {
     if (!lokiAuthDirty) return;
     lokiAuthDirty = false;
-    await saveSettings();
+    const token = configStore.logging.lokiAuth;
+    // Use the dedicated command so the preservation guard in set_config doesn't
+    // block intentional token changes (including clearing).
+    try {
+      await invoke('set_loki_auth', { token: token || null });
+    } catch (e) {
+      toast.error('Failed to save Loki token', {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
   }
 
   function handleLokiTenantInput(event: Event): void {
@@ -64,7 +79,16 @@
   async function handleTestConnection(): Promise<void> {
     isTesting = true;
     try {
-      await invoke('test_loki_connection');
+      // Test the on-screen values directly so the user can verify before saving.
+      // If the token field shows the mask sentinel, pass empty string so Loki
+      // attempts an unauthenticated push (the real token stays server-side).
+      const authToTest =
+        configStore.logging.lokiAuth === LOKI_AUTH_MASK ? '' : configStore.logging.lokiAuth;
+      await invoke('test_loki_connection', {
+        url: configStore.logging.lokiUrl,
+        auth: authToTest,
+        tenant: configStore.logging.lokiTenant,
+      });
       toast.success('Loki connection successful');
     } catch (e) {
       toast.error('Loki connection failed', {

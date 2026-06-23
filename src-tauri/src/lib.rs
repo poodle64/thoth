@@ -746,6 +746,7 @@ pub fn run() {
             control_api::set_api_port,
             // Logging / telemetry
             telemetry::test_loki_connection,
+            config::set_loki_auth,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
