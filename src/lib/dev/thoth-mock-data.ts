@@ -244,7 +244,7 @@ const MOCK_CLIPBOARD_SETTINGS = {
 // Insights mock data
 // ---------------------------------------------------------------------------
 
-/** Build ~90 days of realistic activity ending today */
+/** Build ~14 months of realistic activity ending today, so heatmap month labels span multiple months */
 function buildMockActivity(): Array<{ day: string; count: number; words: number }> {
   const activity = [];
   const today = new Date();
@@ -255,7 +255,8 @@ function buildMockActivity(): Array<{ day: string; count: number; words: number 
     return (seed >>> 0) / 0xffffffff;
   };
 
-  for (let i = 89; i >= 0; i--) {
+  // 365 days = one full year of data so all month labels appear
+  for (let i = 364; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
     const day = d.toISOString().slice(0, 10);
@@ -289,21 +290,21 @@ const MOCK_INSIGHTS_DATA = {
   longestStreak: 31,
   throughput: [
     {
-      name: 'FluidAudio',
+      name: 'fluidaudio-parakeet-tdt-coreml',
       count: 1200,
       avgAudioDuration: 8.2,
       avgProcessingTime: 0.12,
       speedFactor: 67,
     },
     {
-      name: 'Whisper',
+      name: 'ggml-large-v3-turbo',
       count: 580,
       avgAudioDuration: 11.4,
       avgProcessingTime: 0.67,
       speedFactor: 17,
     },
     {
-      name: 'Parakeet',
+      name: 'parakeet-tdt-1.1',
       count: 62,
       avgAudioDuration: 6.1,
       avgProcessingTime: 1.05,
@@ -312,9 +313,9 @@ const MOCK_INSIGHTS_DATA = {
   ],
   modelUsage: {
     backendCounts: [
-      { name: 'FluidAudio (Parakeet v3)', count: 1200 },
-      { name: 'Whisper Small', count: 580 },
-      { name: 'Parakeet TDT v3', count: 62 },
+      { name: 'fluidaudio-parakeet-tdt-coreml', count: 1200 },
+      { name: 'ggml-large-v3-turbo', count: 580 },
+      { name: 'parakeet-tdt-1.1', count: 62 },
     ],
     enhancementPrompts: [
       { prompt: 'Fix grammar and punctuation', count: 210 },

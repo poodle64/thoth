@@ -26,6 +26,7 @@
   import { Button } from '$components/ui/button';
   import { Checkbox } from '$components/ui/checkbox';
   import { formatBytes, formatTotalDuration } from '../utils/format';
+  import { friendlyModelName } from '../utils/model-name';
   import Flame from '@lucide/svelte/icons/flame';
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
@@ -146,11 +147,27 @@
   );
   const cruftSomeSelected = $derived(cruftSelectedIds.size > 0 && !cruftAllSelected);
 
+  const MONTH_ABBREVS = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+
   const heatmapData = $derived.by(() => {
     if (!data?.activity?.length)
       return {
         weeks: [] as Array<Array<{ day: string; count: number; words: number } | null>>,
         max: 1,
+        monthLabels: [] as Array<{ label: string; weekIndex: number }>,
       };
     const byDay = new Map(data.activity.map((d) => [d.day, d]));
 
@@ -161,8 +178,25 @@
 
     const weeks: Array<Array<{ day: string; count: number; words: number } | null>> = [];
     const cursor = new Date(start);
+    let weekIndex = 0;
+    // Track which months we've already placed a label for
+    const seenMonths = new Set<number>();
+    const monthLabels: Array<{ label: string; weekIndex: number }> = [];
+
     while (cursor <= today) {
       const week: Array<{ day: string; count: number; words: number } | null> = [];
+      // Check the Sunday (first day of week) for month boundary
+      const sundayMonth = cursor.getMonth();
+      const sundayYear = cursor.getFullYear();
+      const monthKey = sundayYear * 12 + sundayMonth;
+      if (!seenMonths.has(monthKey)) {
+        seenMonths.add(monthKey);
+        // Only label if not the very first partial week (to avoid clipping)
+        if (weekIndex > 0) {
+          monthLabels.push({ label: MONTH_ABBREVS[sundayMonth], weekIndex });
+        }
+      }
+
       for (let d = 0; d < 7; d++) {
         if (cursor > today) {
           week.push(null);
@@ -173,10 +207,11 @@
         cursor.setDate(cursor.getDate() + 1);
       }
       weeks.push(week);
+      weekIndex++;
     }
 
     const max = Math.max(1, ...data.activity.map((d) => d.count));
-    return { weeks, max };
+    return { weeks, max, monthLabels };
   });
 
   const peakHour = $derived.by(() => {
@@ -384,7 +419,10 @@
           <span class="text-[22px] font-semibold text-foreground tabular-nums leading-tight block">
             ≈{data.totals.totalWords.toLocaleString()}
           </span>
-          <span class="text-xs text-muted-foreground mt-1 block">Words dictated</span>
+          <span class="text-xs text-muted-foreground mt-1 block">
+            Words dictated
+            <span class="opacity-60">({data.totals.totalCount.toLocaleString()} recordings)</span>
+          </span>
         </Card.Content>
       </Card.Root>
       <Card.Root>
@@ -401,7 +439,7 @@
             {formatTotalDuration(data.totals.typingTimeSavedSeconds)}
           </span>
           <span class="text-xs text-muted-foreground mt-1 block">
-            Typing time saved <span class="opacity-60">@ 40 wpm</span>
+            Typing saved <span class="opacity-60">@ 40 wpm</span>
           </span>
         </Card.Content>
       </Card.Root>
@@ -414,7 +452,7 @@
             {data.currentStreak}d
           </span>
           <span class="text-xs text-muted-foreground mt-1 block">
-            Current streak <span class="opacity-60">longest {data.longestStreak}d</span>
+            Streak <span class="opacity-60">longest {data.longestStreak}d</span>
           </span>
         </Card.Content>
       </Card.Root>
@@ -425,27 +463,57 @@
   <section class="mb-6">
     <h3 class="text-sm font-semibold text-foreground mb-3">Activity</h3>
     <div class="rounded-md border border-border bg-card p-4 overflow-x-auto">
-      <div class="heatmap-grid">
-        {#each heatmapData.weeks as week}
-          <div class="heatmap-col">
-            {#each week as cell}
-              {#if cell === null}
-                <div class="heatmap-cell heatmap-cell--empty"></div>
-              {:else}
-                {@const intensity = heatmapData.max > 0 ? cell.count / heatmapData.max : 0}
-                <div
-                  class="heatmap-cell"
-                  style="--intensity: {intensity}"
-                  title="{cell.day}: {cell.count} recording{cell.count === 1
-                    ? ''
-                    : 's'}{cell.words > 0 ? `, ≈${cell.words.toLocaleString()} words` : ''}"
-                ></div>
-              {/if}
+      <!-- Month labels row + weekday gutter side-by-side -->
+      <div class="heatmap-outer">
+        <!-- Left gutter: weekday labels aligned to Mon/Wed/Fri rows -->
+        <div class="heatmap-day-labels" aria-hidden="true">
+          <!-- spacer for month-label row -->
+          <div class="heatmap-month-spacer"></div>
+          <span class="heatmap-day-label">Mon</span>
+          <span class="heatmap-day-label heatmap-day-label--hidden"></span>
+          <span class="heatmap-day-label">Wed</span>
+          <span class="heatmap-day-label heatmap-day-label--hidden"></span>
+          <span class="heatmap-day-label">Fri</span>
+          <span class="heatmap-day-label heatmap-day-label--hidden"></span>
+          <span class="heatmap-day-label heatmap-day-label--hidden"></span>
+        </div>
+
+        <!-- Right side: month labels + grid -->
+        <div class="heatmap-right">
+          <!-- Month label row — absolutely positioned over the grid -->
+          <div class="heatmap-month-row" aria-hidden="true">
+            {#each heatmapData.monthLabels as ml}
+              <span class="heatmap-month-label" style="left: calc({ml.weekIndex} * 12px)"
+                >{ml.label}</span
+              >
             {/each}
           </div>
-        {/each}
+
+          <!-- Cell grid -->
+          <div class="heatmap-grid">
+            {#each heatmapData.weeks as week}
+              <div class="heatmap-col">
+                {#each week as cell}
+                  {#if cell === null}
+                    <div class="heatmap-cell heatmap-cell--empty"></div>
+                  {:else}
+                    {@const intensity = heatmapData.max > 0 ? cell.count / heatmapData.max : 0}
+                    <div
+                      class="heatmap-cell"
+                      style="--intensity: {intensity}"
+                      title="{cell.day}: {cell.count} recording{cell.count === 1
+                        ? ''
+                        : 's'}{cell.words > 0 ? `, ≈${cell.words.toLocaleString()} words` : ''}"
+                    ></div>
+                  {/if}
+                {/each}
+              </div>
+            {/each}
+          </div>
+        </div>
       </div>
-      <div class="flex items-center gap-1.5 mt-2 justify-end">
+
+      <div class="flex items-center gap-1.5 mt-3 justify-end">
         <span class="text-[10px] text-muted-foreground">Less</span>
         <div class="heatmap-legend-cell" style="--intensity: 0"></div>
         <div class="heatmap-legend-cell" style="--intensity: 0.25"></div>
@@ -465,19 +533,25 @@
         <p class="text-xs text-muted-foreground mb-4">×realtime — higher is faster</p>
         <div class="flex flex-col gap-3">
           {#each data.throughput as row}
+            {@const displayName = friendlyModelName(row.name)}
             <div class="flex items-center gap-3">
-              <span class="text-xs text-muted-foreground w-28 shrink-0 truncate" title={row.name}>
-                {row.name}
+              <span
+                class="text-xs text-muted-foreground w-36 shrink-0 truncate"
+                title={displayName}
+              >
+                {displayName}
               </span>
-              <div class="flex-1 flex items-end gap-1 h-8">
+              <div class="flex-1 h-5">
                 <div
-                  class="rounded-sm transition-all"
+                  class="h-full rounded-sm"
                   style="width: {(row.speedFactor / maxThroughput) *
-                    100}%; height: 100%; background: var(--chart-1); min-width: 4px"
+                    100}%; background: var(--chart-1); min-width: 4px"
                 ></div>
               </div>
-              <span class="text-xs font-semibold text-foreground tabular-nums w-14 shrink-0">
-                {row.speedFactor.toFixed(0)}×
+              <span
+                class="text-xs font-semibold text-foreground tabular-nums w-12 text-right shrink-0"
+              >
+                {row.speedFactor >= 10 ? row.speedFactor.toFixed(0) : row.speedFactor.toFixed(1)}×
               </span>
             </div>
           {/each}
@@ -499,9 +573,13 @@
         </div>
         <div class="flex flex-col gap-2.5">
           {#each data.modelUsage.backendCounts as bc}
+            {@const displayName = friendlyModelName(bc.name)}
             <div class="flex items-center gap-3">
-              <span class="text-xs text-muted-foreground w-36 shrink-0 truncate" title={bc.name}>
-                {bc.name}
+              <span
+                class="text-xs text-muted-foreground w-36 shrink-0 truncate"
+                title={displayName}
+              >
+                {displayName}
               </span>
               <div class="flex-1 h-2 rounded-full bg-muted overflow-hidden">
                 <div
@@ -509,8 +587,8 @@
                   style="width: {(bc.count / maxBackendCount) * 100}%; background: var(--chart-1)"
                 ></div>
               </div>
-              <span class="text-xs text-foreground tabular-nums w-10 text-right shrink-0">
-                {bc.count}
+              <span class="text-xs text-foreground tabular-nums w-14 text-right shrink-0">
+                {bc.count.toLocaleString()}
               </span>
             </div>
           {/each}
@@ -828,10 +906,66 @@
 
 <style>
   /* GitHub-style contribution heatmap */
+
+  /* Outer wrapper: day-label gutter beside the grid+month-labels block */
+  .heatmap-outer {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: max-content;
+  }
+
+  /* Left column: weekday labels */
+  .heatmap-day-labels {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-top: 0; /* aligns with month-row + grid */
+  }
+
+  /* Spacer that matches the month-label row height */
+  .heatmap-month-spacer {
+    height: 14px;
+    display: block;
+  }
+
+  .heatmap-day-label {
+    height: 10px;
+    line-height: 10px;
+    font-size: 9px;
+    color: var(--muted-foreground);
+    white-space: nowrap;
+    display: block;
+  }
+
+  .heatmap-day-label--hidden {
+    visibility: hidden;
+  }
+
+  /* Right block: month labels above the grid */
+  .heatmap-right {
+    position: relative;
+  }
+
+  .heatmap-month-row {
+    position: relative;
+    height: 14px;
+    margin-bottom: 2px;
+  }
+
+  .heatmap-month-label {
+    position: absolute;
+    top: 0;
+    font-size: 9px;
+    color: var(--muted-foreground);
+    line-height: 1;
+    white-space: nowrap;
+    /* each week column is 12px (10px cell + 2px gap) */
+  }
+
   .heatmap-grid {
     display: flex;
     gap: 2px;
-    min-width: max-content;
   }
 
   .heatmap-col {
