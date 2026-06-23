@@ -195,10 +195,10 @@ fn build_loki_components(
         builder = builder.label(pair[0].as_str(), pair[1].as_str()).ok()?;
     }
 
-    // Authorization header — value is intentionally not logged anywhere.
-    if !cfg.loki_auth.0.is_empty() {
+    // Authorization header — bare token gets a Bearer prefix. Never logged.
+    if let Some(auth_val) = config::authorization_header(&cfg.loki_auth.0) {
         builder = builder
-            .http_header("Authorization", cfg.loki_auth.0.as_str())
+            .http_header("Authorization", auth_val.as_str())
             .ok()?;
     }
 

@@ -184,10 +184,14 @@
             value={configStore.logging.lokiAuth}
             oninput={handleLokiAuthInput}
             onblur={handleLokiAuthBlur}
-            placeholder="Bearer token (optional)"
+            placeholder="Paste your token"
             autocomplete="off"
             aria-label="Loki bearer token"
           />
+          <p class="text-xs text-muted-foreground">
+            Just the token — <span class="font-mono">Bearer</span> is added automatically. Paste a full
+            <span class="font-mono">Bearer …</span> or <span class="font-mono">Basic …</span> value to override.
+          </p>
         </div>
 
         <!-- Tenant ID (optional) -->

@@ -54,15 +54,10 @@ pub async fn test_loki_connection(
         .header("Content-Type", "application/json")
         .body(body.to_string());
 
-    // Authorization header value is used directly without logging.
-    let effective_auth = if auth.is_empty() || auth == crate::config::LOKI_AUTH_MASK {
-        // Empty or mask sentinel: try without auth (Loki may allow unauthenticated push)
-        None
-    } else {
-        Some(auth)
-    };
-    if let Some(ref auth_val) = effective_auth {
-        req_builder = req_builder.header("Authorization", auth_val.as_str());
+    // Normalise to a full Authorization header (bare token gets a Bearer
+    // prefix). Empty/masked yields None — push unauthenticated. Never logged.
+    if let Some(auth_val) = crate::config::authorization_header(&auth) {
+        req_builder = req_builder.header("Authorization", auth_val);
     }
     if let Some(ref t) = tenant {
         if !t.is_empty() {

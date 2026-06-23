@@ -124,6 +124,25 @@ impl LokiAuth {
     }
 }
 
+/// Build the value for the HTTP `Authorization` header from a stored auth
+/// token. Returns `None` when there is no usable token (empty or the API mask
+/// sentinel). A value that already carries an auth scheme (`Bearer `/`Basic `,
+/// case-insensitive) is used verbatim; a bare token gets a `Bearer ` prefix —
+/// so the user can paste just the token (the common case) and still satisfy a
+/// `Authorization: Bearer <token>` check.
+pub(crate) fn authorization_header(auth: &str) -> Option<String> {
+    let token = auth.trim();
+    if token.is_empty() || token == LOKI_AUTH_MASK {
+        return None;
+    }
+    let lower = token.to_ascii_lowercase();
+    if lower.starts_with("bearer ") || lower.starts_with("basic ") {
+        Some(token.to_string())
+    } else {
+        Some(format!("Bearer {token}"))
+    }
+}
+
 impl std::fmt::Debug for LokiAuth {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.0.is_empty() {
@@ -1590,6 +1609,32 @@ mod tests {
         assert!(LokiAuth(String::new()).is_masked_or_empty());
         assert!(LokiAuth(LOKI_AUTH_MASK.to_string()).is_masked_or_empty());
         assert!(!LokiAuth("real_token".to_string()).is_masked_or_empty());
+    }
+
+    #[test]
+    fn test_authorization_header() {
+        // empty / masked → no header
+        assert_eq!(authorization_header(""), None);
+        assert_eq!(authorization_header("   "), None);
+        assert_eq!(authorization_header(LOKI_AUTH_MASK), None);
+        // bare token → Bearer prefixed
+        assert_eq!(
+            authorization_header("abc123").as_deref(),
+            Some("Bearer abc123")
+        );
+        // already-schemed values pass through verbatim (case-insensitive match)
+        assert_eq!(
+            authorization_header("Bearer abc123").as_deref(),
+            Some("Bearer abc123")
+        );
+        assert_eq!(
+            authorization_header("bearer abc123").as_deref(),
+            Some("bearer abc123")
+        );
+        assert_eq!(
+            authorization_header("Basic dXNlcjpwYXNz").as_deref(),
+            Some("Basic dXNlcjpwYXNz")
+        );
     }
 
     #[test]
