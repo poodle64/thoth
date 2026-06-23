@@ -53,6 +53,9 @@
   let unlistenProgress: UnlistenFn | null = null;
   let unlistenComplete: UnlistenFn | null = null;
   let unlistenError: UnlistenFn | null = null;
+  let unlistenModelChanged: UnlistenFn | null = null;
+  let unlistenModelReady: UnlistenFn | null = null;
+  let unlistenModelFailed: UnlistenFn | null = null;
 
   onMount(() => {
     loadModels(false);
@@ -63,6 +66,9 @@
       if (unlistenProgress) unlistenProgress();
       if (unlistenComplete) unlistenComplete();
       if (unlistenError) unlistenError();
+      if (unlistenModelChanged) unlistenModelChanged();
+      if (unlistenModelReady) unlistenModelReady();
+      if (unlistenModelFailed) unlistenModelFailed();
     };
   });
 
@@ -100,6 +106,18 @@
       error = event.payload;
       progress = null;
       downloadingModelId = null;
+    });
+
+    // Keep the model cards honest when the active model changes or finishes
+    // loading — e.g. when switched from the tray menu, or when a background
+    // warmup succeeds or fails. Without this the "Active" badge can drift out of
+    // sync with what the backend has actually loaded.
+    unlistenModelChanged = await listen<string>('model-changed', () => loadModels(false));
+    unlistenModelReady = await listen<string>('model-ready', () => loadModels(false));
+    unlistenModelFailed = await listen<string>('model-init-failed', async (event) => {
+      await loadModels(false);
+      const failed = models.find((m) => m.id === event.payload);
+      error = `${failed?.name ?? event.payload} failed to load. Try re-downloading it from this page.`;
     });
   }
 
@@ -326,8 +344,10 @@
           <div class="flex items-center justify-between gap-2">
             <div class="flex min-w-0 items-center gap-2">
               <span class="truncate text-sm font-semibold">{model.name}</span>
-              {#if model.selected}
+              {#if model.selected && model.downloaded}
                 <Badge>Active</Badge>
+              {:else if model.selected}
+                <Badge variant="destructive">Not installed</Badge>
               {:else if model.recommended}
                 <Badge variant="secondary">Recommended</Badge>
               {/if}

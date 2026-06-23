@@ -77,6 +77,15 @@ pub fn check_model_downloaded(model_id: Option<String>) -> bool {
     });
 
     let model = manifest.models.iter().find(|m| m.id == model_id);
+
+    // FluidAudio readiness is its compiled CoreML cache, not the on-disk
+    // required_files sentinel; defer to the manifest's cache-aware check.
+    if let Some(m) = model {
+        if m.model_type == "fluidaudio_coreml" {
+            return super::manifest::is_model_downloaded(m);
+        }
+    }
+
     let required_files: Vec<&str> = match &model {
         Some(m) => m.required_files.iter().map(|s| s.as_str()).collect(),
         None => vec![

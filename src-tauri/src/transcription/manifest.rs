@@ -258,6 +258,14 @@ pub fn get_fallback_manifest() -> ModelManifest {
 
 /// Check if a specific model is downloaded locally
 pub fn is_model_downloaded(model: &RemoteModelInfo) -> bool {
+    // FluidAudio's "downloaded" state is the compiled CoreML cache in
+    // ~/Library/Application Support/FluidAudio/Models/, NOT the sentinel marker
+    // in ~/.thoth/models/. The marker persists after the cache is cleared, so
+    // trusting it makes the UI and tray claim a model that cannot actually load.
+    if model.model_type == "fluidaudio_coreml" {
+        return fluidaudio_cache_present();
+    }
+
     let model_dir = get_model_directory(&model.id);
 
     for file in &model.required_files {
@@ -317,6 +325,21 @@ pub fn get_model_disk_size(model: &RemoteModelInfo) -> Option<u64> {
                 .map(|m| m.len())
         })
         .reduce(|a, b| a + b)
+}
+
+/// Whether FluidAudio's compiled CoreML model cache is present and populated.
+///
+/// Always `false` on builds without the FluidAudio backend, so the model simply
+/// reads as not-downloaded there.
+fn fluidaudio_cache_present() -> bool {
+    #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+    {
+        super::fluidaudio::is_cached()
+    }
+    #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
+    {
+        false
+    }
 }
 
 /// Recursively calculate directory size in bytes

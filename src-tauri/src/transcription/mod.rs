@@ -20,6 +20,7 @@ use crate::error::Error;
 use parking_lot::Mutex;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Transcription backend type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -91,6 +92,20 @@ static TRANSCRIPTION_SERVICE: OnceLock<Mutex<Option<TranscriptionService>>> = On
 
 fn get_service() -> &'static Mutex<Option<TranscriptionService>> {
     TRANSCRIPTION_SERVICE.get_or_init(|| Mutex::new(None))
+}
+
+/// Whether the most recent warmup attempt finished without loading any usable
+/// model (the selected backend *and* the Whisper fallback both failed).
+///
+/// This is the difference between "a model is configured / on disk" and "a model
+/// can actually transcribe". The record guard and the pipeline's load-wait read
+/// it so they can block (or bail fast) instead of recording into a void and then
+/// hanging for 60 s on a model that will never load.
+static WARMUP_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Returns `true` when the last warmup attempt loaded no usable transcription model.
+pub fn warmup_failed() -> bool {
+    WARMUP_FAILED.load(Ordering::SeqCst)
 }
 
 /// Initialise the transcription service with whisper backend (primary)
@@ -379,7 +394,22 @@ fn audio_has_speech(path: &std::path::Path) -> Result<bool, String> {
 
 /// Eagerly initialise the transcription model in the background.
 /// Triggers Metal shader compilation so the first recording is instant.
+///
+/// Records the outcome in [`WARMUP_FAILED`] so the record guard and pipeline can
+/// react immediately when no usable model could be loaded.
 pub fn warmup_transcription() {
+    // Clear the flag so an in-progress retry is treated optimistically; if this
+    // attempt also fails to produce a service, it is set again below.
+    WARMUP_FAILED.store(false, Ordering::SeqCst);
+    warmup_transcription_inner();
+    let loaded = is_transcription_ready();
+    WARMUP_FAILED.store(!loaded, Ordering::SeqCst);
+    if !loaded {
+        tracing::warn!("Warmup finished without loading a usable transcription model");
+    }
+}
+
+fn warmup_transcription_inner() {
     let selected_id = crate::config::get_config()
         .ok()
         .and_then(|c| c.transcription.model_id.clone());

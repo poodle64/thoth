@@ -249,17 +249,22 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, Error> {
         return Err("Pipeline is already running".to_string().into());
     }
 
-    // If the transcription model isn't loaded yet, try to load it in the
-    // background while we record.  This avoids blocking the user — the model
-    // will (hopefully) be ready by the time they stop speaking.
+    // If the transcription model isn't loaded yet, decide whether we can record.
+    // We allow recording during an in-progress background load (the model is
+    // usually ready by the time the user stops speaking), but block outright when
+    // there is no usable model — either the selected model is not on disk, or a
+    // warmup has already proved that nothing (selected or fallback) can load.
+    // Otherwise the user records into a void and the pipeline hangs at the
+    // transcription stage waiting for a model that will never arrive.
     if !transcription::is_transcription_ready() {
-        if !transcription::download::check_model_downloaded(None) {
+        if transcription::warmup_failed() || !transcription::download::check_model_downloaded(None)
+        {
             PIPELINE_RUNNING.store(false, Ordering::SeqCst);
-            tracing::warn!("Pipeline: No transcription model downloaded, blocking recording");
-            tracing::warn!(target: "telemetry", reason = "no_model_downloaded", "model_load_failure");
+            tracing::warn!("Pipeline: No usable transcription model, blocking recording");
+            tracing::warn!(target: "telemetry", reason = "no_usable_model", "model_load_failure");
             let _ = crate::recording_indicator::hide_recording_indicator(app.clone());
             return Err(
-                "No transcription model downloaded. Open Settings \u{2192} Models to get started."
+                "No transcription model is ready. Open Settings \u{2192} Models to download or repair one."
                     .to_string()
                     .into(),
             );
@@ -517,6 +522,15 @@ async fn run_transcription_pipeline(
         );
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         while !transcription::is_transcription_ready() {
+            // Bail the moment the background warmup reports it could load nothing,
+            // instead of waiting out the full 60 s on a model that will never load.
+            if transcription::warmup_failed() {
+                tracing::warn!(target: "telemetry", reason = "warmup_failed", "model_load_failure");
+                return Err(
+                    "No transcription model is ready. Open Settings \u{2192} Models to download or repair one."
+                        .to_string(),
+                );
+            }
             if std::time::Instant::now() > deadline {
                 tracing::warn!(target: "telemetry", reason = "load_timeout_60s", "model_load_failure");
                 return Err("Transcription model failed to load within 60 seconds".to_string());
