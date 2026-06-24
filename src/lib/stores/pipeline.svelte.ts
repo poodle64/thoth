@@ -202,9 +202,21 @@ function createPipelineStore() {
 
     // Progress events: update the display message only.
     // State is owned by recording-state; pipeline-progress must not set it.
+    // Exception: on a failed transition, surface the error to the user via
+    // toast and error sound. This listener is the SINGLE owner of failure
+    // feedback: every genuine pipeline failure emits a `failed` progress event
+    // (including the detached recording path, which no imperative caller can
+    // catch), so the imperative call sites deliberately no longer also play the
+    // error sound. The no-speech sentinel is excluded; it is handled separately
+    // (a gentle info toast) and must not produce an error noise on a
+    // deliberately silent recording.
     const progressUnlisten = await listen<PipelineProgress>('pipeline-progress', (event) => {
       debug(' pipeline-progress message update:', event.payload.message);
       message = event.payload.message;
+      if (event.payload.state === 'failed' && event.payload.message !== NO_SPEECH_SENTINEL) {
+        toast.error(event.payload.message);
+        soundStore.playError();
+      }
     });
     unlisteners.push(progressUnlisten);
 
@@ -377,7 +389,6 @@ function createPipelineStore() {
         error = errorMsg;
         state = 'failed';
         invoke('hide_recording_indicator').catch(() => {});
-        soundStore.playError();
         return { success: false, error: errorMsg };
       }
 
@@ -479,7 +490,6 @@ function createPipelineStore() {
       } else {
         state = 'failed';
         error = result.error ?? 'Unknown error';
-        soundStore.playError();
         return { success: false, error: result.error ?? 'Unknown error' };
       }
     } catch (e) {
@@ -493,7 +503,6 @@ function createPipelineStore() {
       console.error('[Pipeline] Exception in transcribeFile:', errorMsg);
       error = errorMsg;
       state = 'failed';
-      soundStore.playError();
       return { success: false, error: errorMsg };
     } finally {
       isRunning = false;

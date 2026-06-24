@@ -482,6 +482,26 @@ pub fn get_pipeline_state() -> PipelineState {
     }
 }
 
+/// Run the synchronous, panic-prone post-transcription text transforms under
+/// a catch boundary, so a panic (e.g. the phonetic matcher over arbitrary
+/// decoded text) becomes a recoverable error instead of aborting the app.
+///
+/// `AssertUnwindSafe` is sound here: the wrapped transforms take only read
+/// locks (`parking_lot`, which does not poison on panic) over read-only shared
+/// data, and the caught panic is discarded rather than resumed, so no later
+/// observer can witness a half-updated state. Do not add a write path inside
+/// the wrapped closure without revisiting this.
+fn catch_post_processing<F: FnOnce() -> String>(f: F) -> Result<String, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|payload| {
+        let detail = payload
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown panic".to_string());
+        format!("Text post-processing failed: {detail}")
+    })
+}
+
 /// Output of the core transcription pipeline (transcribe + filter + enhance).
 ///
 /// Shared by [`process_audio`] (recordings/imports) and [`pipeline_retranscribe`].
@@ -588,8 +608,10 @@ async fn run_transcription_pipeline(
         );
         emit_progress(app, PipelineState::Filtering, "Applying filters...");
 
-        if config.apply_filtering {
-            let filter_opts = transcription::FilterOptions {
+        let apply_filtering = config.apply_filtering;
+        let apply_dictionary = config.apply_dictionary;
+        let filter_opts = if apply_filtering {
+            Some(transcription::FilterOptions {
                 remove_fillers: config.remove_fillers,
                 australian_spelling: config.australian_spelling,
                 spoken_numbers_to_digits: config.spoken_numbers_to_digits,
@@ -603,17 +625,25 @@ async fn run_transcription_pipeline(
                 // (FilterOptions::default() would otherwise turn it on here and
                 // apply it a second time, ignoring config.apply_dictionary).
                 apply_dictionary: false,
-            };
-            text = transcription::filter_transcription(text, Some(filter_opts));
-            tracing::debug!("Pipeline: After filtering: {} chars", text.len());
-        }
+            })
+        } else {
+            None
+        };
 
-        if config.apply_dictionary {
-            text = dictionary::apply_dictionary(&text);
-            tracing::debug!("Pipeline: After dictionary: {} chars", text.len());
-            text = canonical::apply_canonical(&text);
-            tracing::debug!("Pipeline: After canonical: {} chars", text.len());
-        }
+        text = catch_post_processing(move || {
+            let mut t = text;
+            if apply_filtering {
+                t = transcription::filter_transcription(t, filter_opts);
+                tracing::debug!("Pipeline: After filtering: {} chars", t.len());
+            }
+            if apply_dictionary {
+                t = dictionary::apply_dictionary(&t);
+                tracing::debug!("Pipeline: After dictionary: {} chars", t.len());
+                t = canonical::apply_canonical(&t);
+                tracing::debug!("Pipeline: After canonical: {} chars", t.len());
+            }
+            t
+        })?;
 
         tracing::info!("Pipeline: Filtered text to {} characters", text.len());
     }
@@ -1400,6 +1430,42 @@ mod tests {
         assert!(
             wav_path.exists(),
             "WAV file must be retained after a genuine pipeline error"
+        );
+    }
+
+    // ── catch_post_processing tests ────────────────────────────────────────────
+
+    /// A panicking closure must be caught and returned as Err containing the
+    /// panic message, so one bad transcription does not abort the whole app.
+    #[test]
+    fn test_catch_post_processing_captures_panic() {
+        let result = catch_post_processing(|| panic!("boom"));
+        assert!(result.is_err(), "panicking closure must return Err");
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("boom"),
+            "error message must contain the panic payload; got: {msg}"
+        );
+    }
+
+    /// A non-panicking closure must return its value as Ok.
+    #[test]
+    fn test_catch_post_processing_ok_on_success() {
+        let result = catch_post_processing(|| "hello".to_string());
+        assert_eq!(result, Ok("hello".to_string()));
+    }
+
+    /// A panic with a formatted (String) payload is also captured. This covers
+    /// the `String` downcast branch, distinct from the `&str` literal branch
+    /// exercised by `test_catch_post_processing_captures_panic`.
+    #[test]
+    fn test_catch_post_processing_captures_string_panic() {
+        let detail = String::from("formatted-detail");
+        let result = catch_post_processing(move || panic!("{detail}"));
+        assert!(result.is_err(), "panicking closure must return Err");
+        assert!(
+            result.unwrap_err().contains("formatted-detail"),
+            "error message must contain the formatted String panic payload"
         );
     }
 }

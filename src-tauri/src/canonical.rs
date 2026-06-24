@@ -178,9 +178,12 @@ fn dm() -> &'static DoubleMetaphone {
 /// (NFD) and drop every non-ASCII char, so "café" → "cafe" and "sí" → "si".
 ///
 /// rphonetic's DoubleMetaphone slices its input by byte offset and panics on
-/// any multi-byte UTF-8 char; with `panic = "abort"` that crash takes down the
-/// whole app. Folding to ASCII first keeps accented dictation matchable against
-/// its ASCII form while never feeding a non-ASCII byte to the encoder.
+/// any multi-byte UTF-8 char. Post-processing runs inside a `catch_unwind`
+/// boundary (see `pipeline::catch_post_processing`), so such a panic would
+/// become a recoverable per-transcription error rather than crashing the app.
+/// Folding to ASCII first keeps accented dictation matchable against its ASCII
+/// form while never feeding a non-ASCII byte to the encoder — this is the
+/// correct source-level guard; `catch_unwind` is the safety net.
 /// Non-Latin scripts and emoji fold away to nothing, which is correct —
 /// DoubleMetaphone is an ASCII-Latin algorithm and cannot key them anyway.
 fn fold_to_ascii(s: &str) -> String {
