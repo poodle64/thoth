@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.7] - 2026-06-25
+
+### Fixed
+
+- **Thoth no longer crashes on dictations with accented or non-Latin characters.** A word like "café" or "sí" reaching the canonical-term phonetic matcher could panic it (the matcher sliced text by byte, cutting a multi-byte character in half); and because release builds aborted on any panic, the whole app went down, which felt random. Accented input is now folded to its ASCII form before phonetic matching. As defence in depth, the transcription pipeline now contains panics, so a single bad input fails only that one transcription (with an error toast and sound) instead of aborting the app.
+- **Live telemetry forwarding to Loki now works.** A saved Loki URL that already ended in `/loki/api/v1/push` was doubled (the app appended the push path again), so every forwarded event silently returned 404. You can now save just the base URL (e.g. `https://loki.example`) and Thoth adds the push path itself; a full-path URL is also handled. The historical-log backfill script now reads the endpoint and token from Thoth's own settings, so no separate env file is needed.
+
+### Note
+
+First published build since 2026.6.5. It also includes everything from the never-published 2026.6.6: the Insights dashboard, the opt-in content-free Loki telemetry export, and Linux / Wayland support (detailed in the [2026.6.6] entry below).
+
 ## [2026.6.6] - 2026-06-24
 
 ### Added
