@@ -10,7 +10,7 @@ use crate::database::schema::{
     ALTER_ADD_ENHANCEMENT_DURATION, ALTER_ADD_ENHANCEMENT_MODEL_NAME,
     ALTER_ADD_TRANSCRIPTION_DURATION, ALTER_ADD_TRANSCRIPTION_MODEL_NAME, CREATE_MIGRATIONS_TABLE,
     CREATE_TRANSCRIPTIONS_CREATED_AT_INDEX, CREATE_TRANSCRIPTIONS_IS_ENHANCED_INDEX,
-    CREATE_TRANSCRIPTIONS_TABLE,
+    CREATE_TRANSCRIPTIONS_TABLE, CREATE_TRASH_TABLE,
 };
 
 /// A database migration with a version number, name, and SQL statements.
@@ -40,6 +40,11 @@ const MIGRATIONS: &[Migration] = &[
             ALTER_ADD_ENHANCEMENT_MODEL_NAME,
             ALTER_ADD_ENHANCEMENT_DURATION,
         ],
+    },
+    Migration {
+        version: 3,
+        name: "create_trash_table",
+        statements: &[CREATE_TRASH_TABLE],
     },
 ];
 
@@ -155,7 +160,7 @@ mod tests {
         let version: i32 = conn
             .query_row("SELECT MAX(version) FROM migrations", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
     }
 
     #[test]

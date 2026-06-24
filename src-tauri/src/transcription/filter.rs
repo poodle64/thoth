@@ -69,6 +69,17 @@ static FILLER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(u+[hm]+|e+r+|a+h+)\b").unwrap()
 });
 
+/// Sentence-initial filler, with its spoken "pause" comma and the first letter
+/// of the word it was hiding. A dictated "Ah, so then..." transcribes the filler
+/// as the capitalised sentence start followed by a comma; deleting only the word
+/// would orphan that comma and leave the new first word lowercase (", so then").
+/// Group 1 is the sentence boundary (re-emitted); group 2 is the next word's
+/// first letter, which is upper-cased so the repaired sentence reads correctly
+/// regardless of the `sentence_case` option.
+static LEADING_FILLER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(\A|[.!?]\s+)(?:u+[hm]+|e+r+|a+h+)\b[ \t]*,?[ \t]*([A-Za-z])").unwrap()
+});
+
 /// Multiple whitespace pattern
 static MULTI_SPACE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" {2,}").unwrap());
 
@@ -89,6 +100,17 @@ static SPACE_BEFORE_PUNCT_PATTERN: LazyLock<Regex> =
 /// Missing space after punctuation pattern
 static MISSING_SPACE_AFTER_PUNCT_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"([.!?,;:])([A-Za-z])").unwrap());
+
+/// Orphaned punctuation left at the very start of the text — e.g. a pause comma
+/// stranded after a leading filler was removed ("Ah, 1995" → ", 1995").
+static LEADING_ORPHAN_PUNCT_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*[,;:][\s,;:]*").unwrap());
+
+/// Repeated commas (with optional intervening whitespace) collapse to one — the
+/// artefact a mid-sentence filler leaves behind ("was, uh, thinking" → "was, ,
+/// thinking").
+static REPEATED_COMMA_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r",(?:\s*,)+").unwrap());
 
 /// Sentence start pattern (for capitalisation)
 static SENTENCE_START_PATTERN: LazyLock<Regex> =
@@ -168,9 +190,20 @@ impl OutputFilter {
     }
 }
 
-/// Remove common filler words and sounds from text
+/// Remove common filler words and sounds from text.
+///
+/// A sentence-initial filler is removed together with its spoken pause comma,
+/// and the word it was hiding is re-capitalised so "Ah, so then..." becomes
+/// "So then..." rather than a stranded ", so then...". Remaining mid-sentence
+/// fillers are simply deleted; the doubled commas and stray spaces they leave
+/// are tidied by [`cleanup_punctuation`] and [`normalise_whitespace`].
 pub fn remove_filler_words(text: &str) -> String {
-    FILLER_PATTERN.replace_all(text, "").to_string()
+    let repaired = LEADING_FILLER_PATTERN.replace_all(text, |caps: &regex::Captures| {
+        let boundary = caps.get(1).map_or("", |m| m.as_str());
+        let letter = caps.get(2).map_or("", |m| m.as_str());
+        format!("{}{}", boundary, letter.to_uppercase())
+    });
+    FILLER_PATTERN.replace_all(&repaired, "").to_string()
 }
 
 /// Normalise whitespace by collapsing multiple spaces and trimming
@@ -181,8 +214,14 @@ pub fn normalise_whitespace(text: &str) -> String {
 
 /// Clean up punctuation issues
 pub fn cleanup_punctuation(text: &str) -> String {
+    // Strip punctuation orphaned at the start of the text (e.g. a pause comma
+    // stranded after a leading filler was removed) and collapse the doubled
+    // commas a mid-sentence filler leaves behind.
+    let result = LEADING_ORPHAN_PUNCT_PATTERN.replace_all(text, "");
+    let result = REPEATED_COMMA_PATTERN.replace_all(&result, ",");
+
     // Remove duplicate punctuation (... -> ., !!! -> !, ??? -> ?)
-    let result = DUPLICATE_PERIOD_PATTERN.replace_all(text, ".");
+    let result = DUPLICATE_PERIOD_PATTERN.replace_all(&result, ".");
     let result = DUPLICATE_EXCLAIM_PATTERN.replace_all(&result, "!");
     let result = DUPLICATE_QUESTION_PATTERN.replace_all(&result, "?");
 
@@ -770,14 +809,15 @@ mod tests {
     #[test]
     fn test_remove_um() {
         assert_eq!(remove_filler_words("I um think so"), "I  think so");
-        assert_eq!(remove_filler_words("Um hello"), " hello");
+        // Sentence-initial filler: removed and the next word re-capitalised.
+        assert_eq!(remove_filler_words("Um hello"), "Hello");
         assert_eq!(remove_filler_words("hello um"), "hello ");
     }
 
     #[test]
     fn test_remove_uh() {
         assert_eq!(remove_filler_words("I uh need help"), "I  need help");
-        assert_eq!(remove_filler_words("Uh what"), " what");
+        assert_eq!(remove_filler_words("Uh what"), "What");
     }
 
     #[test]
@@ -788,8 +828,27 @@ mod tests {
 
     #[test]
     fn test_remove_ah() {
-        assert_eq!(remove_filler_words("Ah I see"), " I see");
+        assert_eq!(remove_filler_words("Ah I see"), "I see");
         assert_eq!(remove_filler_words("So ah yes"), "So  yes");
+    }
+
+    #[test]
+    fn test_remove_leading_filler_with_pause_comma() {
+        // The reported bug: a dictated "Ah, ..." transcribes as a capitalised
+        // filler plus a pause comma; removing only the word must not orphan the
+        // comma or leave the new first word lowercase.
+        assert_eq!(
+            remove_filler_words("Ah, so then, but it comes back to what I was saying."),
+            "So then, but it comes back to what I was saying."
+        );
+        assert_eq!(remove_filler_words("Um, then I left."), "Then I left.");
+        // Mid-text sentence start (after a terminator) is repaired too.
+        assert_eq!(
+            remove_filler_words("I went home. Um, then I left."),
+            "I went home. Then I left."
+        );
+        // Already-capitalised next word: filler and pause comma still removed.
+        assert_eq!(remove_filler_words("Ah, I see"), "I see");
     }
 
     #[test]
@@ -821,15 +880,17 @@ mod tests {
 
     #[test]
     fn test_remove_multiple_fillers() {
+        // Leading "Um," is repaired (comma dropped, "I" kept); the mid-sentence
+        // "uh" leaves a doubled comma that cleanup_punctuation later collapses.
         assert_eq!(
             remove_filler_words("Um, I was, uh, like thinking, you know"),
-            ", I was, , like thinking, you know"
+            "I was, , like thinking, you know"
         );
     }
 
     #[test]
     fn test_case_insensitive_fillers() {
-        assert_eq!(remove_filler_words("UM hello"), " hello");
+        assert_eq!(remove_filler_words("UM hello"), "Hello");
         assert_eq!(remove_filler_words("I UH think"), "I  think");
     }
 
@@ -897,6 +958,20 @@ mod tests {
         assert_eq!(cleanup_punctuation("What ??Really"), "What? Really");
     }
 
+    #[test]
+    fn test_strip_leading_orphan_punctuation() {
+        // A pause comma stranded at the start (filler removed before a word that
+        // was already capitalised, e.g. a name or "I").
+        assert_eq!(cleanup_punctuation(", I see"), "I see");
+        assert_eq!(cleanup_punctuation("  ; hello"), "hello");
+    }
+
+    #[test]
+    fn test_collapse_repeated_commas() {
+        assert_eq!(cleanup_punctuation("was, , thinking"), "was, thinking");
+        assert_eq!(cleanup_punctuation("a,,b"), "a, b");
+    }
+
     // Sentence case tests
 
     #[test]
@@ -950,9 +1025,10 @@ mod tests {
         let input = "um, I was like  thinking...what do you think ??";
         let result = filter.filter(input);
 
-        // "um" removed; "like" preserved (not a hesitation sound); spaces normalised;
-        // punctuation cleaned; sentence case applied
-        assert_eq!(result, ", I was like thinking. What do you think?");
+        // "um" and its pause comma removed (no orphaned leading comma); "like"
+        // preserved (not a hesitation sound); spaces normalised; punctuation
+        // cleaned; sentence case applied
+        assert_eq!(result, "I was like thinking. What do you think?");
     }
 
     #[test]
@@ -1165,6 +1241,34 @@ mod tests {
         assert_eq!(
             result,
             "So like I was thinking you know about the project. And I think we should like move forward with it what do you think?"
+        );
+    }
+
+    #[test]
+    fn test_leading_filler_repaired_without_sentence_case() {
+        // Reproduces the reported bug under the real defaults: the engine emits
+        // native casing, so sentence_case stays OFF. A leading "Ah," must still
+        // be repaired (comma dropped, "so" capitalised) rather than left as
+        // ", so then...".
+        let filter = OutputFilter::new(FilterOptions {
+            remove_fillers: true,
+            normalise_whitespace: true,
+            cleanup_punctuation: true,
+            sentence_case: false,
+            apply_dictionary: false,
+            australian_spelling: false,
+            spoken_numbers_to_digits: false,
+            voice_formatting_commands: true,
+        });
+
+        assert_eq!(
+            filter.filter("Ah, so then, but it comes back to what I was saying."),
+            "So then, but it comes back to what I was saying."
+        );
+        // Mid-sentence filler with surrounding pause commas: no doubled comma.
+        assert_eq!(
+            filter.filter("I was, uh, thinking about it."),
+            "I was, thinking about it."
         );
     }
 

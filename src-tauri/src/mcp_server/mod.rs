@@ -304,14 +304,29 @@ impl ThothMcp {
                 let patch = p
                     .patch
                     .ok_or_else(|| core_err("`patch` required for update".into()))?;
-                // Merge the patch onto the current config, then set.
+                // Canonicalise camelCase keys to snake_case before merging so that
+                // `{"localRetentionDays": 14}` and `{"local_retention_days": 14}` both
+                // work. Without this step, a camelCase key is added alongside the
+                // existing snake_case key and serde errors on "duplicate field".
+                let patch_val: serde_json::Value = serde_json::from_str(&patch)
+                    .map_err(|e| core_err(format!("invalid patch JSON: {}", e)))?;
+                if !patch_val.is_object() {
+                    return Err(core_err(
+                        "`patch` must be a JSON object, not a scalar or array".into(),
+                    ));
+                }
+                let patch_val = crate::config::canonicalise_patch_keys(patch_val);
+                // `get_config()` returns the config with loki_auth replaced by the mask
+                // sentinel "***". Merging onto this masked base is safe: if the patch does
+                // not include loki_auth, the sentinel survives into the merged Value and
+                // `set_config`'s mask/empty guard restores the real stored token. If the
+                // patch explicitly sends the sentinel, the same guard applies. The only way
+                // to clear loki_auth is via `set_loki_auth`.
                 let mut current = serde_json::to_value(
                     crate::config::get_config().map_err(|e| core_err(e.to_string()))?,
                 )
                 .map_err(|e| core_err(e.to_string()))?;
-                let patch_val: serde_json::Value = serde_json::from_str(&patch)
-                    .map_err(|e| core_err(format!("invalid patch JSON: {}", e)))?;
-                merge_json(&mut current, &patch_val);
+                crate::config::merge_json(&mut current, &patch_val);
                 let new_cfg: crate::config::Config = serde_json::from_value(current)
                     .map_err(|e| core_err(format!("merged config invalid: {}", e)))?;
                 crate::config::set_config(new_cfg).map_err(|e| core_err(e.to_string()))?;
@@ -434,16 +449,4 @@ pub fn build_service() -> StreamableHttpService<ThothMcp, LocalSessionManager> {
         LocalSessionManager::default().into(),
         StreamableHttpServerConfig::default(),
     )
-}
-
-/// Recursively merge `patch` into `target` (objects merged key-wise; other values replaced).
-fn merge_json(target: &mut serde_json::Value, patch: &serde_json::Value) {
-    match (target, patch) {
-        (serde_json::Value::Object(t), serde_json::Value::Object(p)) => {
-            for (k, v) in p {
-                merge_json(t.entry(k.clone()).or_insert(serde_json::Value::Null), v);
-            }
-        }
-        (t, p) => *t = p.clone(),
-    }
 }

@@ -7,6 +7,7 @@
   import { Button } from '$components/ui/button';
   import { Input } from '$components/ui/input';
   import * as AlertDialog from '$components/ui/alert-dialog';
+  import LoggingTelemetrySettings from './LoggingTelemetrySettings.svelte';
   import Eye from '@lucide/svelte/icons/eye';
   import EyeOff from '@lucide/svelte/icons/eye-off';
   import Copy from '@lucide/svelte/icons/copy';
@@ -123,7 +124,9 @@
   </div>
   <div class="flex flex-col gap-2">
     <!-- Enable API row -->
-    <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3">
+    <div
+      class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3"
+    >
       <div class="flex flex-1 flex-col gap-1">
         <span class="text-sm font-medium text-foreground">Enable API server</span>
         <span class="text-xs text-muted-foreground flex items-center gap-1.5">
@@ -139,10 +142,7 @@
           {/if}
         </span>
       </div>
-      <Switch
-        checked={status.apiEnabled}
-        onCheckedChange={handleApiToggle}
-      />
+      <Switch checked={status.apiEnabled} onCheckedChange={handleApiToggle} />
     </div>
 
     <!-- Token management — only shown when API is enabled and token exists -->
@@ -213,7 +213,9 @@
     </p>
   </div>
   <div class="flex flex-col gap-2">
-    <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3">
+    <div
+      class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3"
+    >
       <div class="flex flex-1 flex-col gap-1">
         <span class="text-sm font-medium text-foreground">Enable MCP server</span>
         {#if status.mcpEnabled && status.apiRunning}
@@ -236,6 +238,8 @@
     {/if}
   </div>
 </section>
+
+<LoggingTelemetrySettings />
 
 <!-- Rotate token confirmation dialog -->
 <AlertDialog.Root

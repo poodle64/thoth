@@ -70,6 +70,24 @@ export interface IntegrationsConfig {
   mcpEnabled: boolean;
 }
 
+/** Logging and telemetry configuration */
+export interface LoggingConfig {
+  /** Local log retention in days */
+  localRetentionDays: number;
+  /** Whether to forward telemetry to a remote Loki instance */
+  remoteEnabled: boolean;
+  /** Loki push URL */
+  lokiUrl: string;
+  /** Loki bearer token (secret) */
+  lokiAuth: string;
+  /** Optional Loki tenant ID (X-Scope-OrgID header) */
+  lokiTenant: string | null;
+  /** Extra static labels as [key, value] pairs */
+  lokiLabels: [string, string][];
+  /** Telemetry level: "error", "warn", "info", "debug" */
+  telemetryLevel: string;
+}
+
 /** AI enhancement configuration */
 export interface EnhancementConfig {
   /** Whether AI enhancement is enabled */
@@ -149,6 +167,8 @@ export interface Config {
   recorder: RecorderConfig;
   /** Integrations settings */
   integrations: IntegrationsConfig;
+  /** Logging and telemetry settings */
+  logging: LoggingConfig;
 }
 
 /** Raw config from backend (snake_case fields) */
@@ -207,6 +227,15 @@ interface ConfigRaw {
     api_enabled: boolean;
     api_port: number;
     mcp_enabled: boolean;
+  };
+  logging?: {
+    local_retention_days: number;
+    remote_enabled: boolean;
+    loki_url: string;
+    loki_auth: string;
+    loki_tenant: string | null;
+    loki_labels: [string, string][];
+    telemetry_level: string;
   };
 }
 
@@ -267,6 +296,15 @@ function parseConfig(raw: ConfigRaw): Config {
       apiEnabled: raw.integrations?.api_enabled ?? false,
       apiPort: raw.integrations?.api_port ?? 8765,
       mcpEnabled: raw.integrations?.mcp_enabled ?? false,
+    },
+    logging: {
+      localRetentionDays: raw.logging?.local_retention_days ?? 7,
+      remoteEnabled: raw.logging?.remote_enabled ?? false,
+      lokiUrl: raw.logging?.loki_url ?? '',
+      lokiAuth: raw.logging?.loki_auth ?? '',
+      lokiTenant: raw.logging?.loki_tenant ?? null,
+      lokiLabels: raw.logging?.loki_labels ?? [],
+      telemetryLevel: raw.logging?.telemetry_level ?? 'info',
     },
   };
 }
@@ -329,6 +367,15 @@ function serialiseConfig(config: Config): ConfigRaw {
       api_port: config.integrations.apiPort,
       mcp_enabled: config.integrations.mcpEnabled,
     },
+    logging: {
+      local_retention_days: config.logging.localRetentionDays,
+      remote_enabled: config.logging.remoteEnabled,
+      loki_url: config.logging.lokiUrl,
+      loki_auth: config.logging.lokiAuth,
+      loki_tenant: config.logging.lokiTenant,
+      loki_labels: config.logging.lokiLabels,
+      telemetry_level: config.logging.telemetryLevel,
+    },
   };
 }
 
@@ -389,6 +436,15 @@ function getDefaultConfig(): Config {
       apiEnabled: false,
       apiPort: 8765,
       mcpEnabled: false,
+    },
+    logging: {
+      localRetentionDays: 7,
+      remoteEnabled: false,
+      lokiUrl: '',
+      lokiAuth: '',
+      lokiTenant: null,
+      lokiLabels: [],
+      telemetryLevel: 'info',
     },
   };
 }
@@ -536,6 +592,13 @@ function createConfigStore() {
   }
 
   /**
+   * Update a specific logging config field
+   */
+  function updateLogging<K extends keyof LoggingConfig>(key: K, value: LoggingConfig[K]): void {
+    config.logging[key] = value;
+  }
+
+  /**
    * Set or clear the enhancement API key via the dedicated backend command.
    *
    * This is the only correct way to change the API key. The generic save()
@@ -601,6 +664,9 @@ function createConfigStore() {
     get integrations() {
       return config.integrations;
     },
+    get logging() {
+      return config.logging;
+    },
 
     // Actions
     load,
@@ -614,6 +680,7 @@ function createConfigStore() {
     updateGeneral,
     updateRecorder,
     updateIntegrations,
+    updateLogging,
     setEnhancementApiKey,
     clearError,
   };

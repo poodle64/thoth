@@ -20,6 +20,7 @@
   import FileText from '@lucide/svelte/icons/file-text';
   import HardDrive from '@lucide/svelte/icons/hard-drive';
   import Plug from '@lucide/svelte/icons/plug';
+  import BarChart3 from '@lucide/svelte/icons/bar-chart-3';
   import Info from '@lucide/svelte/icons/info';
   import AIEnhancementSettings from '../components/AIEnhancementSettings.svelte';
   import AudioDeviceSelector from '../components/AudioDeviceSelector.svelte';
@@ -28,6 +29,7 @@
   import StoragePane from '../components/StoragePane.svelte';
   import IntegrationsSettings from '../components/IntegrationsSettings.svelte';
   import HistoryPane from '../components/HistoryPane.svelte';
+  import InsightsPane from '../components/InsightsPane.svelte';
   import ModelManager from '../components/ModelManager.svelte';
   import TranscribePane from '../components/TranscribePane.svelte';
   import OverviewPane from '../components/OverviewPane.svelte';
@@ -62,6 +64,7 @@
   /** Available settings panes matching Swift app */
   const panes: SettingsPane[] = [
     { id: 'overview', title: 'Overview', icon: LayoutDashboard },
+    { id: 'insights', title: 'Insights', icon: BarChart3 },
     { id: 'recording', title: 'Recording', icon: Mic },
     { id: 'models', title: 'Models', icon: Cpu },
     { id: 'ai', title: 'AI Enhancement', icon: Sparkles },
@@ -308,13 +311,19 @@
         <div class="pane">
           <OverviewPane onNavigate={(paneId) => (activePane = paneId)} />
         </div>
+      {:else if activePane === 'insights'}
+        <div class="pane">
+          <InsightsPane />
+        </div>
       {:else if activePane === 'recording'}
         <div class="pane">
           <!-- Audio Input Section -->
           <section class="flex flex-col">
             <div class="mb-3">
               <h2 class="text-base font-semibold text-foreground m-0">Audio Input</h2>
-              <p class="text-xs text-muted-foreground m-0">Choose how Thoth selects your audio input device</p>
+              <p class="text-xs text-muted-foreground m-0">
+                Choose how Thoth selects your audio input device
+              </p>
             </div>
             <div class="flex flex-col gap-2">
               <AudioDeviceSelector />
@@ -325,19 +334,22 @@
           <section class="flex flex-col">
             <div class="mb-3">
               <h2 class="text-base font-semibold text-foreground m-0">Shortcuts</h2>
-              <p class="text-xs text-muted-foreground m-0">Tap to start recording, tap again to stop.</p>
+              <p class="text-xs text-muted-foreground m-0">
+                Tap to start recording, tap again to stop.
+              </p>
             </div>
             <div class="flex flex-col gap-2">
               {#if !shortcutsStore.isLoading}
                 <div class="shortcuts-list">
                   {#each allShortcuts as shortcut, i (shortcut.id)}
-                    <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3">
+                    <div
+                      class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3"
+                    >
                       <div class="flex flex-1 flex-col gap-1">
-                        <span class="text-sm font-medium text-foreground">{shortcut.description}</span>
-                        <span
-                          class="text-xs shortcut-status"
-                          class:enabled={shortcut.isEnabled}
+                        <span class="text-sm font-medium text-foreground"
+                          >{shortcut.description}</span
                         >
+                        <span class="text-xs shortcut-status" class:enabled={shortcut.isEnabled}>
                           {shortcut.isEnabled ? 'Active' : 'Inactive'}
                         </span>
                       </div>
@@ -361,10 +373,14 @@
           <section class="flex flex-col">
             <div class="mb-3">
               <h2 class="text-base font-semibold text-foreground m-0">Recording Behaviour</h2>
-              <p class="text-xs text-muted-foreground m-0">Audio and clipboard handling during transcription</p>
+              <p class="text-xs text-muted-foreground m-0">
+                Audio and clipboard handling during transcription
+              </p>
             </div>
             <div class="flex flex-col gap-2">
-              <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3">
+              <div
+                class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3"
+              >
                 <div class="flex flex-1 flex-col gap-1">
                   <span class="text-sm font-medium text-foreground">Sound Feedback</span>
                   <span class="text-xs text-muted-foreground"
@@ -378,10 +394,14 @@
                 />
               </div>
               <div class="row-separator"></div>
-              <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3">
+              <div
+                class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3"
+              >
                 <div class="flex flex-1 flex-col gap-1">
                   <span class="text-sm font-medium text-foreground">Recording Indicator</span>
-                  <span class="text-xs text-muted-foreground">Show floating indicator during recording</span>
+                  <span class="text-xs text-muted-foreground"
+                    >Show floating indicator during recording</span
+                  >
                 </div>
                 <Switch
                   checked={configStore.general.showRecordingIndicator}
@@ -405,7 +425,9 @@
               </div>
               {#if configStore.general.showRecordingIndicator}
                 <div class="row-separator"></div>
-                <div class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3">
+                <div
+                  class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3"
+                >
                   <div class="flex flex-1 flex-col gap-1">
                     <span class="text-sm font-medium text-foreground">Indicator Style</span>
                     <span class="text-xs text-muted-foreground"
@@ -516,14 +538,7 @@
                     <div class="mode-preview">
                       <svg viewBox="0 0 80 52" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <!-- Pill shape -->
-                        <rect
-                          x="8"
-                          y="16"
-                          width="64"
-                          height="20"
-                          rx="10"
-                          fill="var(--primary)"
-                        />
+                        <rect x="8" y="16" width="64" height="20" rx="10" fill="var(--primary)" />
                         <!-- Mic icon on left side -->
                         <rect x="17" y="22" width="4" height="6" rx="2" fill="white" />
                         <path
@@ -613,7 +628,9 @@
           <section class="flex flex-col">
             <div class="mb-3">
               <h2 class="text-base font-semibold text-foreground m-0">Speech Recognition</h2>
-              <p class="text-xs text-muted-foreground m-0">Local models for transcribing speech to text</p>
+              <p class="text-xs text-muted-foreground m-0">
+                Local models for transcribing speech to text
+              </p>
             </div>
             <div class="flex flex-col gap-2">
               <ModelManager />
@@ -665,7 +682,9 @@
           <section class="flex flex-col">
             <div class="mb-3">
               <h2 class="text-base font-semibold text-foreground m-0">Output Filtering</h2>
-              <p class="text-xs text-muted-foreground m-0">Configure how transcription output is processed</p>
+              <p class="text-xs text-muted-foreground m-0">
+                Configure how transcription output is processed
+              </p>
             </div>
             <div class="flex flex-col gap-2">
               <FilterSettings
