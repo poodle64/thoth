@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2026.6.6] - 2026-06-24
+
+### Added
+
+- **Insights dashboard.** A new Insights pane visualises your dictation history — total words and recordings, time saved versus typing, an activity heatmap, transcription-speed and model-usage breakdowns, a recording-length histogram, a time-of-day chart, and a storage breakdown — plus a "cruft finder" that surfaces stray or short recordings for clean-up. (#90, #91)
+- **Reversible Trash for recordings.** The cruft finder no longer deletes outright; recordings are moved to a recoverable Trash you can restore from, so clean-up is safe. (#91)
+- **Opt-in, content-free telemetry export to Loki.** A new Logging & Telemetry settings card lets you forward operational events (recording lifecycle, model-load, timings, character counts — never transcript text) to a Loki endpoint you control, with a Test-connection button. Off by default; the auth token is stored locally and redacted in the UI. (#91)
+- **Linux / Wayland support.** Native Hyprland global shortcuts (via `hyprctl` + a FIFO) and clipboard paste (`wl-copy` + `hyprctl`); an optional GPU (CUDA) Parakeet backend via the sherpa-onnx CUDA prebuilt; a window-decorations toggle with a custom close button; and an importable Nix package (GPU Parakeet + Whisper Vulkan).
+
+### Changed
+
+- **The main window is larger** (1100px wide, with a minimum size) to fit the Insights dashboard. (#91)
+- **Developer builds now use the Nix flake toolchain** (micromamba retired). On macOS the Nix dev shell now builds the FluidAudio/Parakeet backend and runs the full Rust test suite for the first time, via a scoped Swift-toolchain fix for the leaked Nix-SDK-vs-Xcode mismatch. (#93)
+
+### Fixed
+
+- **Long dictations no longer get spurious sentence breaks at pauses.** On recordings long enough to be split internally (~14s+), the transcriber treated each split point as a sentence end — inserting a stray full stop and a capital letter mid-sentence (e.g. "take a look at this. Recording and see…"). Thoth now measures the pause length at each split: a brief in-sentence breath is stitched back together (stray full stop and capital removed), while a genuine between-sentence pause is preserved. (#96)
+- **Sentence-initial filler words are cleaned up correctly** ("Um, anyway…" → "Anyway…").
+- **Settings handling is more robust** — configuration patches tolerate camelCase/snake_case and apply as partial updates, and the transcription-init IPC argument casing was corrected. (#94, #95)
+- **Smaller fixes:** the Insights time-of-day axis labels align with the hour bars; the bundled MCP server emits compact JSON; transcription readiness is polled so the status leaves "Loading…".
+
 ## [2026.6.5] - 2026-06-13
 
 ### Fixed
