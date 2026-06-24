@@ -33,7 +33,11 @@ Usage:
     # preview what would ship — needs no endpoint, sends nothing
     python3 scripts/loki_backfill.py --dry-run
 
-    # real push (operator supplies endpoint + token via env)
+    # real push — reads the Loki URL + token from Thoth's settings
+    # (~/.thoth/config.json: logging.lokiUrl / lokiAuth / lokiTenant) by default
+    python3 scripts/loki_backfill.py
+
+    # or override the endpoint/token explicitly via env
     LOKI_PUSH_URL=https://loki.example/loki/api/v1/push \\
     LOKI_AUTH="Bearer <token>" \\
     python3 scripts/loki_backfill.py
@@ -53,6 +57,7 @@ from collections import Counter
 from datetime import datetime
 
 DEFAULT_LOG = os.path.expanduser("~/.thoth/logs/thoth-debug.log")
+DEFAULT_CONFIG = os.path.expanduser("~/.thoth/config.json")
 
 # Two timestamp formats seen in the log's lifetime.
 ISO_RE = re.compile(
@@ -195,9 +200,55 @@ def push_batch(url: str, headers: dict, streams: dict) -> None:
     raise SystemExit("Loki push failed after retries")
 
 
+def _loki_from_config(config_path: str) -> tuple[str | None, str | None, str | None]:
+    """Read the Loki push URL, auth header, and tenant from Thoth's config.json.
+
+    Lets the backfill reuse the endpoint + token already saved in Thoth's
+    Logging & Telemetry settings, so no separate env file or command-line token
+    is needed. The token stays in the file and is only assembled into an
+    Authorization header here — it is never printed.
+
+    config.json stores the bare token under ``logging.lokiAuth`` (the in-app
+    exporter adds the ``Bearer`` scheme), so a bare token is wrapped as
+    ``Bearer <token>`` while a value already carrying a scheme is used as-is.
+    A base URL gets ``/loki/api/v1/push`` appended if missing, matching the
+    in-app exporter.
+
+    Returns ``(url, authorization_header, tenant)``; any field is ``None`` when
+    absent or the file cannot be read.
+    """
+    try:
+        with open(config_path, "r") as fh:
+            logging_cfg = json.load(fh).get("logging") or {}
+    except OSError, ValueError:
+        return None, None, None
+
+    def pick(*keys: str) -> str | None:
+        for k in keys:
+            v = logging_cfg.get(k)
+            if v:
+                return v
+        return None
+
+    url = pick("lokiUrl", "loki_url")
+    if url and "/loki/api/v1/push" not in url:
+        url = url.rstrip("/") + "/loki/api/v1/push"
+    token = pick("lokiAuth", "loki_auth")
+    auth = None
+    if token:
+        auth = token if token.lower().startswith("bearer ") else f"Bearer {token}"
+    return url, auth, pick("lokiTenant", "loki_tenant")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--log-path", default=DEFAULT_LOG)
+    ap.add_argument(
+        "--config-path",
+        default=DEFAULT_CONFIG,
+        help="Thoth config.json to read the Loki URL/token/tenant from "
+        "(env LOKI_* overrides it)",
+    )
     ap.add_argument("--dry-run", action="store_true", help="report only; send nothing")
     ap.add_argument("--batch-size", type=int, default=2000, help="log lines per push")
     ap.add_argument(
@@ -242,14 +293,20 @@ def main() -> int:
         "Clear the target Loki stream before re-running.",
         file=sys.stderr,
     )
-    url = os.environ.get("LOKI_PUSH_URL")
+    cfg_url, cfg_auth, cfg_tenant = _loki_from_config(args.config_path)
+    url = os.environ.get("LOKI_PUSH_URL") or cfg_url
     if not url:
-        raise SystemExit("Set LOKI_PUSH_URL (and optionally LOKI_AUTH, LOKI_TENANT)")
+        raise SystemExit(
+            "No Loki endpoint. Set LOKI_PUSH_URL, or save the Loki URL + token in "
+            f"Thoth's Logging & Telemetry settings ({args.config_path})."
+        )
     headers = {"Content-Type": "application/json"}
-    if os.environ.get("LOKI_AUTH"):
-        headers["Authorization"] = os.environ["LOKI_AUTH"]
-    if os.environ.get("LOKI_TENANT"):
-        headers["X-Scope-OrgID"] = os.environ["LOKI_TENANT"]
+    auth = os.environ.get("LOKI_AUTH") or cfg_auth
+    if auth:
+        headers["Authorization"] = auth
+    tenant = os.environ.get("LOKI_TENANT") or cfg_tenant
+    if tenant:
+        headers["X-Scope-OrgID"] = tenant
 
     base_labels = {"job": "thoth-backfill", "app": "thoth"}
     # buffer per level so each Loki stream stays timestamp-ordered.
