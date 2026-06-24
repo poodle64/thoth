@@ -405,7 +405,8 @@ pub(crate) fn join_segments(parts: &[String]) -> String {
 ///
 /// Guards that suppress lowercasing (any one is sufficient):
 /// - Not an ASCII uppercase letter at position 0 (nothing to do).
-/// - Token is `I` or starts with `I'` (English first-person pronoun).
+/// - Token is `I` or starts with `I'` / `I\u{2019}` (English first-person pronoun,
+///   with either the ASCII apostrophe U+0027 or the typographic right single quote U+2019).
 /// - Token is entirely uppercase letters, length ≥ 2 (acronym).
 /// - Token contains an uppercase letter after position 0 (CamelCase / proper noun).
 fn first_token_needs_lowercase(token: &str) -> bool {
@@ -419,8 +420,9 @@ fn first_token_needs_lowercase(token: &str) -> bool {
         return false;
     }
 
-    // Guard: English first-person pronoun `I` or contractions like `I'm`.
-    if token == "I" || token.starts_with("I'") {
+    // Guard: English first-person pronoun `I` or contractions like `I'm` / `I\u{2019}m`.
+    // Covers both the ASCII apostrophe (U+0027) and the typographic right single quote (U+2019).
+    if token == "I" || token.starts_with("I'") || token.starts_with("I\u{2019}") {
         return false;
     }
 
@@ -738,5 +740,38 @@ mod tests {
         let parts = s(&["first part", "Second part", "Third part"]);
         let result = join_segments(&parts);
         assert_eq!(result, "first part second part third part");
+    }
+
+    /// 2-char all-uppercase acronym `OK` at a seam is preserved.
+    #[test]
+    fn test_join_segments_ok_acronym_preserved() {
+        let parts = s(&["that sounds", "OK for now"]);
+        let result = join_segments(&parts);
+        assert!(
+            result.contains("sounds OK for"),
+            "expected 'sounds OK for', got: {result}"
+        );
+    }
+
+    /// Mixed-case acronym `TVs` (CamelCase guard) at a seam is preserved.
+    #[test]
+    fn test_join_segments_tvs_camel_preserved() {
+        let parts = s(&["the old", "TVs were huge"]);
+        let result = join_segments(&parts);
+        assert!(
+            result.contains("old TVs were"),
+            "expected 'old TVs were', got: {result}"
+        );
+    }
+
+    /// Typographic apostrophe contraction `I\u{2019}m` at a seam is preserved.
+    #[test]
+    fn test_join_segments_typographic_apostrophe_contraction_preserved() {
+        let parts = s(&["and then", "I\u{2019}m not sure"]);
+        let result = join_segments(&parts);
+        assert!(
+            result.contains("then I\u{2019}m not"),
+            "expected 'then I\u{2019}m not', got: {result}"
+        );
     }
 }
