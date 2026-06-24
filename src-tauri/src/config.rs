@@ -64,7 +64,9 @@ pub struct LoggingConfig {
     /// Whether to forward telemetry events to a remote Loki instance (default false)
     #[serde(default, alias = "remoteEnabled")]
     pub remote_enabled: bool,
-    /// Loki push endpoint URL (e.g. "http://loki:3100")
+    /// Loki endpoint URL. Accepts either a bare base ("http://loki:3100") or a
+    /// full push URL ("http://loki:3100/loki/api/v1/push"); the trailing push
+    /// path is normalised away before use, so either form forwards correctly.
     #[serde(default, alias = "lokiUrl")]
     pub loki_url: String,
     /// Authorization header value (e.g. "Bearer glsa_xxx"). Stored locally; never logged.

@@ -28,6 +28,21 @@ pub(crate) fn is_telemetry_event_by_target(target: &str) -> bool {
     target == TELEMETRY_TARGET
 }
 
+/// Normalise a configured Loki URL to a bare base (`scheme://host[:port]`),
+/// stripping a trailing `/loki/api/v1/push` and any trailing slash.
+///
+/// Both Loki consumers append the push path themselves — the live tracing layer
+/// ([`crate::build_loki_components`]) via `tracing-loki`'s `url::Url::join`, and
+/// [`test_loki_connection`] via string concatenation. Without this, an operator
+/// who saved the full push URL (the natural value to copy from a Loki/Grafana
+/// config) would get a doubled path (`…/loki/api/v1/loki/api/v1/push`) and every
+/// push would 404. Sharing one helper keeps the test button and live forwarding
+/// in agreement.
+pub(crate) fn normalise_loki_base_url(raw: &str) -> &str {
+    let trimmed = raw.trim_end_matches('/');
+    trimmed.strip_suffix("/loki/api/v1/push").unwrap_or(trimmed)
+}
+
 /// Push a single synthetic telemetry line to the given Loki endpoint.
 ///
 /// Used by the Settings "Test connection" button to verify that the URL,
@@ -70,13 +85,11 @@ pub async fn test_loki_connection(
         _ => crate::config::get_raw_loki_tenant(),
     };
 
-    // Accept either a bare base URL ("http://loki:3100") or one that already
-    // ends with the push path so callers don't have to strip it themselves.
-    let push_url = if url.ends_with("/loki/api/v1/push") {
-        url.clone()
-    } else {
-        format!("{}/loki/api/v1/push", url.trim_end_matches('/'))
-    };
+    // Accept either a bare base URL ("http://loki:3100") or a full push URL;
+    // normalise to the base, then append the canonical push path. Sharing the
+    // helper with the live tracing layer guarantees the test button verifies the
+    // exact endpoint live forwarding will use.
+    let push_url = format!("{}/loki/api/v1/push", normalise_loki_base_url(&url));
 
     let now_ns = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -165,6 +178,55 @@ mod tests {
             assert!(
                 !is_telemetry_event_by_target(target),
                 "target '{target}' must be blocked by the telemetry filter"
+            );
+        }
+    }
+
+    #[test]
+    fn normalise_loki_base_url_strips_push_path() {
+        // A full push URL collapses to the bare base so neither consumer doubles it.
+        assert_eq!(
+            normalise_loki_base_url("https://loki.example/loki/api/v1/push"),
+            "https://loki.example"
+        );
+        // A trailing slash on the full push URL is handled too.
+        assert_eq!(
+            normalise_loki_base_url("https://loki.example/loki/api/v1/push/"),
+            "https://loki.example"
+        );
+    }
+
+    #[test]
+    fn normalise_loki_base_url_leaves_bare_base_untouched() {
+        assert_eq!(
+            normalise_loki_base_url("http://loki:3100"),
+            "http://loki:3100"
+        );
+        assert_eq!(
+            normalise_loki_base_url("http://loki:3100/"),
+            "http://loki:3100"
+        );
+    }
+
+    #[test]
+    fn live_layer_join_yields_single_push_path() {
+        // Reproduces the doubled-path bug: `tracing-loki` appends the push path
+        // via `url::Url::join`. Feeding it a normalised base must yield exactly
+        // one push path regardless of which form the operator saved.
+        for raw in [
+            "https://loki.example",
+            "https://loki.example/",
+            "https://loki.example/loki/api/v1/push",
+            "https://loki.example/loki/api/v1/push/",
+        ] {
+            let base = normalise_loki_base_url(raw)
+                .parse::<url::Url>()
+                .expect("normalised base parses");
+            let pushed = base.join("loki/api/v1/push").expect("join push path");
+            assert_eq!(
+                pushed.as_str(),
+                "https://loki.example/loki/api/v1/push",
+                "raw input {raw:?} must yield a single push path"
             );
         }
     }

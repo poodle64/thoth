@@ -176,7 +176,14 @@ fn build_loki_components(
 ) -> Option<(tracing_loki::Layer, tracing_loki::BackgroundTask)> {
     use sha2::Digest;
 
-    let url = cfg.loki_url.parse::<url::Url>().ok()?;
+    // Normalise away any trailing "/loki/api/v1/push" the operator may have
+    // saved: `tracing-loki` appends that path itself via `url::Url::join`, so a
+    // full push URL here would be doubled into "…/loki/api/v1/loki/api/v1/push"
+    // and every push would 404. Keeps the live layer in agreement with the
+    // Settings "Test connection" command.
+    let url = telemetry::normalise_loki_base_url(&cfg.loki_url)
+        .parse::<url::Url>()
+        .ok()?;
 
     // Derive a stable, non-identifying device id from the hostname via SHA-256.
     // The raw hostname on macOS often embeds the operator's name (e.g.
