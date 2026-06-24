@@ -151,14 +151,9 @@ impl TranscriptionService {
         );
 
         let start = std::time::Instant::now();
-        // parts[i] is the transcript for segments[i]; the seam between parts[i]
-        // and parts[i+1] has silence duration seam_gaps[i].  We track a separate
-        // gaps list aligned to the parts we actually keep (non-empty segments).
         let mut parts: Vec<String> = Vec::with_capacity(segments.len());
-        let mut kept_gaps: Vec<f32> = Vec::with_capacity(seam_gaps.len());
-        let mut next_gap: Option<f32> = None;
+        let mut kept: Vec<bool> = Vec::with_capacity(segments.len());
         for (i, &(begin, end)) in segments.iter().enumerate() {
-            let gap = seam_gaps.get(i).copied();
             let tmp = audio_path.with_extension(format!("seg{i}.wav"));
             write_padded_wav(&samples[begin..end], &spec, &tmp)?;
             let text = self.transcribe_one(&tmp);
@@ -166,27 +161,16 @@ impl TranscriptionService {
 
             let text = text?;
             let trimmed = text.trim();
-            if !trimmed.is_empty() {
-                // The seam before this part is next_gap (the gap between the
-                // previously kept segment and this one).  On the first kept part
-                // there is no preceding seam; on subsequent ones we record it.
-                if !parts.is_empty() {
-                    kept_gaps.push(next_gap.unwrap_or(0.0));
-                }
+            if trimmed.is_empty() {
+                kept.push(false);
+            } else {
+                kept.push(true);
                 parts.push(trimmed.to_string());
             }
-            // Carry forward the gap that follows this segment regardless of
-            // whether the segment was kept; if the next segment is also empty
-            // we inherit the combined silence.
-            next_gap = match (next_gap, gap) {
-                (Some(a), Some(b)) => Some(a + b),
-                (Some(a), None) => Some(a),
-                (None, Some(b)) => Some(b),
-                (None, None) => None,
-            };
         }
 
-        let joined = join_segments(&parts, &kept_gaps);
+        let aligned_gaps = align_kept_gaps(&kept, &seam_gaps);
+        let joined = join_segments(&parts, &aligned_gaps);
         tracing::info!(
             "FluidAudio transcript: {} chars, {} words from {} segment(s) in {:.3}s",
             joined.len(),
@@ -371,6 +355,38 @@ fn write_padded_wav(samples: &[f32], spec: &hound::WavSpec, path: &Path) -> Resu
     }
     writer.finalize()?;
     Ok(())
+}
+
+/// Align `seam_gaps` to the segments that actually produced a transcript.
+///
+/// `kept[i]` is `true` when segment `i` produced a non-empty transcript.
+/// `seam_gaps[i]` is the silence duration (seconds) between segment `i` and
+/// segment `i+1` (length `kept.len() - 1`).
+///
+/// Returns the per-seam gaps aligned to the *kept* parts: `result[j]` is the
+/// total silence between kept part `j` and kept part `j+1`, folding any
+/// dropped (empty) segments between them. `result.len() == (#kept parts) - 1`.
+fn align_kept_gaps(kept: &[bool], seam_gaps: &[f32]) -> Vec<f32> {
+    let mut out = Vec::new();
+    let mut accum = 0.0f32;
+    let mut seen_kept = false;
+    for i in 0..kept.len() {
+        let gap_after = if i + 1 < kept.len() {
+            seam_gaps.get(i).copied().unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        if kept[i] {
+            if seen_kept {
+                out.push(accum);
+            }
+            seen_kept = true;
+            accum = gap_after;
+        } else {
+            accum += gap_after;
+        }
+    }
+    out
 }
 
 /// Join segment transcripts into a single string, correcting seam artefacts.
@@ -984,5 +1000,49 @@ mod tests {
         let mut s = String::new();
         strip_trailing_terminal(&mut s);
         assert_eq!(s, "");
+    }
+
+    // --- align_kept_gaps tests ---
+
+    /// All segments kept: gaps pass through unchanged (the bug case — must NOT accumulate).
+    #[test]
+    fn test_align_kept_gaps_all_kept() {
+        assert_eq!(
+            align_kept_gaps(&[true, true, true], &[0.3, 0.4]),
+            vec![0.3, 0.4]
+        );
+    }
+
+    /// Middle segment empty: its gaps on both sides fold into one.
+    #[test]
+    fn test_align_kept_gaps_middle_empty() {
+        let result = align_kept_gaps(&[true, false, true], &[0.3, 0.4]);
+        assert_eq!(result.len(), 1);
+        assert!(
+            (result[0] - 0.7).abs() < 1e-5,
+            "expected ~0.7, got {}",
+            result[0]
+        );
+    }
+
+    /// Leading empty segment: no seam before the first kept part.
+    #[test]
+    fn test_align_kept_gaps_leading_empty() {
+        assert_eq!(
+            align_kept_gaps(&[false, true, true], &[0.3, 0.4]),
+            vec![0.4]
+        );
+    }
+
+    /// Single kept segment: no seams.
+    #[test]
+    fn test_align_kept_gaps_single_kept() {
+        assert_eq!(align_kept_gaps(&[true], &[]), Vec::<f32>::new());
+    }
+
+    /// Two kept segments: one gap passed through.
+    #[test]
+    fn test_align_kept_gaps_two_kept() {
+        assert_eq!(align_kept_gaps(&[true, true], &[0.5]), vec![0.5]);
     }
 }
