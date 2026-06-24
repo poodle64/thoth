@@ -174,9 +174,23 @@ fn dm() -> &'static DoubleMetaphone {
     DM.get_or_init(DoubleMetaphone::default)
 }
 
+/// Fold a string to pure ASCII for phonetic encoding: decompose accents
+/// (NFD) and drop every non-ASCII char, so "café" → "cafe" and "sí" → "si".
+///
+/// rphonetic's DoubleMetaphone slices its input by byte offset and panics on
+/// any multi-byte UTF-8 char; with `panic = "abort"` that crash takes down the
+/// whole app. Folding to ASCII first keeps accented dictation matchable against
+/// its ASCII form while never feeding a non-ASCII byte to the encoder.
+/// Non-Latin scripts and emoji fold away to nothing, which is correct —
+/// DoubleMetaphone is an ASCII-Latin algorithm and cannot key them anyway.
+fn fold_to_ascii(s: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    s.nfd().filter(|c| c.is_ascii()).collect()
+}
+
 /// True when the two strings share at least one Double-Metaphone key.
 fn phonetic_match(a: &str, b: &str) -> bool {
-    dm().is_encoded_equals(a, b)
+    dm().is_encoded_equals(&fold_to_ascii(a), &fold_to_ascii(b))
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,5 +1116,72 @@ mod tests {
         let text = "a tic here";
         let result = run_with_registry(terms, text);
         assert_eq!(result, text);
+    }
+
+    // -------------------------------------------------------------------------
+    // Non-ASCII / accent-crash regression (rphonetic DoubleMetaphone panic guard)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_fold_to_ascii_accented_latin() {
+        // NFD decomposition strips the combining accent, leaving the base letter.
+        assert_eq!(fold_to_ascii("café"), "cafe");
+        assert_eq!(fold_to_ascii("sí"), "si");
+        assert_eq!(fold_to_ascii("naïve"), "naive");
+        assert_eq!(fold_to_ascii("résumé"), "resume");
+    }
+
+    #[test]
+    fn test_fold_to_ascii_non_latin_folds_to_empty() {
+        // Non-Latin scripts have no ASCII base after NFD — they fold away entirely.
+        // This is correct; DoubleMetaphone is an ASCII-Latin algorithm.
+        assert_eq!(fold_to_ascii("Привет"), ""); // Cyrillic
+        assert_eq!(fold_to_ascii("こんにちは"), ""); // Japanese
+    }
+
+    #[test]
+    fn test_fold_to_ascii_emoji_folds_to_empty() {
+        assert_eq!(fold_to_ascii("🎙️"), "");
+    }
+
+    #[test]
+    fn test_phonetic_match_no_panic_on_non_ascii() {
+        // The original crash: DoubleMetaphone panicked on "sí" (multi-byte UTF-8).
+        // This must return false without panicking — the two strings are unrelated.
+        let result = phonetic_match("oh sí", "gods wood");
+        assert!(!result, "unrelated strings must not match");
+    }
+
+    #[test]
+    fn test_phonetic_match_accented_matches_ascii_form() {
+        // "café" folds to "cafe"; both encode to the same DoubleMetaphone key KF.
+        assert!(
+            phonetic_match("café", "cafe"),
+            "café must phonetically match cafe after ASCII folding"
+        );
+        // "naïve" folds to "naive" — same phonetic key.
+        assert!(
+            phonetic_match("naïve", "naive"),
+            "naïve must phonetically match naive after ASCII folding"
+        );
+    }
+
+    #[test]
+    fn test_apply_canonical_no_panic_with_non_ascii_transcript() {
+        // End-to-end: a Phonetic-policy term registered, transcript contains "Oh sí."
+        // Previously this would SIGABRT the app; it must now complete without panicking.
+        let terms = vec![CanonicalTerm {
+            term: "godswood".to_string(),
+            aliases: vec!["gods wood".to_string()],
+            policy: SnapPolicy::Phonetic,
+            max_words: 2,
+            threshold: None,
+        }];
+        // Should not panic; "Oh sí" is not a phonetic match for "godswood" / "gods wood".
+        let result = run_with_registry(terms, "Oh sí.");
+        assert_eq!(
+            result, "Oh sí.",
+            "non-matching non-ASCII text must pass through unchanged"
+        );
     }
 }
