@@ -98,6 +98,24 @@
           libiconv
           # libclang for bindgen (whisper.cpp)
           llvmPackages.libclang
+          # Scoped `swift` shim (issue #93). FluidAudio's vendored build.rs runs a
+          # bare `swift build`, which inherits the nixpkgs apple-sdk-14.4 setup-hook's
+          # leaked SDKROOT/DEVELOPER_DIR (a Swift 5.10 SDK) — but /usr/bin/swift is
+          # Xcode's swiftc 6.2.x, which rejects the 5.10 SDK ("no such module
+          # 'SwiftShims'" / "SDK not supported by the compiler"). This shim, placed
+          # ahead of /usr/bin on PATH, peels the leaked vars off only for the Swift
+          # build and points it at the real Xcode toolchain, leaving the nix
+          # cc-wrapper / rustc paths (which want the Nix SDK) untouched. The `unset`
+          # before xcode-select and the explicit PATH prepend are both load-bearing.
+          (pkgs.writeShellScriptBin "swift" ''
+            if [ -d /Applications/Xcode.app ]; then
+              unset SDKROOT DEVELOPER_DIR
+              export DEVELOPER_DIR="$(/usr/bin/xcode-select -p 2>/dev/null || echo /Applications/Xcode.app/Contents/Developer)"
+              export PATH="/usr/bin:/bin:$PATH"
+              export MACOSX_DEPLOYMENT_TARGET=14.0
+            fi
+            exec /usr/bin/swift "$@"
+          '')
         ] ++ [
           # Frontend
           nodejs_22
@@ -123,6 +141,33 @@
         bindgenHook = pkgs.lib.optionalString pkgs.stdenv.isLinux ''
 
           export BINDGEN_EXTRA_CLANG_ARGS="$(< ${pkgs.stdenv.cc}/nix-support/libc-cflags) -idirafter ${pkgs.llvmPackages.libclang.lib}/lib/clang/${pkgs.lib.versions.major pkgs.llvmPackages.libclang.version}/include"
+        '';
+
+        # macOS (issue #93): the `swift` shim builds FluidAudio's objects against
+        # the real Xcode runtime, but the FINAL Rust link still fails for two
+        # reasons, both because the nix linker is pointed at the apple-sdk-14.4
+        # (Swift 5.10) SDK via the leaked SDKROOT:
+        #   1. `ld: library not found for -lswiftCore` — the 14.4 SDK has no Swift
+        #      runtime stubs; add `-L <xcode-sdk>/usr/lib/swift`.
+        #   2. `_OBJC_CLASS_$_MLState` / CoreML `MLModel.makeState()` undefined —
+        #      FluidAudio's streaming ASR uses the stateful CoreML API, which is
+        #      `API_AVAILABLE(macos 15.0)` and exists ONLY in the Xcode SDK's
+        #      CoreML.framework (it is entirely absent from apple-sdk-14.4's
+        #      CoreML.tbd); add a framework search path (`-L framework=<xcode-sdk>/
+        #      System/Library/Frameworks`) so `framework=CoreML` resolves there. ld
+        #      weak-imports the 15.0 symbols against the 14.0 deployment target,
+        #      matching the runtime backend gate.
+        # Both paths MUST be computed with the leaked apple-sdk vars unset —
+        # otherwise `xcrun` resolves to the Nix 14.4 SDK (no swiftCore, no MLState)
+        # instead of Xcode's. Done in the shellHook (not a static mkShell attr) so
+        # `xcrun` runs at shell entry, and appended to (not clobbering) RUSTFLAGS.
+        darwinSwiftLinkHook = pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+
+          __thoth_xcode_sdk="$(env -u SDKROOT -u DEVELOPER_DIR /usr/bin/xcrun --sdk macosx --show-sdk-path 2>/dev/null)"
+          if [ -n "$__thoth_xcode_sdk" ] && [ -d "$__thoth_xcode_sdk/usr/lib/swift" ]; then
+            export RUSTFLAGS="''${RUSTFLAGS:+$RUSTFLAGS }-L $__thoth_xcode_sdk/usr/lib/swift -L framework=$__thoth_xcode_sdk/System/Library/Frameworks"
+          fi
+          unset __thoth_xcode_sdk
         '';
 
         # One dev-shell definition, optionally wired for GPU Parakeet (CUDA).
@@ -190,7 +235,7 @@
             echo "  --features cuda     - NVIDIA GPUs (Whisper)"
             echo "  --features vulkan   - Cross-platform (Whisper)"
             echo "  nix develop .#cuda  - GPU Parakeet (NVIDIA, via sherpa-onnx CUDA)"
-          '') + bindgenHook;
+          '') + bindgenHook + darwinSwiftLinkHook;
         } // pkgs.lib.optionalAttrs gpuParakeet {
           # Make sherpa-onnx-sys link the CUDA libs instead of downloading CPU ones.
           SHERPA_ONNX_LIB_DIR = "${sherpaOnnxCuda}/lib";
