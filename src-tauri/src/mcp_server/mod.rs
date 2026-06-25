@@ -7,9 +7,12 @@
 //!
 //! Tool surface (task-centric, per the house MCP design principles):
 //! - `dictionary` (dispatcher: list/add/update/delete/import/export)
+//! - `canonical`  (dispatcher: list/add/update/remove)
 //! - `setting`    (dispatcher: get/update)
 //! - `transcription` (dispatcher: list/get/stats)
 //! - `transcribe_file` / `transcribe_status` (async file transcription)
+//! - `test_loki_connection` (verify the Loki log-shipping endpoint)
+//! - `recording` (start/stop/toggle, mirroring the global hotkey)
 //! - `get_state`, `get_system`, `list_prompts`
 
 use rmcp::{
@@ -108,6 +111,27 @@ pub struct TranscribeFileParams {
 pub struct TranscribeStatusParams {
     /// The job id returned by `transcribe_file`.
     pub job_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct TestLokiParams {
+    /// The Loki base URL to test (e.g. `https://loki.example`); the
+    /// `/loki/api/v1/push` path is appended if missing. Omit to test the URL
+    /// saved in Logging settings.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Optional Authorization value (a bearer token). Omit to use the saved token.
+    #[serde(default)]
+    pub auth: Option<String>,
+    /// Optional X-Scope-OrgID tenant header. Omit to use the saved tenant.
+    #[serde(default)]
+    pub tenant: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RecordingParams {
+    /// The action: `start`, `stop`, or `toggle` (toggle mirrors the global hotkey).
+    pub action: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -412,6 +436,71 @@ impl ThothMcp {
         let prompts = crate::enhancement::prompts::get_all_prompts();
         json_result(&prompts)
     }
+
+    #[tool(
+        description = "Test the Loki log-shipping endpoint by pushing one synthetic, content-free event, to verify the URL, token and tenant before saving. Optional `url` (omit to test the URL saved in Logging settings; a bare base URL is fine, the push path is added); optional `auth` (omit to use the saved token); optional `tenant` (omit to use the saved tenant). Returns ok on success, or the Loki error."
+    )]
+    async fn test_loki_connection(
+        &self,
+        Parameters(p): Parameters<TestLokiParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let url = match p.url {
+            Some(u) if !u.trim().is_empty() => u,
+            _ => {
+                crate::config::get_config()
+                    .map_err(|e| core_err(e.to_string()))?
+                    .logging
+                    .loki_url
+            }
+        };
+        if url.trim().is_empty() {
+            return Err(core_err(
+                "no Loki URL given and none saved in Logging settings".into(),
+            ));
+        }
+        crate::telemetry::test_loki_connection(url, p.auth, p.tenant)
+            .await
+            .map_err(|e| core_err(e.to_string()))?;
+        json_result(&serde_json::json!({ "ok": true, "message": "Loki accepted a test event" }))
+    }
+
+    #[tool(
+        description = "Control recording the same way the global hotkey does: `start`, `stop`, or `toggle`. `stop` (and a toggle that stops) runs the full transcription pipeline on what was recorded, honouring your saved filter, spelling and enhancement settings, then inserts/copies the text per your settings. Returns the resulting action (and the recording path on a start)."
+    )]
+    async fn recording(
+        &self,
+        Parameters(p): Parameters<RecordingParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let app = crate::app_handle::get()
+            .ok_or_else(|| core_err("Thoth app handle is not available yet".into()))?;
+        match p.action.as_str() {
+            "start" => {
+                let path = crate::pipeline::pipeline_start_recording(app)
+                    .map_err(|e| core_err(e.to_string()))?;
+                json_result(&serde_json::json!({ "action": "started", "path": path }))
+            }
+            "stop" => {
+                let cfg = crate::pipeline::effective_pipeline_config()
+                    .map_err(|e| core_err(e.to_string()))?;
+                crate::pipeline::pipeline_stop_and_process(app, Some(cfg))
+                    .await
+                    .map_err(|e| core_err(e.to_string()))?;
+                json_result(&serde_json::json!({ "action": "stopped" }))
+            }
+            "toggle" => {
+                let cfg = crate::pipeline::effective_pipeline_config()
+                    .map_err(|e| core_err(e.to_string()))?;
+                let outcome = crate::pipeline::pipeline_toggle_recording(app, Some(cfg))
+                    .await
+                    .map_err(|e| core_err(e.to_string()))?;
+                json_result(&outcome)
+            }
+            other => Err(core_err(format!(
+                "unknown action '{}'; must be start | stop | toggle",
+                other
+            ))),
+        }
+    }
 }
 
 #[tool_handler]
@@ -422,9 +511,11 @@ impl ServerHandler for ThothMcp {
                 "Use this server to read and control the locally-running Thoth voice-transcription \
                  app on this machine. Dispatchers: `dictionary` (list/add/update/delete/import/export), \
                  `setting` (get/update), `transcription` (list/get/stats). Singletons: `transcribe_file` \
-                 + `transcribe_status` (transcribe a local audio file as a background job), `get_state`, \
-                 `get_system`, `list_prompts`. All operations mirror what the user can do in Thoth's GUI; \
-                 destructive and system operations are intentionally not exposed. This controls only the \
+                 + `transcribe_status` (transcribe a local audio file as a background job), \
+                 `test_loki_connection` (verify the Loki endpoint), `recording` (start/stop/toggle, \
+                 mirroring the global hotkey), `get_state`, `get_system`, `list_prompts`. All operations \
+                 mirror what the user can do in Thoth's GUI; genuinely destructive or system-level \
+                 operations (deleting history, quitting the app) remain unexposed. This controls only the \
                  local instance."
                     .to_string(),
             )

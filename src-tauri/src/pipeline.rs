@@ -105,6 +105,43 @@ impl Default for PipelineConfig {
     }
 }
 
+/// Build the effective [`PipelineConfig`] from the saved settings, mirroring the
+/// frontend's `getDefaultConfig()`. Used by entry points that trigger a recording
+/// without a frontend-supplied config (e.g. the bundled MCP server) so the result
+/// honours the user's filter, spelling and enhancement settings exactly as the
+/// global hotkey does (`PipelineConfig::default()` hardcodes different values).
+pub(crate) fn effective_pipeline_config() -> Result<PipelineConfig, Error> {
+    let cfg = crate::config::get_config()?;
+    let t = &cfg.transcription;
+    let e = &cfg.enhancement;
+    let enhancement_prompt = if e.enabled {
+        crate::enhancement::prompts::get_all_prompts()
+            .into_iter()
+            .find(|p| p.id == e.prompt_id)
+            .map(|p| p.template)
+            .unwrap_or_else(|| DEFAULT_ENHANCEMENT_PROMPT.to_string())
+    } else {
+        DEFAULT_ENHANCEMENT_PROMPT.to_string()
+    };
+    Ok(PipelineConfig {
+        apply_dictionary: true,
+        apply_filtering: true,
+        remove_fillers: t.remove_fillers,
+        australian_spelling: t.australian_spelling,
+        spoken_numbers_to_digits: t.spoken_numbers_to_digits,
+        normalise_whitespace: t.normalise_whitespace,
+        cleanup_punctuation: t.cleanup_punctuation,
+        sentence_case: t.sentence_case,
+        voice_formatting_commands: t.voice_formatting_commands,
+        enhancement_enabled: e.enabled,
+        enhancement_model: e.model.clone(),
+        enhancement_prompt,
+        auto_copy: t.auto_copy,
+        auto_paste: t.auto_paste,
+        insertion_method: "paste".to_string(),
+    })
+}
+
 /// Default enhancement prompt
 const DEFAULT_ENHANCEMENT_PROMPT: &str = r#"Fix grammar and punctuation in the following text.
 Keep the original meaning and tone. Output only the corrected text, nothing else.
