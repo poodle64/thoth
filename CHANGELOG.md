@@ -6,10 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [2026.6.7] - 2026-06-25
 
+### Added
+
+- **The bundled MCP server can now test the Loki connection and control recording.** Two new tools: `test_loki_connection` verifies your Loki URL, token and tenant by pushing one content-free event (the same as the Settings "Test connection" button), and `recording` starts, stops, or toggles recording exactly as the global hotkey does — honouring your saved filter, spelling and enhancement settings.
+
 ### Fixed
 
 - **Thoth no longer crashes on dictations with accented or non-Latin characters.** A word like "café" or "sí" reaching the canonical-term phonetic matcher could panic it (the matcher sliced text by byte, cutting a multi-byte character in half); and because release builds aborted on any panic, the whole app went down, which felt random. Accented input is now folded to its ASCII form before phonetic matching. As defence in depth, the transcription pipeline now contains panics, so a single bad input fails only that one transcription (with an error toast and sound) instead of aborting the app.
 - **Live telemetry forwarding to Loki now works.** A saved Loki URL that already ended in `/loki/api/v1/push` was doubled (the app appended the push path again), so every forwarded event silently returned 404. You can now save just the base URL (e.g. `https://loki.example`) and Thoth adds the push path itself; a full-path URL is also handled. The historical-log backfill script now reads the endpoint and token from Thoth's own settings, so no separate env file is needed.
+- **Your Loki URL and token are no longer wiped when you update the app.** On launch the app re-saved the whole config just to record the version, and that round-trip could blank the saved Loki URL (and exposed the token to the same fragile path), so after an update remote forwarding silently stopped. The version is now recorded without rewriting the rest of the config, the URL and tenant get the same protection the token already had, and saving with forwarding enabled but no URL is now blocked (an empty token warns) instead of silently saving a broken configuration.
 
 ### Note
 
