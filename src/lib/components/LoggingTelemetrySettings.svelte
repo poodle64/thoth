@@ -33,6 +33,20 @@
   }
 
   async function handleSave(): Promise<void> {
+    // Validate the remote-forwarding config before saving, so the user is never
+    // left with forwarding silently broken. lokiAuth is the mask "***" when a
+    // token is stored, so an empty value here means no token is set.
+    if (configStore.logging.remoteEnabled) {
+      if (configStore.logging.lokiUrl.trim().length === 0) {
+        toast.error('A Loki URL is required when remote forwarding is on');
+        return;
+      }
+      if (configStore.logging.lokiAuth.trim().length === 0) {
+        toast.warning(
+          'No Loki auth token set — forwarding will fail if your endpoint requires authentication'
+        );
+      }
+    }
     isSaving = true;
     try {
       // Persist the token via the dedicated command (bypasses the preservation
@@ -71,6 +85,17 @@
   async function handleRemoteToggle(enabled: boolean): Promise<void> {
     configStore.updateLogging('remoteEnabled', enabled);
     await saveSettings();
+    // Warn (without blocking the toggle) if forwarding was turned on without a
+    // usable URL or token, so it is obvious nothing will ship.
+    if (enabled) {
+      if (configStore.logging.lokiUrl.trim().length === 0) {
+        toast.error('Remote forwarding is on but no Loki URL is set — enter one to ship events');
+      } else if (configStore.logging.lokiAuth.trim().length === 0) {
+        toast.warning(
+          'No Loki auth token set — forwarding will fail if your endpoint requires authentication'
+        );
+      }
+    }
   }
 
   function handleLokiUrlInput(event: Event): void {

@@ -870,6 +870,35 @@ pub fn set_config(mut config: Config) -> Result<(), Error> {
             tracing::debug!("Preserving loki_auth (incoming config had empty/masked value)");
             config.logging.loki_auth = current.logging.loki_auth.clone();
         }
+
+        // Preserve loki_url if the incoming value is blank but a URL is stored.
+        // The generic settings save sends the whole logging config, and a blank
+        // URL is almost always an unintended wipe (a startup re-save, or a UI
+        // that had not loaded the field) rather than a deliberate clear —
+        // forwarding is turned off via remote_enabled, not by blanking the URL.
+        // Changing the URL still works because a non-empty value overwrites.
+        if config.logging.loki_url.trim().is_empty() && !current.logging.loki_url.trim().is_empty()
+        {
+            tracing::debug!("Preserving loki_url (incoming config had a blank URL)");
+            config.logging.loki_url = current.logging.loki_url.clone();
+        }
+
+        // Preserve loki_tenant the same way (blank/None incoming, stored value present).
+        let incoming_tenant_blank = config
+            .logging
+            .loki_tenant
+            .as_deref()
+            .map(|t| t.trim().is_empty())
+            .unwrap_or(true);
+        let cached_tenant_present = current
+            .logging
+            .loki_tenant
+            .as_deref()
+            .is_some_and(|t| !t.trim().is_empty());
+        if incoming_tenant_blank && cached_tenant_present {
+            tracing::debug!("Preserving loki_tenant (incoming config had a blank tenant)");
+            config.logging.loki_tenant = current.logging.loki_tenant.clone();
+        }
     }
 
     // Save to disk first
@@ -984,6 +1013,27 @@ pub fn set_loki_auth(token: Option<String>) -> Result<(), Error> {
         }
     );
     Ok(())
+}
+
+/// Record the running binary's version as `last_run_version`, persisting only
+/// when it changed.
+///
+/// Mutates the live config singleton in place and writes that — it does NOT go
+/// through the masked `get_config()` / `set_config()` round-trip, so it can
+/// never blank `loki_url` / `loki_auth` / other sensitive fields the way a
+/// full-config re-save can. Returns `Some(previous_version)` when a *different*
+/// version was recorded before (a genuine update, so the caller can run
+/// one-time post-update steps), or `None` when the version was unchanged (no
+/// write) or this is a fresh install (no prior version recorded).
+pub fn record_last_run_version(version: &str) -> Result<Option<String>, Error> {
+    let mut cached = get_config_instance().write();
+    let prev = cached.general.last_run_version.clone();
+    if prev.as_deref() == Some(version) {
+        return Ok(None); // unchanged — no write
+    }
+    cached.general.last_run_version = Some(version.to_string());
+    save_to_disk(&cached)?;
+    Ok(prev) // Some(old) on a real update; None on a fresh install
 }
 
 /// Set shortcut config directly, bypassing set_config's preservation logic.
@@ -1778,6 +1828,74 @@ mod tests {
 
         // Restore clean state
         instance.write().logging.loki_auth = LokiAuth::default();
+    }
+
+    #[test]
+    fn test_set_config_preserves_loki_url_on_blank_incoming() {
+        // A generic save that sends a blank loki_url (e.g. a UI that had not
+        // loaded the field, or a startup re-save) must keep the stored URL;
+        // a non-blank incoming URL still overwrites.
+        let _guard = CONFIG_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let instance = get_config_instance();
+        {
+            instance.write().logging.loki_url = "https://loki.example".to_string();
+        }
+
+        let mut blank = Config::default(); // loki_url == ""
+        let mut typed = Config::default();
+        typed.logging.loki_url = "https://other.example".to_string();
+        {
+            let current = instance.read();
+            for incoming in [&mut blank, &mut typed] {
+                if incoming.logging.loki_url.trim().is_empty()
+                    && !current.logging.loki_url.trim().is_empty()
+                {
+                    incoming.logging.loki_url = current.logging.loki_url.clone();
+                }
+            }
+        }
+        assert_eq!(
+            blank.logging.loki_url, "https://loki.example",
+            "blank preserved"
+        );
+        assert_eq!(
+            typed.logging.loki_url, "https://other.example",
+            "non-blank overwrites"
+        );
+
+        instance.write().logging.loki_url = String::new();
+    }
+
+    #[test]
+    fn test_set_config_preserves_loki_tenant_on_blank_incoming() {
+        // A blank/None incoming loki_tenant must keep the stored tenant.
+        let _guard = CONFIG_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let instance = get_config_instance();
+        {
+            instance.write().logging.loki_tenant = Some("team-a".to_string());
+        }
+
+        let mut incoming = Config::default(); // loki_tenant == None
+        {
+            let current = instance.read();
+            let incoming_blank = incoming
+                .logging
+                .loki_tenant
+                .as_deref()
+                .map(|t| t.trim().is_empty())
+                .unwrap_or(true);
+            let cached_present = current
+                .logging
+                .loki_tenant
+                .as_deref()
+                .is_some_and(|t| !t.trim().is_empty());
+            if incoming_blank && cached_present {
+                incoming.logging.loki_tenant = current.logging.loki_tenant.clone();
+            }
+        }
+        assert_eq!(incoming.logging.loki_tenant.as_deref(), Some("team-a"));
+
+        instance.write().logging.loki_tenant = None;
     }
 
     #[test]

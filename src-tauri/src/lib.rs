@@ -508,26 +508,19 @@ pub fn run() {
                 // those three permissions once so the user re-grants from a
                 // clean slate. A genuinely fresh install (no recorded version)
                 // does NOT trigger a reset — there is nothing stale yet.
-                if let Ok(cfg) = config::get_config() {
-                    let current = env!("CARGO_PKG_VERSION").to_string();
-                    let changed = cfg
-                        .general
-                        .last_run_version
-                        .as_deref()
-                        .is_some_and(|prev| prev != current);
-
-                    // Record the current version regardless, so the reset fires
-                    // at most once per update.
-                    let mut updated = cfg.clone();
-                    updated.general.last_run_version = Some(current.clone());
-                    if let Err(e) = config::set_config(updated) {
-                        tracing::error!("Failed to record last-run version: {}", e);
-                    }
-
-                    if changed {
+                let current = env!("CARGO_PKG_VERSION").to_string();
+                // Record the running version by mutating only this field on the
+                // live config and writing it — NOT via a get_config()/set_config()
+                // round-trip. That round-trip serialises a masked loki_auth and,
+                // on a version-change launch, was blanking loki_url/loki_auth.
+                // record_last_run_version writes only when the version changed.
+                match config::record_last_run_version(&current) {
+                    // Some(prev): a different version was recorded before, i.e. a
+                    // genuine update — reset the now-stale macOS permissions once.
+                    Ok(Some(prev)) => {
                         tracing::info!(
                             "Update detected ({} → {}); resetting macOS permissions",
-                            cfg.general.last_run_version.as_deref().unwrap_or("?"),
+                            prev,
                             current
                         );
                         // Spawn so the admin-prompt does not block window setup.
@@ -540,6 +533,9 @@ pub fn run() {
                             }
                         });
                     }
+                    // None: same version (no write) or a fresh install (nothing stale).
+                    Ok(None) => {}
+                    Err(e) => tracing::error!("Failed to record last-run version: {}", e),
                 }
 
                 // Set dock visibility based on user config
