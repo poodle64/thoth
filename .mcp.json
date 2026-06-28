@@ -1,14 +1,5 @@
 {
   "mcpServers": {
-    "quartermaster": {
-      "command": "${HOME}/Nextcloud/programming/projects/repos/mcp-servers/.venv/bin/python",
-      "args": [
-        "-m",
-        "quartermaster_mcp.server",
-        "--transport",
-        "stdio"
-      ]
-    },
     "shadcn-ui": {
       "command": "npx",
       "args": [
