@@ -117,3 +117,4 @@ docs/branding/app-icon-prompt.md
 # Temporary files
 *.tmp
 *.temp
+.mcp.json
