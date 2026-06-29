@@ -34,7 +34,6 @@ jobs:
           # Parakeet + FluidAudio), so the macOS-only modules are compiled.
           - platform: macos-15
             args: ''
-            runner: macos-15
           # Linux: the same feature set release.yaml ships — defaults off,
           # Vulkan on. This compiles the Linux-only code (Wayland portal via
           # ashpd, x11rb mouse tracking, the Vulkan whisper backend) that never
@@ -43,18 +42,10 @@ jobs:
           # sherpa-rs blocker is gone) but a Parakeet transcription is not yet
           # runtime-verified on a glibc desktop and crashes at model init under
           # the Nix toolchain — opt in with `--features parakeet` to test (#53).
-          # Runs on the self-hosted atlas runner inside an Ubuntu 22.04 container
-          # (buildpack-deps:jammy ships git/curl/wget) so the apt-based Vulkan SDK
-          # + GTK deps install — atlas is NixOS and has no apt.
           - platform: ubuntu-22.04
             args: '--no-default-features --features vulkan'
-            runner: [self-hosted, atlas]
-            container: buildpack-deps:jammy
 
-    # macOS stays on GitHub-hosted (no container); the Linux leg runs in the
-    # container on atlas. matrix.container is empty for macOS = run on the host.
-    runs-on: ${{ matrix.runner }}
-    container: ${{ matrix.container }}
+    runs-on: ${{ matrix.platform }}
 
     # macOS Apple Silicon runners: whisper.cpp's GGML detects the i8mm CPU
     # feature via -march=native and emits vmmlaq_s32 intrinsics, then fails to
@@ -80,13 +71,12 @@ jobs:
           # onward — so the LunarG apt repo is the supported way to get it on a
           # jammy runner. vulkan-sdk pulls in glslc, the loader/headers, and the
           # SPIRV headers, replacing libvulkan-dev/spirv-headers.
-          # Runs as root inside the container, so no sudo.
           wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc \
-            | tee /etc/apt/trusted.gpg.d/lunarg.asc > /dev/null
-          wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list \
+            | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc > /dev/null
+          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list \
             http://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
-          apt-get update
-          apt-get install -y vulkan-sdk
+          sudo apt-get update
+          sudo apt-get install -y vulkan-sdk
 
       - name: Install system dependencies (Linux)
         if: matrix.platform == 'ubuntu-22.04'
@@ -94,7 +84,7 @@ jobs:
           # GUI + audio libs Tauri needs to compile. desktop-file-utils provides
           # desktop-file-validate used below. The Vulkan toolchain is installed
           # by the Vulkan SDK step above.
-          apt-get install -y \
+          sudo apt-get install -y \
             libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
             patchelf libasound2-dev desktop-file-utils
 
