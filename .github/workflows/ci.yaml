@@ -18,6 +18,9 @@ on:
   # only way to compile-check the Linux-only code before it reaches main.
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 # Cancel superseded runs on the same ref to save CI minutes.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -45,6 +48,10 @@ jobs:
           - platform: ubuntu-22.04
             args: '--no-default-features --features vulkan'
 
+    # by-exception (2026-07-03): cross-platform compilation gate — macOS
+    # Metal/Swift toolchain and Linux Vulkan/Wayland code cannot build on the
+    # household self-hosted runner (atlas is macOS-only); both platforms must
+    # be tested natively.
     runs-on: ${{ matrix.platform }}
 
     # macOS Apple Silicon runners: whisper.cpp's GGML detects the i8mm CPU
@@ -59,7 +66,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Install Vulkan SDK (Linux)
         if: matrix.platform == 'ubuntu-22.04'
@@ -89,12 +96,12 @@ jobs:
             patchelf libasound2-dev desktop-file-utils
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           components: rustfmt, clippy
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: './src-tauri -> target'
 
@@ -114,20 +121,27 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: desktop-file-validate src-tauri/linux/thoth.desktop
 
+      - name: Notify failure (ntfy infra)
+        if: failure() && github.event_name != 'pull_request'
+        uses: poodle64/master-project/.github/actions/ntfy-failure@main
+        with:
+          title: 'thoth: rust (${{ matrix.platform }}) failed'
+          token: ${{ secrets.NTFY_TOKEN }}
+
   frontend:
     name: Frontend
     runs-on: [self-hosted, atlas]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: lts/*
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10
 
@@ -136,3 +150,9 @@ jobs:
 
       - name: Type-check (svelte-check)
         run: pnpm check
+
+      - name: Notify failure (ntfy infra)
+        if: failure() && github.event_name != 'pull_request'
+        uses: poodle64/master-project/.github/actions/ntfy-failure@main
+        with:
+          title: 'thoth: frontend failed'
