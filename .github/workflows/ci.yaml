@@ -123,10 +123,22 @@ jobs:
 
       - name: Notify failure (ntfy infra)
         if: failure() && github.event_name != 'pull_request'
-        uses: poodle64/master-project/.github/actions/ntfy-failure@main
-        with:
-          title: 'thoth: rust (${{ matrix.platform }}) failed'
-          token: ${{ secrets.NTFY_TOKEN }}
+        shell: bash
+        env:
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # Inline ntfy notify: thoth is a private repo; vendor-hosted runners
+          # cannot resolve composite actions from poodle64/master-project (also
+          # private) at job-setup time, so the notify step is inlined here.
+          curl -sS --max-time 10 \
+            -H "Authorization: Bearer $NTFY_TOKEN" \
+            -H "Title: thoth: rust (${{ matrix.platform }}) failed" \
+            -H "Priority: 4" \
+            -H "Tags: rotating_light" \
+            -d "Run: $RUN_URL" \
+            "https://ntfy.godswood.au/infra" \
+            || echo "::warning::ntfy notify POST failed"
 
   frontend:
     name: Frontend
@@ -153,6 +165,26 @@ jobs:
 
       - name: Notify failure (ntfy infra)
         if: failure() && github.event_name != 'pull_request'
-        uses: poodle64/master-project/.github/actions/ntfy-failure@main
-        with:
-          title: 'thoth: frontend failed'
+        shell: bash
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # Inline ntfy notify: thoth is a private repo; composite actions from
+          # poodle64/master-project (also private) cannot be resolved at
+          # job-setup time on any runner. Atlas self-hosted reads the host token.
+          TOKEN=""
+          for f in /etc/ntfy/tokens/ci-publisher.token /run/secrets/ntfy/systemd; do
+            [ -r "$f" ] && TOKEN="$(cat "$f")" && break
+          done
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::ntfy-failure: no host token file readable — notification NOT sent"
+            exit 0
+          fi
+          curl -sS --max-time 10 \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Title: thoth: frontend failed" \
+            -H "Priority: 4" \
+            -H "Tags: rotating_light" \
+            -d "Run: $RUN_URL" \
+            "https://ntfy.godswood.au/infra" \
+            || echo "::warning::ntfy notify POST failed"
