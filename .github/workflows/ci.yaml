@@ -163,6 +163,9 @@ jobs:
       - name: Type-check (svelte-check)
         run: pnpm check
 
+      - name: CSS lint (stylelint)
+        run: pnpm lint:css
+
       - name: Notify failure (ntfy infra)
         if: failure() && github.event_name != 'pull_request'
         shell: bash

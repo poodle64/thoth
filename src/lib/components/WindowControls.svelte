@@ -43,7 +43,7 @@
   }
 
   button.wc-close:hover {
-    background: #e53935;
-    color: #fff;
+    background: oklch(0.608 0.209 27);
+    color: oklch(1.000 0.000 0);
   }
 </style>
