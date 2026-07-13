@@ -147,17 +147,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
-      - name: Setup Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with:
-          node-version: lts/*
-
       - name: Install pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           # Reads the packageManager pin from package.json rather than
           # floating to whatever latest pnpm 10.x exists at run time.
           package_json_file: package.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: lts/*
+          # pnpm must already be on PATH before this step: setup-node's
+          # package-manager-cache auto-detection reads the packageManager
+          # field above and shells out to the pnpm binary to resolve the
+          # store path.
+          cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
