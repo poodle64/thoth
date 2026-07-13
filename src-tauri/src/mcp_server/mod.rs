@@ -151,6 +151,20 @@ fn core_err(msg: String) -> McpError {
     McpError::internal_error(msg, None)
 }
 
+/// Compact acknowledgement for a mutating dictionary/canonical action. Confirms
+/// success and reports the affected `index` and the resulting collection size,
+/// WITHOUT echoing the whole list back. Returning the full ~150-entry list on
+/// every add/update/delete was pure token waste; a caller that wants the list
+/// calls the `list` action.
+fn mutation_ack(action: &str, index: usize, count: usize) -> Result<CallToolResult, McpError> {
+    json_result(&serde_json::json!({
+        "ok": true,
+        "action": action,
+        "index": index,
+        "count": count,
+    }))
+}
+
 /// Parse an optional policy string into a `SnapPolicy`.  `None` defaults to `AliasOnly`.
 fn parse_snap_policy(policy: Option<&str>) -> Result<crate::canonical::SnapPolicy, McpError> {
     match policy {
@@ -173,7 +187,7 @@ impl ThothMcp {
     }
 
     #[tool(
-        description = "Manage Thoth's personal dictionary (find/replace entries applied to transcriptions). Use this to view or change spelling corrections and word replacements. Action: list | add | update | delete | import | export. add/update require from + to (+ optional caseSensitive); update/delete require index (from list); import requires json (+ optional merge). Returns: the entry list (list/add/update), a count (import), or a JSON string (export)."
+        description = "Manage Thoth's personal dictionary (find/replace entries applied to transcriptions). Use this to view or change spelling corrections and word replacements. Action: list | add | update | delete | import | export. add/update require from + to (+ optional caseSensitive); update/delete require index (from list); import requires json (+ optional merge). Returns: the entry list (list), a compact ack {ok, action, index, count} (add/update/delete), a count (import), or a JSON string (export)."
     )]
     async fn dictionary(
         &self,
@@ -197,9 +211,11 @@ impl ThothMcp {
                 };
                 crate::dictionary::add_dictionary_entry(entry)
                     .map_err(|e| core_err(e.to_string()))?;
-                let entries = crate::dictionary::get_dictionary_entries()
-                    .map_err(|e| core_err(e.to_string()))?;
-                json_result(&entries)
+                let count = crate::dictionary::get_dictionary_entries()
+                    .map_err(|e| core_err(e.to_string()))?
+                    .len();
+                // add appends, so the new entry sits at the last index.
+                mutation_ack("add", count.saturating_sub(1), count)
             }
             "update" => {
                 let index = p
@@ -216,9 +232,10 @@ impl ThothMcp {
                 };
                 crate::dictionary::update_dictionary_entry(index, entry)
                     .map_err(|e| core_err(e.to_string()))?;
-                let entries = crate::dictionary::get_dictionary_entries()
-                    .map_err(|e| core_err(e.to_string()))?;
-                json_result(&entries)
+                let count = crate::dictionary::get_dictionary_entries()
+                    .map_err(|e| core_err(e.to_string()))?
+                    .len();
+                mutation_ack("update", index, count)
             }
             "delete" => {
                 let index = p
@@ -226,9 +243,10 @@ impl ThothMcp {
                     .ok_or_else(|| core_err("`index` required for delete".into()))?;
                 crate::dictionary::remove_dictionary_entry(index)
                     .map_err(|e| core_err(e.to_string()))?;
-                let entries = crate::dictionary::get_dictionary_entries()
-                    .map_err(|e| core_err(e.to_string()))?;
-                json_result(&entries)
+                let count = crate::dictionary::get_dictionary_entries()
+                    .map_err(|e| core_err(e.to_string()))?
+                    .len();
+                mutation_ack("delete", index, count)
             }
             "import" => {
                 let json = p
@@ -248,7 +266,7 @@ impl ThothMcp {
     }
 
     #[tool(
-        description = "Manage Thoth's canonical-term registry (phonetic/fuzzy snapping of acoustic variants to a registered spelling). Register a term ONCE and all acoustic/spelling variants auto-snap to it. Action: list | add | update | remove. add/update require term (+ optional aliases, policy, index for update/remove). policy: aliasOnly (default, exact aliases only), phonetic (AND gate: Double-Metaphone key match AND edit-distance >= 0.55), conservative (same AND gate, higher 0.85 threshold for terms that collide with common words). Returns: the term list."
+        description = "Manage Thoth's canonical-term registry (phonetic/fuzzy snapping of acoustic variants to a registered spelling). Register a term ONCE and all acoustic/spelling variants auto-snap to it. Action: list | add | update | remove. add/update require term (+ optional aliases, policy, index for update/remove). policy: aliasOnly (default, exact aliases only), phonetic (AND gate: Double-Metaphone key match AND edit-distance >= 0.55), conservative (same AND gate, higher 0.85 threshold for terms that collide with common words). Returns: the term list (list), or a compact ack {ok, action, index, count} (add/update/remove)."
     )]
     async fn canonical(
         &self,
@@ -273,9 +291,11 @@ impl ThothMcp {
                     threshold: None,
                 };
                 crate::canonical::add_canonical_term(ct).map_err(|e| core_err(e.to_string()))?;
-                let terms =
-                    crate::canonical::get_canonical_terms().map_err(|e| core_err(e.to_string()))?;
-                json_result(&terms)
+                let count = crate::canonical::get_canonical_terms()
+                    .map_err(|e| core_err(e.to_string()))?
+                    .len();
+                // add appends, so the new term sits at the last index.
+                mutation_ack("add", count.saturating_sub(1), count)
             }
             "update" => {
                 let index = p
@@ -294,9 +314,10 @@ impl ThothMcp {
                 };
                 crate::canonical::update_canonical_term(index, ct)
                     .map_err(|e| core_err(e.to_string()))?;
-                let terms =
-                    crate::canonical::get_canonical_terms().map_err(|e| core_err(e.to_string()))?;
-                json_result(&terms)
+                let count = crate::canonical::get_canonical_terms()
+                    .map_err(|e| core_err(e.to_string()))?
+                    .len();
+                mutation_ack("update", index, count)
             }
             "remove" => {
                 let index = p
@@ -304,9 +325,10 @@ impl ThothMcp {
                     .ok_or_else(|| core_err("`index` required for remove".into()))?;
                 crate::canonical::remove_canonical_term(index)
                     .map_err(|e| core_err(e.to_string()))?;
-                let terms =
-                    crate::canonical::get_canonical_terms().map_err(|e| core_err(e.to_string()))?;
-                json_result(&terms)
+                let count = crate::canonical::get_canonical_terms()
+                    .map_err(|e| core_err(e.to_string()))?
+                    .len();
+                mutation_ack("remove", index, count)
             }
             other => Err(core_err(format!("unknown action: {}", other))),
         }

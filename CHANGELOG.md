@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- **The bundled MCP server no longer echoes the whole dictionary/canonical list on every edit.** Adding, updating or deleting a dictionary entry — or a canonical term — returned the entire list (~150 entries) in the tool response each time, spending the agent's context on data it never asked for. These actions now return a compact acknowledgement (`{ok, action, index, count}`); use the `list` action when you actually want the full list back.
+
 ## [2026.6.7] - 2026-06-25
 
 ### Added
