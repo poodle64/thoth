@@ -4,6 +4,7 @@
   "private": true,
   "description": "Privacy-first, offline-capable voice transcription application",
   "type": "module",
+  "packageManager": "pnpm@10.28.0",
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
