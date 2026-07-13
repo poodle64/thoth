@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use tower_http::validate_request::ValidateRequestHeaderLayer;
 use uuid::Uuid;
@@ -439,12 +440,17 @@ fn bearer_auth_layer(
     > + Clone,
 > {
     ValidateRequestHeaderLayer::custom(move |req: &mut axum::http::Request<axum::body::Body>| {
+        // Constant-time compare: a plain `==` short-circuits on the first
+        // differing byte, which leaks the token's length and prefix through
+        // response-time variance. `ct_eq` folds over every byte regardless of
+        // where (or whether) a mismatch occurs; a length mismatch is allowed
+        // to short-circuit (length is not treated as sensitive).
         let ok = req
             .headers()
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.strip_prefix("Bearer "))
-            .is_some_and(|t| t == token);
+            .is_some_and(|t| t.as_bytes().ct_eq(token.as_bytes()).into());
 
         if ok {
             Ok(())
@@ -461,6 +467,65 @@ fn bearer_auth_layer(
             Err(res)
         }
     })
+}
+
+/// Build a [`ValidateRequestHeaderLayer`] that rejects any request whose
+/// `Host` header does not name a loopback address, with a 400 and a JSON body
+/// on failure.
+///
+/// Anti DNS-rebinding: a browser sets the `Host` header from the URL bar's
+/// hostname, not the address it resolved to — so a malicious page served from
+/// a public domain that resolves to `127.0.0.1` cannot forge a `Host` this
+/// check accepts, even though the underlying TCP connection is genuinely
+/// loopback. This mirrors rmcp's own default `allowed_hosts` behaviour on the
+/// `/mcp` mount (see [`crate::mcp_server::build_service`]); the REST router
+/// needs its own copy of the same check since rmcp only guards its own mount.
+#[allow(clippy::result_large_err)]
+fn host_validation_layer() -> ValidateRequestHeaderLayer<
+    impl tower_http::validate_request::ValidateRequest<
+        axum::body::Body,
+        ResponseBody = axum::body::Body,
+    > + Clone,
+> {
+    ValidateRequestHeaderLayer::custom(|req: &mut axum::http::Request<axum::body::Body>| {
+        let ok = req
+            .headers()
+            .get(axum::http::header::HOST)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(is_loopback_host);
+
+        if ok {
+            Ok(())
+        } else {
+            let body_bytes =
+                serde_json::to_vec(&serde_json::json!({ "error": "Invalid Host header" }))
+                    .unwrap_or_default();
+            let body = axum::body::Body::from(body_bytes);
+            let mut res = axum::http::Response::new(body);
+            *res.status_mut() = StatusCode::BAD_REQUEST;
+            res.headers_mut().insert(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static("application/json"),
+            );
+            Err(res)
+        }
+    })
+}
+
+/// True when `host` (a raw `Host` header value, e.g. `127.0.0.1:3939` or
+/// `[::1]`) names a loopback address. Any port is accepted — only the
+/// hostname is checked, matching rmcp's own default `allowed_hosts` entries
+/// (`localhost`, `127.0.0.1`, `::1`), which likewise carry no port.
+fn is_loopback_host(host: &str) -> bool {
+    let Ok(authority) = axum::http::uri::Authority::try_from(host) else {
+        return false;
+    };
+    let hostname = authority
+        .host()
+        .trim_matches('[')
+        .trim_matches(']')
+        .to_ascii_lowercase();
+    matches!(hostname.as_str(), "localhost" | "127.0.0.1" | "::1")
 }
 
 // ---------------------------------------------------------------------------
@@ -490,6 +555,7 @@ fn build_router(token: String, app_version: String, mcp_enabled: bool) -> Router
         .route("/transcribe", post(handle_post_transcribe))
         .route("/transcribe/{id}", get(handle_get_transcribe_job))
         .layer(auth)
+        .layer(host_validation_layer())
         .with_state(state);
 
     // Mount the bundled MCP server at /mcp when enabled, behind the same bearer auth.
