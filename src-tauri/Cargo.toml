@@ -43,19 +43,34 @@ symphonia = { version = "0.6", features = ["mp3", "aac", "ogg", "vorbis", "flac"
 # the SHERPA_ONNX_LIB_DIR env var. (Linux CI builds without the parakeet feature.)
 sherpa-onnx = { version = "1.13", default-features = false, optional = true }
 # fluidaudio-rs: Apple Neural Engine backend via CoreML (macOS-only, Apple Silicon).
-# WHY fork, not crates.io: the upstream crate lacks platform compile-guards (fails to
-# build on Linux/Windows); the fork wraps the implementation in
-# `#[cfg(all(target_os = "macos", target_arch = "aarch64"))]` so CI builds pass.
-# The fork is also ahead of upstream on the FluidAudio Swift dependency (0.15.0; upstream
-# still ships 0.14.1) and configures melChunkContext=false (silence-aligned chunking).
-# melChunkContext is now redundant belt-and-braces, NOT load-bearing: app-side segmentation
-# (plan_segments) keeps every padded unit under FluidAudio's 15 s single-shot limit, so the
-# chunked decoder never fires (verified at max 14.85 s across the real recording corpus). The
-# fork is retained for the platform compile-guards and to stay ahead of upstream on FluidAudio
-# 0.15 — do not replace with the upstream crate until the guards AND a 0.15+ bump are upstream
-# and verified via the live app. The 0.15.0 rewrite already constructs a
-# fresh TdtDecoderState per one-shot call (the cross-call decoder-state reset upstream
-# PR #15 adds), so there is nothing to cherry-pick (#79). Pinned by tag, not bare rev.
+# WHY the fork, not upstream — reassessed 2026-07-17 against upstream tip 2d10833.
+# ONE reason survives: upstream still lacks platform compile-guards (its build.rs
+# invokes `swift build` unconditionally and its ffi/mod.rs has no cfg gating), so
+# it fails to build on Linux/Windows; the fork gates on
+# `#[cfg(all(target_os = "macos", target_arch = "aarch64"))]`.
+#
+# The two other reasons no longer hold, and are recorded here so they are not
+# re-litigated:
+#   - "ahead on FluidAudio 0.15.0 vs upstream 0.14.1" is no longer load-bearing.
+#     The correctness-critical part — a fresh TdtDecoderState per one-shot call —
+#     reached upstream independently via upstream PR #15 (355370e), applied against
+#     0.14.1. Same conclusion #79 drew when it closed as "nothing to cherry-pick".
+#   - melChunkContext=false was never load-bearing: plan_segments keeps every padded
+#     unit under FluidAudio's 15 s single-shot limit (max 14.85 s across the real
+#     corpus), so the chunked decoder never fires on either variant.
+#
+# The fork is now BEHIND upstream on features (~4k lines of diarization/VAD/
+# Qwen3-ASR/streaming it never gained), and the API used here — new(),
+# is_apple_silicon(), init_asr(), transcribe_file() — exists verbatim upstream, a
+# strict superset. Switching back is a drop-in match at the API level.
+#
+# RETIREMENT CONDITION: replace this with the upstream crate once the platform
+# guard is upstream AND in a cut release, verified by the cargo suite plus a real
+# end-to-end transcription — not a compile check. Rationale and the scope of the
+# unblocking PR: https://github.com/poodle64/fluidaudio-rs#why-this-fork-exists-and-what-would-end-it
+# Note this app's CI already builds Linux with `--no-default-features --features
+# vulkan`, excluding this feature, so the guard is not load-bearing for our own
+# build today. Pinned by tag, not bare rev.
 fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", tag = "v0.15.0-thoth.1", optional = true }
 
 # AI Enhancement and Model Downloads
