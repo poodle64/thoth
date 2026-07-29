@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 # Cancel superseded runs on the same ref to save CI minutes.
 concurrency:
@@ -163,9 +164,13 @@ jobs:
           # field above and shells out to the pnpm binary to resolve the
           # store path.
           cache: 'pnpm'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@poodle64'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Type-check (svelte-check)
         run: pnpm check

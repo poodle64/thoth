@@ -1,134 +1,85 @@
 @import 'tailwindcss';
-@import 'tw-animate-css';
-@import 'shadcn-svelte/tailwind.css';
+@import '@poodle64/design-tokens/tokens.tw.css';
+@import '@poodle64/design-tokens/tokens.css';
+@import '@poodle64/ui/styles.css';
 
-@custom-variant dark (&:is(.dark *));
+/* @poodle64/ui ships in node_modules, outside Tailwind's default src/ scan —
+   without this the shared components render unstyled: no build error, no
+   lint hit, just missing classes in the compiled CSS. */
+@source '../node_modules/@poodle64/ui/dist';
 
-/* Scribe's Amber palette mapped to the standard shadcn token slots.
-   Thoth is dark-only; :root and .dark hold identical values so tokens
-   resolve whether or not the .dark class is present. */
-:root {
-  --radius: 0.5rem;
+/*
+  The enter/exit animation keyframes and the `dark`, `data-open` and
+  `data-closed` variants all arrive with @poodle64/ui/styles.css above, so
+  Thoth declares none of them locally (they used to come from tw-animate-css
+  and shadcn-svelte/tailwind.css, both now dropped).
 
-  --background: oklch(0.223 0.002 67.7);
-  --foreground: oklch(0.933 0.012 79.8);
+  Per-app palette for Thoth: Scribe's Amber palette (DESIGN.md).
 
-  --card: oklch(0.266 0.005 67.6);
-  --card-foreground: oklch(0.933 0.012 79.8);
+  Thoth is dark-only — ModeWatcher defaults to dark and the app has no light-mode
+  toggle — so :root and .dark carry the identical override, exactly as the
+  hand-rolled version this replaces did.
 
-  --popover: oklch(0.266 0.005 67.6);
-  --popover-foreground: oklch(0.933 0.012 79.8);
-
-  --primary: oklch(0.693 0.124 65.9);
-  --primary-foreground: oklch(0.223 0.002 67.7);
-
-  --secondary: oklch(0.266 0.005 67.6);
-  --secondary-foreground: oklch(0.933 0.012 79.8);
-
-  --muted: oklch(0.323 0.007 67.6);
-  --muted-foreground: oklch(0.670 0.020 78.2);
-
-  --accent: oklch(0.323 0.007 67.6);
-  --accent-foreground: oklch(0.933 0.012 79.8);
-
-  --destructive: oklch(0.631 0.177 29.5);
-  --destructive-foreground: oklch(1.000 0.000 0);
-
-  --border: oklch(0.323 0.007 67.6);
-  --input: oklch(0.323 0.007 67.6);
-  --ring: oklch(0.693 0.124 65.9);
-
-  --chart-1: oklch(0.693 0.124 65.9);
-  --chart-2: oklch(0.705 0.154 150);
-  --chart-3: oklch(0.832 0.145 93.2);
-  --chart-4: oklch(0.631 0.177 29.5);
-  --chart-5: oklch(0.507 0.018 76.9);
-
-  --sidebar: oklch(0.223 0.002 67.7);
-  --sidebar-foreground: oklch(0.933 0.012 79.8);
-  --sidebar-primary: oklch(0.693 0.124 65.9);
-  --sidebar-primary-foreground: oklch(0.223 0.002 67.7);
-  --sidebar-accent: oklch(0.323 0.007 67.6);
-  --sidebar-accent-foreground: oklch(0.933 0.012 79.8);
-  --sidebar-border: oklch(0.323 0.007 67.6);
-  --sidebar-ring: oklch(0.693 0.124 65.9);
-}
-
+  This is a FULL surface-ladder override, not just the primary accent: Thoth's
+  warm amber-tinted neutrals (hue ~67-80) predate the shared design language and
+  differ materially from its default cool-toned dark scale (hue ~250-260).
+  Collapsing onto the shared neutrals would be a real, uninstructed visual
+  change to an already-shipped app, so every --ds-color-* the shadcn semantic
+  surface reads (background/foreground/surface-1/2/3/border/border-strong/
+  muted-foreground, on top of primary/-foreground/-ring) is repointed at
+  Thoth's existing values below. --ds-color-surface-1 (muted/secondary) and
+  --ds-color-surface-2 (card/accent/popover) collapse thoth's five original,
+  overlapping mid-tones (card, popover, muted, accent, border/input) onto the
+  package's three-slot ladder; the one visible change from this is --accent
+  moving from the old muted tier (0.323) to the card tier (0.266) it now
+  shares with --popover, since the ladder only has one card-tier slot to
+  place both in. --ds-color-border-strong has no prior equivalent in Thoth
+  (the package introduces it); it is a modest lift over --ds-color-border,
+  interpolated the same way the shared default scale relates its own border
+  and border-strong values.
+*/
+:root,
 .dark {
-  --background: oklch(0.223 0.002 67.7);
-  --foreground: oklch(0.933 0.012 79.8);
+  --ds-color-background: oklch(0.223 0.002 67.7);
+  --ds-color-foreground: oklch(0.933 0.012 79.8);
 
-  --card: oklch(0.266 0.005 67.6);
-  --card-foreground: oklch(0.933 0.012 79.8);
+  --ds-color-surface-1: oklch(0.323 0.007 67.6);
+  --ds-color-surface-2: oklch(0.266 0.005 67.6);
+  --ds-color-surface-3: oklch(0.266 0.005 67.6);
 
-  --popover: oklch(0.266 0.005 67.6);
-  --popover-foreground: oklch(0.933 0.012 79.8);
+  --ds-color-muted-foreground: oklch(0.670 0.020 78.2);
 
-  --primary: oklch(0.693 0.124 65.9);
-  --primary-foreground: oklch(0.223 0.002 67.7);
+  --ds-color-border: oklch(0.323 0.007 67.6);
+  --ds-color-border-strong: oklch(0.403 0.009 67.6);
 
-  --secondary: oklch(0.266 0.005 67.6);
-  --secondary-foreground: oklch(0.933 0.012 79.8);
+  --ds-color-primary: oklch(0.693 0.124 65.9);
+  --ds-color-primary-foreground: oklch(0.223 0.002 67.7);
+  --ds-color-ring: oklch(0.693 0.124 65.9);
 
-  --muted: oklch(0.323 0.007 67.6);
-  --muted-foreground: oklch(0.670 0.020 78.2);
-
-  --accent: oklch(0.323 0.007 67.6);
-  --accent-foreground: oklch(0.933 0.012 79.8);
-
-  --destructive: oklch(0.631 0.177 29.5);
-  --destructive-foreground: oklch(1.000 0.000 0);
-
-  --border: oklch(0.323 0.007 67.6);
-  --input: oklch(0.323 0.007 67.6);
-  --ring: oklch(0.693 0.124 65.9);
+  /* Sidebar and chart tokens follow. @poodle64/ui ships no sidebar or chart
+     component (chrome hue and a qualitative series spread are an app's own
+     decision), so both stay Thoth-owned per 20-sveltekit-frontend.md §CSS
+     Token Standard. Thoth has no sidebar surface today (Settings.svelte's
+     nav is hand-rolled CSS, not the shadcn sidebar utilities) — these are the
+     standard's floor for the day one lands. Chart tokens ARE live (used by
+     InsightsPane) and keep their exact prior values. */
+  --sidebar: var(--ds-color-surface-1);
+  --sidebar-foreground: var(--ds-color-foreground);
+  --sidebar-primary: var(--ds-color-primary);
+  --sidebar-primary-foreground: var(--ds-color-primary-foreground);
+  --sidebar-accent: var(--ds-color-surface-2);
+  --sidebar-accent-foreground: var(--ds-color-foreground);
+  --sidebar-border: var(--ds-color-border);
+  --sidebar-ring: var(--ds-color-ring);
 
   --chart-1: oklch(0.693 0.124 65.9);
   --chart-2: oklch(0.705 0.154 150);
   --chart-3: oklch(0.832 0.145 93.2);
   --chart-4: oklch(0.631 0.177 29.5);
   --chart-5: oklch(0.507 0.018 76.9);
-
-  --sidebar: oklch(0.223 0.002 67.7);
-  --sidebar-foreground: oklch(0.933 0.012 79.8);
-  --sidebar-primary: oklch(0.693 0.124 65.9);
-  --sidebar-primary-foreground: oklch(0.223 0.002 67.7);
-  --sidebar-accent: oklch(0.323 0.007 67.6);
-  --sidebar-accent-foreground: oklch(0.933 0.012 79.8);
-  --sidebar-border: oklch(0.323 0.007 67.6);
-  --sidebar-ring: oklch(0.693 0.124 65.9);
 }
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -137,6 +88,12 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
 }
 
 @layer base {

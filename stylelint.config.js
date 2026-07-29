@@ -14,6 +14,9 @@ export default {
           'apply',
           'layer',
           'tailwind',
+          // @source — the content-scan hint that makes Tailwind compile
+          // @poodle64/ui's node_modules-hosted utility classes.
+          'source',
         ],
       },
     ],

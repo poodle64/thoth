@@ -1,15 +1,13 @@
 ---
 name: Thoth
 description: Privacy-first, offline-capable voice transcription application
-version: 2026.7.0
-status: "stub - not yet wired onto @poodle64/design-tokens"
+version: 2026.7.1
+status: "adopted @poodle64/design-tokens and @poodle64/ui (WP-125)"
 ---
 
 ## Current state
 
-Thoth uses a hand-rolled dark-only theme called **Scribe Amber**, defined entirely in `src/app.css`. The palette is built around a warm amber primary (`oklch(0.693 0.124 65.9)`), dark brown backgrounds (deepest at `oklch(0.223 0.002 67.7)`), and muted stone neutrals. All colour tokens are expressed in OKLCH and mapped to the standard shadcn-svelte token slots (`--primary`, `--background`, `--muted`, etc.), then re-exported into Tailwind v4 via `@theme inline`. The radius base is `0.5rem` (`--radius`). Fonts are the system default; Fraunces, Hanken Grotesk, and JetBrains Mono from the shared design language are not yet applied. There is no `:root` / `.dark` divergence in Thoth; both selectors carry identical values.
-
-**Open item:** The shared baseline specifies a radius base of `0.625rem` (`--ds-radius-lg`). Thoth currently uses `0.5rem`. Adoption of the shared tokens will close this drift.
+Thoth uses a dark-only theme called **Scribe Amber**, wired onto `@poodle64/design-tokens` + `@poodle64/ui` in `src/app.css`. The palette is built around a warm amber primary (`oklch(0.693 0.124 65.9)`), dark brown backgrounds (deepest at `oklch(0.223 0.002 67.7)`), and muted stone neutrals — all still expressed in OKLCH, but now as a **full surface-ladder override** of the shared `--ds-color-*` tokens rather than a hand-rolled shadcn alias layer (see the block comment at the top of `app.css` for the rationale and the one visible drift this introduced: `--accent` moved from the old muted tier to the card tier). The radius base now resolves to `var(--ds-radius-lg)` (0.625rem, up from the previous hand-rolled `0.5rem`) via `@poodle64/ui/styles.css`. Thoth has no light mode (`ModeWatcher` defaults to dark, no toggle exists), so `:root` and `.dark` carry the identical override. Fonts remain the system default; Fraunces, Hanken Grotesk, and JetBrains Mono from the shared design language are not yet applied — a follow-up, not part of this migration.
 
 ## Shared baseline
 
@@ -17,11 +15,13 @@ The household design language and binding constants live in two places:
 
 - `docs/master/design/shared-design-language.md` -- canonical source for colour space (OKLCH), radius (`--ds-radius-lg: 0.625rem`), typography (Fraunces display, Hanken Grotesk body, JetBrains Mono code), status vocabulary (success / warning / error / info / neutral), spacing, and namespace (`--ds-*`).
 - `@poodle64/design-tokens` (GitHub Packages, public) -- the compiled CSS custom-property package that projects consume. Provides the `--ds-*` token set and the wiring snippet for `app.css`.
+- `@poodle64/ui` (GitHub Packages, public) -- the shared shadcn-svelte component layer. Provides the shadcn semantic surface registration (`--card`, `--popover`, `--muted`, …) plus the composed page-chrome components.
 
-## Adoption path
+## Component adoption
 
-1. Copy `templates/DESIGN.md.template` from the `@poodle64/design-tokens` package into the repo root and fill in the project-specific fields.
-2. Install the package: `pnpm add -D @poodle64/design-tokens`.
-3. Wire `app.css` per the package's §8 snippet, replacing the hand-rolled Scribe Amber values with `var(--ds-*)` references.
-4. Migrate `--radius` from `0.5rem` to `var(--ds-radius-lg)` (0.625rem) and verify component sizing across all windows.
-5. Apply Fraunces / Hanken Grotesk / JetBrains Mono via the font wiring in the §8 snippet.
+Thoth's vendored `src/lib/components/ui/` primitives with a `@poodle64/ui` equivalent now import from the package. Three primitives stay local because the package genuinely does not ship them:
+
+- **`form`** -- deliberately excluded upstream (a Formsnap/Superforms binding layer is an application-architecture choice, not a design one; see `@poodle64/ui`'s README).
+- **`radio-group`**, **`context-menu`** -- not yet added to the shared package (no app has migrated them upstream yet); Thoth's local copies are not drift, per `20-sveltekit-frontend.md`'s "genuinely missing" carve-out.
+
+`scroll-area` was vendored but had zero importers in Thoth's codebase and was deleted outright rather than migrated.
