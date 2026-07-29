@@ -178,6 +178,9 @@ jobs:
       - name: CSS lint (stylelint)
         run: pnpm lint:css
 
+      - name: Unit tests (vitest)
+        run: pnpm test:run
+
       - name: Notify failure (ntfy infra)
         if: failure() && github.event_name != 'pull_request'
         shell: bash
