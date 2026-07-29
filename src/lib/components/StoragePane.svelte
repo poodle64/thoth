@@ -8,9 +8,9 @@
 
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { Button } from '$components/ui/button';
-  import * as Alert from '$components/ui/alert';
-  import * as AlertDialog from '$components/ui/alert-dialog';
+  import { Button } from '@poodle64/ui/button';
+  import { Alert, AlertDescription } from '@poodle64/ui/alert';
+  import * as AlertDialog from '@poodle64/ui/alert-dialog';
   import LoadingState from '$components/common/LoadingState.svelte';
   import { formatBytes } from '$lib/utils/format';
 
@@ -114,12 +114,12 @@
 {#if isLoading}
   <LoadingState message="Calculating storage usage..." />
 {:else if error}
-  <Alert.Root variant="destructive">
-    <Alert.Description class="flex items-center justify-between gap-3">
+  <Alert variant="destructive">
+    <AlertDescription class="flex items-center justify-between gap-3">
       <span>{error}</span>
       <Button variant="ghost" size="sm" onclick={loadUsage}>Retry</Button>
-    </Alert.Description>
-  </Alert.Root>
+    </AlertDescription>
+  </Alert>
 {:else if usage}
   <!-- Storage overview -->
   <section class="flex flex-col gap-4">

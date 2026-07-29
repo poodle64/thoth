@@ -1,8 +1,8 @@
 <script lang="ts">
   import type { TranscriptionRecord } from '../stores/history.svelte';
   import { historyStore } from '../stores/history.svelte';
-  import { Checkbox } from '$components/ui/checkbox';
-  import { Badge } from '$components/ui/badge';
+  import { Checkbox } from '@poodle64/ui/checkbox';
+  import { Badge } from '@poodle64/ui/badge';
   import * as ContextMenu from '$components/ui/context-menu';
   import Copy from '@lucide/svelte/icons/copy';
   import Trash2 from '@lucide/svelte/icons/trash-2';

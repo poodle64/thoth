@@ -7,15 +7,15 @@
   import { zod4 } from 'sveltekit-superforms/adapters';
   import LoadingState from '$components/common/LoadingState.svelte';
   import { dictionarySchema } from '$lib/schemas/dictionary';
-  import { Button } from '$components/ui/button';
-  import { Input } from '$components/ui/input';
-  import { Checkbox } from '$components/ui/checkbox';
-  import { Label } from '$components/ui/label';
-  import { Badge } from '$components/ui/badge';
-  import * as Table from '$components/ui/table';
+  import { Button } from '@poodle64/ui/button';
+  import { Input } from '@poodle64/ui/input';
+  import { Checkbox } from '@poodle64/ui/checkbox';
+  import { Label } from '@poodle64/ui/label';
+  import { Badge } from '@poodle64/ui/badge';
+  import * as Table from '@poodle64/ui/table';
   import * as Form from '$components/ui/form';
-  import * as Alert from '$components/ui/alert';
-  import * as AlertDialog from '$components/ui/alert-dialog';
+  import { Alert, AlertDescription } from '@poodle64/ui/alert';
+  import * as AlertDialog from '@poodle64/ui/alert-dialog';
   import Download from '@lucide/svelte/icons/download';
   import Upload from '@lucide/svelte/icons/upload';
   import Pencil from '@lucide/svelte/icons/pencil';
@@ -172,9 +172,9 @@
 
 <div class="flex min-h-0 flex-1 flex-col gap-6">
   {#if dictionaryStore.error}
-    <Alert.Root variant="destructive">
-      <Alert.Description>{dictionaryStore.error}</Alert.Description>
-    </Alert.Root>
+    <Alert variant="destructive">
+      <AlertDescription>{dictionaryStore.error}</AlertDescription>
+    </Alert>
   {/if}
 
   <form use:enhance class="shrink-0 rounded-lg border p-4">

@@ -7,10 +7,10 @@
    */
 
   import { invoke } from '@tauri-apps/api/core';
-  import { Button } from '$components/ui/button';
-  import { Switch } from '$components/ui/switch';
-  import { Textarea } from '$components/ui/textarea';
-  import { Label } from '$components/ui/label';
+  import { Button } from '@poodle64/ui/button';
+  import { Switch } from '@poodle64/ui/switch';
+  import { Textarea } from '@poodle64/ui/textarea';
+  import { Label } from '@poodle64/ui/label';
 
   /** Filter options matching the Rust FilterOptions struct */
   interface FilterOptions {

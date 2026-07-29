@@ -15,12 +15,12 @@
   import { settingsStore } from '../stores/settings.svelte';
   import { formatDuration, formatTotalDuration } from '../utils/format';
   import { getUpdaterState, checkForUpdate } from '../stores/updater.svelte';
-  import { Button } from '$components/ui/button';
-  import { Switch } from '$components/ui/switch';
-  import { Badge } from '$components/ui/badge';
-  import * as Card from '$components/ui/card';
-  import * as AlertDialog from '$components/ui/alert-dialog';
-  import * as Alert from '$components/ui/alert';
+  import { Button } from '@poodle64/ui/button';
+  import { Switch } from '@poodle64/ui/switch';
+  import { Badge } from '@poodle64/ui/badge';
+  import * as Card from '@poodle64/ui/card';
+  import * as AlertDialog from '@poodle64/ui/alert-dialog';
+  import { Alert, AlertDescription } from '@poodle64/ui/alert';
   import LoadingState from '$components/common/LoadingState.svelte';
 
   interface ModelStats {
@@ -814,9 +814,9 @@
         />
       </div>
       {#if autostartError}
-        <Alert.Root variant="destructive" class="mt-1">
-          <Alert.Description>{autostartError}</Alert.Description>
-        </Alert.Root>
+        <Alert variant="destructive" class="mt-1">
+          <AlertDescription>{autostartError}</AlertDescription>
+        </Alert>
       {/if}
       <div class="flex items-center justify-between py-1.5">
         <span class="text-sm text-muted-foreground">Show in Dock</span>
@@ -1086,9 +1086,9 @@
           />
         </div>
         {#if autostartError}
-          <Alert.Root variant="destructive" class="my-1">
-            <Alert.Description>{autostartError}</Alert.Description>
-          </Alert.Root>
+          <Alert variant="destructive" class="my-1">
+            <AlertDescription>{autostartError}</AlertDescription>
+          </Alert>
         {/if}
         <div class="autostart-row">
           <span class="status-label">Show in Dock</span>

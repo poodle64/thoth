@@ -1,10 +1,10 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { formatDuration, formatTotalDuration, formatSpeedFactor } from '../utils/format';
-  import * as Dialog from '$components/ui/dialog';
-  import * as Card from '$components/ui/card';
-  import * as Alert from '$components/ui/alert';
-  import { Skeleton } from '$components/ui/skeleton';
+  import * as Dialog from '@poodle64/ui/dialog';
+  import * as Card from '@poodle64/ui/card';
+  import { Alert, AlertDescription } from '@poodle64/ui/alert';
+  import { Skeleton } from '@poodle64/ui/skeleton';
   import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
 
   interface ModelStats {
@@ -84,10 +84,10 @@
           <Skeleton class="h-24 rounded-xl" />
         </div>
       {:else if error}
-        <Alert.Root variant="destructive">
+        <Alert variant="destructive">
           <AlertCircleIcon />
-          <Alert.Description>{error}</Alert.Description>
-        </Alert.Root>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       {:else if stats}
         <!-- Summary cards -->
         <div class="grid grid-cols-2 gap-2">

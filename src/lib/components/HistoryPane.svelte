@@ -18,11 +18,11 @@
   import { historyStore } from '../stores/history.svelte';
   import { NO_SPEECH_SENTINEL } from '../stores/pipeline.svelte';
   import { toast } from 'svelte-sonner';
-  import { Button } from '$components/ui/button';
-  import { Input } from '$components/ui/input';
-  import { Badge } from '$components/ui/badge';
-  import { Checkbox } from '$components/ui/checkbox';
-  import * as AlertDialog from '$components/ui/alert-dialog';
+  import { Button } from '@poodle64/ui/button';
+  import { Input } from '@poodle64/ui/input';
+  import { Badge } from '@poodle64/ui/badge';
+  import { Checkbox } from '@poodle64/ui/checkbox';
+  import * as AlertDialog from '@poodle64/ui/alert-dialog';
   import HistoryList from './HistoryList.svelte';
   import HistoryFilterPanel, { type FilterState } from './HistoryFilterPanel.svelte';
   import ExportDialog from './ExportDialog.svelte';

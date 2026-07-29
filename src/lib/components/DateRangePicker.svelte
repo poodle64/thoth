@@ -4,9 +4,9 @@
    * Supports preset ranges and custom date selection.
    */
 
-  import { Button } from '$components/ui/button';
-  import { Input } from '$components/ui/input';
-  import { Label } from '$components/ui/label';
+  import { Button } from '@poodle64/ui/button';
+  import { Input } from '@poodle64/ui/input';
+  import { Label } from '@poodle64/ui/label';
   import X from '@lucide/svelte/icons/x';
 
   interface Props {

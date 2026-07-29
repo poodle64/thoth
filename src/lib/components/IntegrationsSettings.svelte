@@ -3,10 +3,10 @@
   import { invoke } from '@tauri-apps/api/core';
   import { writeText } from '@tauri-apps/plugin-clipboard-manager';
   import { toast } from 'svelte-sonner';
-  import { Switch } from '$components/ui/switch';
-  import { Button } from '$components/ui/button';
-  import { Input } from '$components/ui/input';
-  import * as AlertDialog from '$components/ui/alert-dialog';
+  import { Switch } from '@poodle64/ui/switch';
+  import { Button } from '@poodle64/ui/button';
+  import { Input } from '@poodle64/ui/input';
+  import * as AlertDialog from '@poodle64/ui/alert-dialog';
   import LoggingTelemetrySettings from './LoggingTelemetrySettings.svelte';
   import Eye from '@lucide/svelte/icons/eye';
   import EyeOff from '@lucide/svelte/icons/eye-off';

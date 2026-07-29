@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Button, type ButtonProps } from "$components/ui/button/index.js";
+	import { Button, type ButtonProps } from "@poodle64/ui/button";
 
 	let { ref = $bindable(null), ...restProps }: ButtonProps = $props();
 </script>

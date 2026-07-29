@@ -2,12 +2,12 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
-  import { Button } from '$components/ui/button';
-  import { Badge } from '$components/ui/badge';
-  import { Skeleton } from '$components/ui/skeleton';
-  import * as Card from '$components/ui/card';
-  import * as AlertDialog from '$components/ui/alert-dialog';
-  import * as Alert from '$components/ui/alert';
+  import { Button } from '@poodle64/ui/button';
+  import { Badge } from '@poodle64/ui/badge';
+  import { Skeleton } from '@poodle64/ui/skeleton';
+  import * as Card from '@poodle64/ui/card';
+  import * as AlertDialog from '@poodle64/ui/alert-dialog';
+  import { Alert, AlertDescription } from '@poodle64/ui/alert';
   import { formatBytes } from '$lib/utils/format';
 
   interface ModelInfo {
@@ -308,12 +308,12 @@
       <Skeleton class="h-[88px] w-full rounded-lg" />
     </div>
   {:else if error}
-    <Alert.Root variant="destructive">
-      <Alert.Description class="flex items-center justify-between gap-3">
+    <Alert variant="destructive">
+      <AlertDescription class="flex items-center justify-between gap-3">
         <span>{error}</span>
         <Button variant="ghost" size="sm" onclick={() => (error = null)}>Dismiss</Button>
-      </Alert.Description>
-    </Alert.Root>
+      </AlertDescription>
+    </Alert>
   {/if}
 
   <div class="flex flex-col gap-3">

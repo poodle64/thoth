@@ -2,7 +2,7 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { Toaster } from '$components/ui/sonner';
+  import { Toaster } from '@poodle64/ui/sonner';
   import { ModeWatcher } from 'mode-watcher';
   import type { Snippet } from 'svelte';
   import { installTauriMock } from '$lib/dev/tauri-mock';

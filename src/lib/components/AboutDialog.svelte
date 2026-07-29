@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import { getVersion } from '@tauri-apps/api/app';
   import { invoke } from '@tauri-apps/api/core';
-  import * as Dialog from '$components/ui/dialog';
-  import { Button } from '$components/ui/button';
+  import * as Dialog from '@poodle64/ui/dialog';
+  import { Button } from '@poodle64/ui/button';
 
   interface Props {
     open: boolean;

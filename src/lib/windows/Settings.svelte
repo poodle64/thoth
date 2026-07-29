@@ -39,8 +39,8 @@
   import { pipelineStore } from '../stores/pipeline.svelte';
   import { shortcutsStore, type ShortcutInfo } from '../stores/shortcuts.svelte';
   import { soundStore } from '../stores/sound.svelte';
-  import { Button } from '$components/ui/button';
-  import { Switch } from '$components/ui/switch';
+  import { Button } from '@poodle64/ui/button';
+  import { Switch } from '@poodle64/ui/switch';
   import WindowControls from '../components/WindowControls.svelte';
 
   /** Settings pane definition */

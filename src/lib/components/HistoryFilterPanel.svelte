@@ -6,10 +6,10 @@
    * enhanced status filtering for transcription records.
    */
 
-  import { Button } from '$components/ui/button';
-  import { Input } from '$components/ui/input';
-  import { Label } from '$components/ui/label';
-  import { Separator } from '$components/ui/separator';
+  import { Button } from '@poodle64/ui/button';
+  import { Input } from '@poodle64/ui/input';
+  import { Label } from '@poodle64/ui/label';
+  import { Separator } from '@poodle64/ui/separator';
   import Search from '@lucide/svelte/icons/search';
   import X from '@lucide/svelte/icons/x';
   import Star from '@lucide/svelte/icons/star';

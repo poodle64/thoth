@@ -3,17 +3,17 @@
   import { onMount } from 'svelte';
   import { configStore } from '../stores/config.svelte';
   import { toast } from 'svelte-sonner';
-  import { Button } from '$components/ui/button';
-  import * as Select from '$components/ui/select';
-  import * as Dialog from '$components/ui/dialog';
-  import * as Alert from '$components/ui/alert';
+  import { Button } from '@poodle64/ui/button';
+  import * as Select from '@poodle64/ui/select';
+  import * as Dialog from '@poodle64/ui/dialog';
+  import { Alert, AlertDescription } from '@poodle64/ui/alert';
   import * as Form from '$components/ui/form';
   import { Select as SelectPrimitive } from 'bits-ui';
-  import { Input } from '$components/ui/input';
-  import { Textarea } from '$components/ui/textarea';
-  import { Switch } from '$components/ui/switch';
-  import { Badge } from '$components/ui/badge';
-  import { Label } from '$components/ui/label';
+  import { Input } from '@poodle64/ui/input';
+  import { Textarea } from '@poodle64/ui/textarea';
+  import { Switch } from '@poodle64/ui/switch';
+  import { Badge } from '@poodle64/ui/badge';
+  import { Label } from '@poodle64/ui/label';
   import LoadingState from '$components/common/LoadingState.svelte';
   import AlertCircle from '@lucide/svelte/icons/alert-circle';
   import Eye from '@lucide/svelte/icons/eye';
@@ -442,10 +442,10 @@
         </div>
 
         {#if error}
-          <Alert.Root variant="destructive">
+          <Alert variant="destructive">
             <AlertCircle class="size-4" />
-            <Alert.Description>{error}</Alert.Description>
-          </Alert.Root>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         {/if}
 
         <!-- Model (text input + chip picker) -->
@@ -530,10 +530,10 @@
         </div>
 
         {#if error}
-          <Alert.Root variant="destructive">
+          <Alert variant="destructive">
             <AlertCircle class="size-4" />
-            <Alert.Description>{error}</Alert.Description>
-          </Alert.Root>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         {/if}
 
         <!-- Model selector -->

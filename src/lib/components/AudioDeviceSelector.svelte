@@ -3,9 +3,9 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { settingsStore } from '../stores/settings.svelte';
-  import { Button } from '$components/ui/button';
-  import * as Select from '$components/ui/select';
-  import * as Alert from '$components/ui/alert';
+  import { Button } from '@poodle64/ui/button';
+  import * as Select from '@poodle64/ui/select';
+  import { Alert, AlertDescription } from '@poodle64/ui/alert';
   import { Select as SelectPrimitive } from 'bits-ui';
   import RefreshCw from '@lucide/svelte/icons/refresh-cw';
   import Mic from '@lucide/svelte/icons/mic';
@@ -246,10 +246,10 @@
   </div>
 
   {#if settingsStore.error}
-    <Alert.Root variant="destructive">
+    <Alert variant="destructive">
       <AlertCircle class="size-4" />
-      <Alert.Description>{settingsStore.error}</Alert.Description>
-    </Alert.Root>
+      <AlertDescription>{settingsStore.error}</AlertDescription>
+    </Alert>
   {/if}
 </div>
 

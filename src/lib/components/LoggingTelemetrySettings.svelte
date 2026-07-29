@@ -3,12 +3,12 @@
   import { onMount } from 'svelte';
   import { configStore } from '../stores/config.svelte';
   import { toast } from 'svelte-sonner';
-  import { Switch } from '$components/ui/switch';
-  import { Button } from '$components/ui/button';
-  import { Input } from '$components/ui/input';
-  import { Label } from '$components/ui/label';
-  import { Badge } from '$components/ui/badge';
-  import * as Tooltip from '$components/ui/tooltip';
+  import { Switch } from '@poodle64/ui/switch';
+  import { Button } from '@poodle64/ui/button';
+  import { Input } from '@poodle64/ui/input';
+  import { Label } from '@poodle64/ui/label';
+  import { Badge } from '@poodle64/ui/badge';
+  import * as Tooltip from '@poodle64/ui/tooltip';
   import Info from '@lucide/svelte/icons/info';
 
   // The API mask sentinel — must match LOKI_AUTH_MASK in config.rs.

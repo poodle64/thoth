@@ -4,7 +4,7 @@
    * Reads audio files from disk via Tauri fs plugin, decodes via Web Audio API.
    */
   import { readFile } from '@tauri-apps/plugin-fs';
-  import { Button } from '$components/ui/button';
+  import { Button } from '@poodle64/ui/button';
 
   interface Props {
     /** Absolute filesystem path to the WAV file */

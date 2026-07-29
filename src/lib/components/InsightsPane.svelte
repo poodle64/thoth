@@ -21,10 +21,10 @@
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { toast } from 'svelte-sonner';
-  import * as Card from '$components/ui/card';
-  import * as AlertDialog from '$components/ui/alert-dialog';
-  import { Button } from '$components/ui/button';
-  import { Checkbox } from '$components/ui/checkbox';
+  import * as Card from '@poodle64/ui/card';
+  import * as AlertDialog from '@poodle64/ui/alert-dialog';
+  import { Button } from '@poodle64/ui/button';
+  import { Checkbox } from '@poodle64/ui/checkbox';
   import { formatBytes, formatTotalDuration } from '../utils/format';
   import { friendlyModelName } from '../utils/model-name';
   import Flame from '@lucide/svelte/icons/flame';

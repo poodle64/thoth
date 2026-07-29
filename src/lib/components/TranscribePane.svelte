@@ -3,9 +3,9 @@
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { writeText } from '@tauri-apps/plugin-clipboard-manager';
   import { pipelineStore } from '../stores/pipeline.svelte';
-  import { Button } from '$components/ui/button';
-  import * as Card from '$components/ui/card';
-  import * as Alert from '$components/ui/alert';
+  import { Button } from '@poodle64/ui/button';
+  import * as Card from '@poodle64/ui/card';
+  import { Alert, AlertDescription } from '@poodle64/ui/alert';
   import Upload from '@lucide/svelte/icons/upload';
   import FileAudio from '@lucide/svelte/icons/file-audio';
   import Copy from '@lucide/svelte/icons/copy';
@@ -183,10 +183,10 @@
 {/if}
 
 {#if hasError}
-  <Alert.Root variant="destructive" class="mt-4">
-    <Alert.Description class="flex items-center justify-between gap-3">
+  <Alert variant="destructive" class="mt-4">
+    <AlertDescription class="flex items-center justify-between gap-3">
       <span>{pipelineStore.error}</span>
       <Button variant="ghost" size="sm" onclick={handleReset}>Dismiss</Button>
-    </Alert.Description>
-  </Alert.Root>
+    </AlertDescription>
+  </Alert>
 {/if}

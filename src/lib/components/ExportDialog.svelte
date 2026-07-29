@@ -1,12 +1,12 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { save } from '@tauri-apps/plugin-dialog';
-  import * as Dialog from '$components/ui/dialog';
-  import { Button } from '$components/ui/button';
-  import { Checkbox } from '$components/ui/checkbox';
-  import { Input } from '$components/ui/input';
-  import { Label } from '$components/ui/label';
-  import * as Alert from '$components/ui/alert';
+  import * as Dialog from '@poodle64/ui/dialog';
+  import { Button } from '@poodle64/ui/button';
+  import { Checkbox } from '@poodle64/ui/checkbox';
+  import { Input } from '@poodle64/ui/input';
+  import { Label } from '@poodle64/ui/label';
+  import { Alert, AlertDescription } from '@poodle64/ui/alert';
   import * as RadioGroup from '$components/ui/radio-group';
   import AlertCircleIcon from '@lucide/svelte/icons/alert-circle';
 
@@ -245,16 +245,16 @@
 
       <!-- Status messages -->
       {#if exportError}
-        <Alert.Root variant="destructive">
+        <Alert variant="destructive">
           <AlertCircleIcon />
-          <Alert.Description>{exportError}</Alert.Description>
-        </Alert.Root>
+          <AlertDescription>{exportError}</AlertDescription>
+        </Alert>
       {/if}
 
       {#if exportSuccess}
-        <Alert.Root>
-          <Alert.Description>{exportSuccess}</Alert.Description>
-        </Alert.Root>
+        <Alert>
+          <AlertDescription>{exportSuccess}</AlertDescription>
+        </Alert>
       {/if}
     </div>
 

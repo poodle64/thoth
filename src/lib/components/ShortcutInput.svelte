@@ -16,7 +16,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { formatForDisplay, validateShortcut } from '../stores/shortcuts.svelte';
-  import { Button } from '$components/ui/button';
+  import { Button } from '@poodle64/ui/button';
   import X from '@lucide/svelte/icons/x';
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 
