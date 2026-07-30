@@ -12,6 +12,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "lint:css": "stylelint \"src/**/*.{css,svelte}\"",
+    "lint:css:fix": "stylelint --fix \"src/**/*.css\"",
     "test": "vitest",
     "test:run": "vitest run",
     "tauri": "tauri"
