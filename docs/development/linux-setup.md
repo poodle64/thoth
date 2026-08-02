@@ -57,6 +57,71 @@ A packaged `.deb` declares these; if you run a raw binary, install them yourself
 - `xdg-utils` — opens external links and settings panels (`xdg-open`).
 - `libayatana-appindicator3-1` — the system tray icon (the modern AppIndicator runtime).
 
+## NixOS and home-manager (Nix flake)
+
+The flake exposes NixOS and home-manager modules (issue #117) so Thoth can be installed declaratively. The packaged binary is already wrapped with its runtime dependencies (wl-clipboard, wtype, the CUDA/Vulkan libraries and GTK resources), so no extra udev rules or system packages are needed.
+
+### NixOS
+
+```nix
+{
+  inputs = {
+    thoth.url = "github:poodle64/thoth";
+  };
+
+  outputs = { self, nixpkgs, ... }@inputs: {
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      modules = [
+        inputs.thoth.nixosModules.default
+        {
+          programs.thoth.enable = true;
+        }
+      ];
+    };
+  };
+}
+```
+
+The `programs.thoth` module installs Thoth for every user on the system. No autostart option is provided at the system level — Thoth is a per-user tray application, so autostart belongs in the home-manager module (or Thoth's own "launch at login" setting).
+
+### home-manager (Linux)
+
+```nix
+{
+  homeConfigurations.myhost = home-manager.lib.homeManagerConfiguration {
+    modules = [
+      inputs.thoth.homeManagerModules.default
+      {
+        services.thoth.enable = true;
+      }
+    ];
+  };
+}
+```
+
+The `services.thoth` module runs Thoth as a systemd user service. Options:
+
+- `services.thoth.package` — the Thoth package (defaults to the flake's build).
+- `services.thoth.autostart` — whether to start Thoth with your graphical session (default `true`). Set it to `false` and the service stays available for manual start with `systemctl --user start thoth`.
+
+### home-manager (macOS)
+
+```nix
+{
+  homeConfigurations.myhost = home-manager.lib.homeManagerConfiguration {
+    modules = [
+      inputs.thoth.homeManagerModules.darwin
+      {
+        services.thoth.enable = true;
+        services.thoth.package = /* your darwin build */;
+      }
+    ];
+  };
+}
+```
+
+The darwin module runs Thoth as a launchd agent in the GUI session (`services.thoth.autostart` maps to `RunAtLoad`). Note the flake does not yet build a darwin package (`meta.platforms` is `x86_64-linux` only), so on macOS you must supply `services.thoth.package` yourself — for example, a Nix package wrapping your `pnpm tauri build` output (e.g. via `pkgs.callPackage`).
+
 ## AppImage and GPU
 
 The Linux AppImage is built with Vulkan enabled, but it does **not** bundle the Vulkan loader or GPU drivers (`bundleMediaFramework` bundles GStreamer media framework libraries, not GPU drivers — those are host-and-vendor-specific and cannot be portably bundled). For GPU-accelerated transcription from the AppImage, the host must have `libvulkan1` and a working GPU Vulkan driver installed. Without them the AppImage runs transcription on CPU.
