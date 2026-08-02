@@ -383,5 +383,41 @@
 
         devShells.default = mkThothShell { };
         devShells.cuda = mkThothShell { gpuParakeet = true; };
-      });
+      })
+    // {
+      # NixOS and home-manager modules (issue #117). Defined outside
+      # eachDefaultSystem: they are system-agnostic, and the package default
+      # is wired lazily via `self.packages` when a user's configuration
+      # evaluates, so `inputs.thoth.nixosModules.default` gives a working
+      # declarative install out of the box.
+      nixosModules.default = {
+        lib,
+        pkgs,
+        ...
+      }: {
+        imports = [ ./nix/module.nix ];
+        programs.thoth.package =
+          lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.thoth;
+      };
+
+      homeManagerModules.default = {
+        lib,
+        pkgs,
+        ...
+      }: {
+        imports = [ ./nix/hm-module.nix ];
+        services.thoth.package =
+          lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.thoth;
+      };
+
+      # macOS home-manager module. Thoth does not yet build for darwin through
+      # this flake (the package is meta.platforms x86_64-linux only), so there
+      # is no package default to wire — darwin users must set
+      # `services.thoth.package` to a darwin-capable build themselves.
+      homeManagerModules.darwin = {
+        ...
+      }: {
+        imports = [ ./nix/hm-module-darwin.nix ];
+      };
+    };
 }
