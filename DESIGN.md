@@ -13,7 +13,7 @@ Thoth uses a dark-only theme called **Scribe Amber**, wired onto `@poodle64/desi
 
 The household design language and binding constants live in two places:
 
-- `docs/master/design/shared-design-language.md` -- canonical source for colour space (OKLCH), radius (`--ds-radius-lg: 0.625rem`), typography (Fraunces display, Hanken Grotesk body, JetBrains Mono code), status vocabulary (success / warning / error / info / neutral), spacing, and namespace (`--ds-*`).
+- `docs/master/reference/guide-shared-design-language.md` -- canonical source for colour space (OKLCH), radius (`--ds-radius-lg: 0.625rem`), typography (Fraunces display, Hanken Grotesk body, JetBrains Mono code), status vocabulary (success / warning / error / info / neutral), spacing, and namespace (`--ds-*`).
 - `@poodle64/design-tokens` (GitHub Packages, public) -- the compiled CSS custom-property package that projects consume. Provides the `--ds-*` token set and the wiring snippet for `app.css`.
 - `@poodle64/ui` (GitHub Packages, public) -- the shared shadcn-svelte component layer. Provides the shadcn semantic surface registration (`--card`, `--popover`, `--muted`, …) plus the composed page-chrome components.
 
