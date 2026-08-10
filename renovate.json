@@ -1,0 +1,39 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "dependencyDashboard": true,
+  "labels": [
+    "dependencies"
+  ],
+  "timezone": "Australia/Brisbane",
+  "schedule": [
+    "after 10pm every weekday",
+    "before 5am every day"
+  ],
+  "prConcurrentLimit": 3,
+  "prHourlyLimit": 2,
+  "packageRules": [
+    {
+      "description": "Batch non-major updates into one PR to keep the noise low.",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ],
+      "groupName": "non-major dependencies"
+    },
+    {
+      "description": "Shared design packages: manual review required — token and component shape changes reach every route.",
+      "matchPackageNames": [
+        "@poodle64/design-tokens",
+        "@poodle64/ui"
+      ],
+      "rangeStrategy": "bump",
+      "automerge": false
+    }
+  ],
+  "npmrc": "@poodle64:registry=https://npm.pkg.github.com/"
+}
