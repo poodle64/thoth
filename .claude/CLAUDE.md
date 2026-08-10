@@ -1,40 +1,20 @@
 # Thoth
 
-Privacy-first, offline-capable voice transcription application.
+Privacy-first, offline-capable voice-to-text for macOS and Linux: record on a hotkey, transcribe locally, paste at the cursor — no cloud round-trip on the core path.
 
-## Dev Environment
+## Scope
 
-- Environment: `thoth` (nix flake)
-- Framework: Tauri 2.0 (Rust backend, Svelte 5 frontend)
-- Minimum macOS: 14.0 (Sonoma)
-- Dev server: port 1422, HMR: port 1423
+- Does: capture audio from any input device, transcribe it locally and offline, optionally enhance the result with a local Ollama model, and paste it at the cursor in whatever app has focus.
+- Does not: sync anything to the cloud, change the system's default audio device, or require network access for the transcription path itself.
+- Paste-at-cursor must restore the user's prior clipboard contents afterward — never leave the transcription sitting in the clipboard.
+- Recording toggles on one global hotkey (press to start, press again to stop); the hotkey itself is user-configurable, not hardcoded.
 
-## Stack
+## Running it
 
-- **UI**: Svelte 5 with runes, Tailwind CSS
-- **Audio**: cpal for cross-platform capture
-- **Transcription**: whisper.cpp with Metal GPU (primary), Sherpa-ONNX with Parakeet (fallback)
-- **AI Enhancement**: Ollama (local LLM)
-- **Persistence**: SQLite with rusqlite
-- **Windows**: Multi-window (main, history, recording indicator)
+- `direnv allow` once per checkout — `.envrc` provisions the pinned Rust/Node toolchain from `flake.nix`; skip it and `cargo`/`pnpm` fall back to whatever's on `PATH`.
+- Rust commands (`cargo test`, `cargo clippy`) run from `src-tauri/`, not the repo root.
 
-## Commands
+## Pitfalls
 
-```bash
-pnpm install        # Install dependencies
-pnpm tauri dev      # Development build
-pnpm tauri build    # Production build
-cargo test          # Run Rust tests (from src-tauri/)
-```
-
-## Key Reminders
-
-- Use Svelte 5 runes ($state, $derived, $effect) not stores
-- Rust backend handles all audio and transcription
-- Frontend communicates via Tauri commands and events
-
-## Sources of Truth
-
-- **Rules**: `.claude/rules/`
-- **Development docs**: `docs/development/`
-- **Product docs**: `docs/product/`
+- The Apple Neural Engine backend (FluidAudio, macOS/Apple Silicon only) shells out to `swift` at build time (`build.rs`) and is safe to compile everywhere only because the fork itself gates on `target_os = "macos", target_arch = "aarch64"` (`Cargo.toml`) — don't drop that gate, and don't assume a new native backend crate is cross-platform-safe without checking the same.
+- Linux has no Metal path: GPU acceleration is a choice of mutually exclusive Cargo features (`vulkan`/`cuda`/`hipblas`), each requiring `--no-default-features` — read `docs/development/linux-setup.md` before touching the Linux build.
