@@ -13,11 +13,11 @@ importers:
   .:
     dependencies:
       '@poodle64/design-tokens':
-        specifier: 2026.7.3
-        version: 2026.7.3
+        specifier: ^2026.8.0
+        version: 2026.8.0
       '@poodle64/ui':
-        specifier: 2026.7.8
-        version: 2026.7.8(bits-ui@2.18.1(@internationalized/date@3.12.2)(@sveltejs/kit@2.63.0(@sveltejs/vite-plugin-svelte@7.1.2(svelte@5.56.2)(vite@8.0.16(esbuild@0.27.3)(jiti@2.6.1)))(svelte@5.56.2)(typescript@6.0.3)(vite@8.0.16(esbuild@0.27.3)(jiti@2.6.1)))(svelte@5.56.2))(mode-watcher@1.1.0(svelte@5.56.2))(svelte-sonner@1.1.1(svelte@5.56.2))(svelte@5.56.2)(tailwindcss@4.3.0)
+        specifier: ^2026.8.7
+        version: 2026.8.7(bits-ui@2.18.1(@internationalized/date@3.12.2)(@sveltejs/kit@2.63.0(@sveltejs/vite-plugin-svelte@7.1.2(svelte@5.56.2)(vite@8.0.16(esbuild@0.27.3)(jiti@2.6.1)))(svelte@5.56.2)(typescript@6.0.3)(vite@8.0.16(esbuild@0.27.3)(jiti@2.6.1)))(svelte@5.56.2))(mode-watcher@1.1.0(svelte@5.56.2))(svelte-sonner@1.1.1(svelte@5.56.2))(svelte@5.56.2)(tailwindcss@4.3.0)
       '@tauri-apps/api':
         specifier: 2.11.0
         version: 2.11.0
@@ -501,11 +501,11 @@ packages:
   '@polka/url@1.0.0-next.29':
     resolution: {integrity: sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww==}
 
-  '@poodle64/design-tokens@2026.7.3':
-    resolution: {integrity: sha512-NOCeYkd3wpHFUyqYOyH24uhSiwJDCN0qpk6hapmKeLkLCHnJbtVl8XgzOTJVsIXhIcWeydoL88Z8Wu+ImU7daA==, tarball: https://npm.pkg.github.com/download/@poodle64/design-tokens/2026.7.3/f596881c8aa86c2bfaf422d98faa8a0ea84d926c}
+  '@poodle64/design-tokens@2026.8.0':
+    resolution: {integrity: sha512-Hq6UeFpEzhp2Ch7BXUWzcz9nlPaQnsK5YZghgYRKF2D9qWlczhlS0wtMsDqKOTzy1yonJ5WcbMuabbgljxfXEQ==}
 
-  '@poodle64/ui@2026.7.8':
-    resolution: {integrity: sha512-bbYz4U9DHBwvuIp0WThIs1KFrc/kducjiYsIsX02F0Ef6KRNFwD4069VKP2VOanyRXkk0jjxeCBEiD7q2qI4YQ==, tarball: https://npm.pkg.github.com/download/@poodle64/ui/2026.7.8/7123cde8b0fa0437488c9c7833682d7b7a9ad29e}
+  '@poodle64/ui@2026.8.7':
+    resolution: {integrity: sha512-c9eO6VaCUhFcnbSRZ9tW1JoyKqkQINhCdgnA1VdC1o1kHhvz6l9A1qj1iU7b23DZqz4Cp3KYzjpuBbpjQPZhSg==}
     peerDependencies:
       bits-ui: ^2.18.1
       mode-watcher: ^1.1.0
@@ -2410,9 +2410,9 @@ snapshots:
 
   '@polka/url@1.0.0-next.29': {}
 
-  '@poodle64/design-tokens@2026.7.3': {}
+  '@poodle64/design-tokens@2026.8.0': {}
 
-  '@poodle64/ui@2026.7.8(bits-ui@2.18.1(@internationalized/date@3.12.2)(@sveltejs/kit@2.63.0(@sveltejs/vite-plugin-svelte@7.1.2(svelte@5.56.2)(vite@8.0.16(esbuild@0.27.3)(jiti@2.6.1)))(svelte@5.56.2)(typescript@6.0.3)(vite@8.0.16(esbuild@0.27.3)(jiti@2.6.1)))(svelte@5.56.2))(mode-watcher@1.1.0(svelte@5.56.2))(svelte-sonner@1.1.1(svelte@5.56.2))(svelte@5.56.2)(tailwindcss@4.3.0)':
+  '@poodle64/ui@2026.8.7(bits-ui@2.18.1(@internationalized/date@3.12.2)(@sveltejs/kit@2.63.0(@sveltejs/vite-plugin-svelte@7.1.2(svelte@5.56.2)(vite@8.0.16(esbuild@0.27.3)(jiti@2.6.1)))(svelte@5.56.2)(typescript@6.0.3)(vite@8.0.16(esbuild@0.27.3)(jiti@2.6.1)))(svelte@5.56.2))(mode-watcher@1.1.0(svelte@5.56.2))(svelte-sonner@1.1.1(svelte@5.56.2))(svelte@5.56.2)(tailwindcss@4.3.0)':
     dependencies:
       '@lucide/svelte': 1.27.0(svelte@5.56.2)
       '@tanstack/table-core': 8.21.3
