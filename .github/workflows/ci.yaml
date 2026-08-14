@@ -164,13 +164,14 @@ jobs:
           # field above and shells out to the pnpm binary to resolve the
           # store path.
           cache: 'pnpm'
-          registry-url: 'https://npm.pkg.github.com'
-          scope: '@poodle64'
+          # No registry-url/scope: @poodle64/design-tokens and @poodle64/ui are
+          # public on registry.npmjs.org, so the default registry serves them with
+          # no credential. Setting registry-url here writes an .npmrc pointing the
+          # scope at GitHub Packages, which then 404s every published version
+          # (2026-08-14).
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Type-check (svelte-check)
         run: pnpm check
