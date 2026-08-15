@@ -91,6 +91,9 @@ pub struct ModelInfo {
     pub model_type: String,
     /// Whether this model's backend is available in the current build
     pub backend_available: bool,
+    /// Human-readable accelerator for this build and platform, e.g.
+    /// "whisper.cpp (Vulkan GPU)". Derived — never hardcode this in the frontend.
+    pub accelerator: String,
 }
 
 /// Cached manifest with timestamp
@@ -351,6 +354,40 @@ pub fn is_backend_available(model_type: &str) -> bool {
     }
 }
 
+/// Human-readable accelerator for a model type, reflecting the host platform and
+/// the compiled feature set.
+///
+/// These strings used to be hardcoded for macOS in the frontend and shown
+/// verbatim everywhere (#129), so a Linux CUDA+Vulkan build advertised
+/// "whisper.cpp (Metal GPU)" — an accelerator that cannot exist on the platform —
+/// and "Sherpa-ONNX (CPU)" for a build that links CUDA. Derived here because Rust
+/// is where the cfg ladder lives; `GpuBackendType::compiled()` is already the
+/// single definition of which GPU backend this build carries.
+pub fn accelerator_label(model_type: &str) -> String {
+    use crate::platform::GpuBackendType;
+
+    match model_type {
+        "whisper_ggml" => match GpuBackendType::compiled() {
+            GpuBackendType::Cpu => "whisper.cpp (CPU)".to_string(),
+            gpu => format!("whisper.cpp ({gpu} GPU)"),
+        },
+        // parakeet-cuda links a CUDA-enabled sherpa-onnx; the recognizer requests
+        // the CUDA provider and falls back to CPU if the EP is missing at runtime,
+        // which is why this says CUDA rather than promising it.
+        "nemo_transducer" => {
+            if cfg!(feature = "parakeet-cuda") {
+                "Sherpa-ONNX (CUDA)".to_string()
+            } else {
+                "Sherpa-ONNX (CPU)".to_string()
+            }
+        }
+        // CoreML/ANE only exists on macOS; the model is marked unavailable
+        // elsewhere, so the label never misleads.
+        "fluidaudio_coreml" => "Apple Neural Engine".to_string(),
+        other => other.to_string(),
+    }
+}
+
 /// Read the persisted version of an installed model, if present.
 ///
 /// Returns `None` when the model predates version tracking or is not installed.
@@ -464,6 +501,7 @@ pub fn to_model_info(remote: &RemoteModelInfo, selected_id: Option<&str>) -> Mod
             &remote.version,
         ),
         selected,
+        accelerator: accelerator_label(&remote.model_type),
         model_type: remote.model_type.clone(),
         backend_available,
     }
@@ -844,6 +882,103 @@ mod tests {
                     info.id
                 );
             }
+        }
+    }
+
+    /// Accelerator text must describe the build actually running, not macOS (#129).
+    ///
+    /// Asserted as properties of the compiled cfg rather than fixed strings, so
+    /// the test is meaningful on every feature combination CI builds.
+    #[test]
+    fn accelerator_label_tracks_platform_and_features() {
+        let whisper = accelerator_label("whisper_ggml");
+        assert!(
+            whisper.contains("whisper.cpp"),
+            "whisper_ggml should name its runtime: {whisper}"
+        );
+
+        // Metal exists only on macOS. This is the reported Linux symptom.
+        #[cfg(not(target_os = "macos"))]
+        assert!(
+            !whisper.contains("Metal"),
+            "advertised Metal on a non-macOS build: {whisper}"
+        );
+        #[cfg(target_os = "macos")]
+        assert!(
+            whisper.contains("Metal"),
+            "macOS build should report Metal: {whisper}"
+        );
+
+        // The GPU feature compiled in must be the one named.
+        #[cfg(all(not(target_os = "macos"), feature = "vulkan"))]
+        assert!(
+            whisper.contains("Vulkan"),
+            "vulkan build should report Vulkan: {whisper}"
+        );
+        #[cfg(all(not(target_os = "macos"), feature = "cuda"))]
+        assert!(
+            whisper.contains("CUDA"),
+            "cuda build should report CUDA: {whisper}"
+        );
+        #[cfg(all(
+            not(target_os = "macos"),
+            not(feature = "vulkan"),
+            not(feature = "cuda"),
+            not(feature = "hipblas")
+        ))]
+        assert!(
+            whisper.contains("CPU"),
+            "CPU-only build should report CPU: {whisper}"
+        );
+
+        // Always asserted, so this binding is used on every feature combination.
+        // CI's Linux leg builds `--no-default-features --features vulkan`, i.e.
+        // with no parakeet feature at all; without an unconditional assertion
+        // both cfg arms below vanish and `-D warnings` fails on the unused
+        // binding rather than on anything real.
+        let parakeet = accelerator_label("nemo_transducer");
+        assert!(
+            parakeet.contains("Sherpa-ONNX"),
+            "nemo_transducer should name its runtime: {parakeet}"
+        );
+
+        // A CUDA-linked sherpa-onnx must not be described as CPU.
+        #[cfg(feature = "parakeet-cuda")]
+        assert!(
+            parakeet.contains("CUDA") && !parakeet.contains("CPU"),
+            "parakeet-cuda build claims CPU: {parakeet}"
+        );
+        #[cfg(all(feature = "parakeet", not(feature = "parakeet-cuda")))]
+        assert!(
+            parakeet.contains("CPU"),
+            "plain parakeet build should report CPU: {parakeet}"
+        );
+
+        assert_eq!(
+            accelerator_label("fluidaudio_coreml"),
+            "Apple Neural Engine"
+        );
+        // Unknown types fall back to the raw type rather than inventing hardware.
+        assert_eq!(accelerator_label("something_new"), "something_new");
+    }
+
+    /// Every model in the real manifest gets a non-empty accelerator, so the UI
+    /// never renders a blank detail row.
+    #[test]
+    fn every_bundled_model_has_an_accelerator() {
+        for model in get_fallback_manifest().models {
+            let info = to_model_info(&model, None);
+            assert!(
+                !info.accelerator.is_empty(),
+                "{} has no accelerator label",
+                info.id
+            );
+            #[cfg(not(target_os = "macos"))]
+            assert!(
+                !info.accelerator.contains("Metal"),
+                "{} advertises Metal on a non-macOS build",
+                info.id
+            );
         }
     }
 
