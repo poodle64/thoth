@@ -369,7 +369,51 @@ fn is_update_available(downloaded: bool, installed: Option<&str>, manifest_versi
     downloaded && installed.map(|v| v != manifest_version).unwrap_or(false)
 }
 
+/// Resolve which model is actually active, given the configured selection.
+///
+/// `configured` is `transcription.model_id` from config, which is `None` on a
+/// fresh install and can also name a model this build cannot run (a config
+/// copied from macOS to Linux, or a feature dropped from the build).
+///
+/// Resolution order, all filtered on `is_backend_available`:
+///
+/// 1. the configured model, if this build can run it;
+/// 2. otherwise the first recommended model this build can run;
+/// 3. otherwise the first model this build can run;
+/// 4. otherwise `None` — nothing is active rather than something unusable.
+///
+/// Step 2 is the fix for #128. Selection previously fell back to
+/// `remote.recommended` alone, and the recommended model
+/// (`fluidaudio-parakeet-tdt-coreml`) is flagged unconditionally while its
+/// backend is gated on `all(target_os = "macos", feature = "fluidaudio")`. On a
+/// Linux build that produced a model showing an `Active` badge and an
+/// `Unavailable` button simultaneously — the app had selected a model it could
+/// not possibly run.
+pub fn resolve_selected_id<'a>(
+    models: &'a [RemoteModelInfo],
+    configured: Option<&'a str>,
+) -> Option<&'a str> {
+    let runnable = |m: &&'a RemoteModelInfo| is_backend_available(&m.model_type);
+
+    if let Some(id) = configured
+        && let Some(m) = models.iter().find(|m| m.id == id).filter(runnable)
+    {
+        return Some(m.id.as_str());
+    }
+
+    models
+        .iter()
+        .find(|m| m.recommended && runnable(m))
+        .or_else(|| models.iter().find(runnable))
+        .map(|m| m.id.as_str())
+}
+
 /// Convert remote model info to frontend model info
+///
+/// `selected_id` should come from [`resolve_selected_id`]. The `selected` flag is
+/// additionally gated on `backend_available` here, so the invariant "a model
+/// whose backend is unavailable can never be Active" holds even if a caller
+/// passes an unresolved id.
 pub fn to_model_info(remote: &RemoteModelInfo, selected_id: Option<&str>) -> ModelInfo {
     let downloaded = is_model_downloaded(remote);
     let disk_size = if downloaded {
@@ -378,9 +422,10 @@ pub fn to_model_info(remote: &RemoteModelInfo, selected_id: Option<&str>) -> Mod
         None
     };
 
-    let selected = selected_id
-        .map(|id| id == remote.id)
-        .unwrap_or(remote.recommended);
+    // Gated on backend availability, not just id equality: a model this build
+    // cannot run must never carry the Active badge (#128).
+    let backend_available = is_backend_available(&remote.model_type);
+    let selected = backend_available && selected_id == Some(remote.id.as_str());
 
     // For FluidAudio models, show the actual cache directory
     let path = if remote.model_type == "fluidaudio_coreml" {
@@ -420,7 +465,7 @@ pub fn to_model_info(remote: &RemoteModelInfo, selected_id: Option<&str>) -> Mod
         ),
         selected,
         model_type: remote.model_type.clone(),
-        backend_available: is_backend_available(&remote.model_type),
+        backend_available,
     }
 }
 
@@ -461,10 +506,12 @@ pub async fn fetch_model_manifest(force_refresh: bool) -> Result<Vec<ModelInfo>,
         .ok()
         .and_then(|c| c.transcription.model_id.clone());
 
+    let resolved_id = resolve_selected_id(&manifest.models, selected_id.as_deref());
+
     let models: Vec<ModelInfo> = manifest
         .models
         .iter()
-        .map(|m| to_model_info(m, selected_id.as_deref()))
+        .map(|m| to_model_info(m, resolved_id))
         .collect();
 
     Ok(models)
@@ -614,7 +661,214 @@ mod tests {
         assert_eq!(info.model_type, "test");
         assert!(!info.backend_available);
 
+        // Naming an unrunnable model no longer makes it Active. model_type "test"
+        // has no backend, and #128 made backend availability a hard precondition
+        // for the badge rather than something the id check could bypass.
         let info_selected = to_model_info(&remote, Some("test-model"));
-        assert!(info_selected.selected);
+        assert!(!info_selected.selected);
+
+        // A model whose backend this build does have is selected as normal.
+        let runnable = RemoteModelInfo {
+            model_type: "whisper_ggml".to_string(),
+            ..remote.clone()
+        };
+        assert!(to_model_info(&runnable, Some("test-model")).selected);
+    }
+
+    /// Fixture spanning the three backends, mirroring the real manifest: the
+    /// recommended model is the macOS-only FluidAudio one.
+    fn selection_fixture() -> Vec<RemoteModelInfo> {
+        let base = RemoteModelInfo {
+            id: String::new(),
+            name: "M".to_string(),
+            description: String::new(),
+            version: "1.0.0".to_string(),
+            download_url: "https://example.com/m.tar.bz2".to_string(),
+            download_size: 1024,
+            extracted_size: 2048,
+            sha256: None,
+            required_files: vec![],
+            archive_directory: None,
+            languages: vec!["en".to_string()],
+            model_type: String::new(),
+            recommended: false,
+            min_app_version: None,
+        };
+        vec![
+            RemoteModelInfo {
+                id: "fluidaudio-parakeet-tdt-coreml".to_string(),
+                model_type: "fluidaudio_coreml".to_string(),
+                recommended: true,
+                ..base.clone()
+            },
+            RemoteModelInfo {
+                id: "whisper-large-v3-turbo".to_string(),
+                model_type: "whisper_ggml".to_string(),
+                ..base.clone()
+            },
+            RemoteModelInfo {
+                id: "parakeet-tdt-0.6b-v3".to_string(),
+                model_type: "nemo_transducer".to_string(),
+                ..base.clone()
+            },
+        ]
+    }
+
+    /// The #128 regression: `model_id = null` must not select a model whose
+    /// backend this build lacks.
+    ///
+    /// On a build without `fluidaudio` (every Linux build, and any macOS build
+    /// with the feature off) the recommended model is unrunnable, so resolution
+    /// must fall through to one that is. Previously selection used
+    /// `remote.recommended` alone and produced a model carrying `Active` and
+    /// `Unavailable` at the same time.
+    #[test]
+    fn null_model_id_never_selects_an_unavailable_backend() {
+        let models = selection_fixture();
+        let resolved = resolve_selected_id(&models, None).expect("something must be selectable");
+
+        assert!(
+            is_backend_available(
+                &models
+                    .iter()
+                    .find(|m| m.id == resolved)
+                    .expect("resolved id must exist in the manifest")
+                    .model_type
+            ),
+            "resolved {resolved} but its backend is unavailable in this build"
+        );
+
+        #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
+        assert_ne!(
+            resolved, "fluidaudio-parakeet-tdt-coreml",
+            "selected the macOS-only model on a build without the fluidaudio feature"
+        );
+
+        // On a build that *can* run it, the recommended model still wins.
+        #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+        assert_eq!(resolved, "fluidaudio-parakeet-tdt-coreml");
+    }
+
+    /// The invariant from #128, stated directly: whatever the config says, no
+    /// model with an unavailable backend may come back Active.
+    #[test]
+    fn unavailable_backend_can_never_be_active() {
+        let models = selection_fixture();
+
+        for configured in [
+            None,
+            Some("fluidaudio-parakeet-tdt-coreml"),
+            Some("whisper-large-v3-turbo"),
+            Some("parakeet-tdt-0.6b-v3"),
+            Some("a-model-that-does-not-exist"),
+        ] {
+            let resolved = resolve_selected_id(&models, configured);
+            for model in &models {
+                let info = to_model_info(model, resolved);
+                if info.selected {
+                    assert!(
+                        info.backend_available,
+                        "{} is Active but its backend is unavailable (configured: {configured:?})",
+                        info.id
+                    );
+                }
+            }
+
+            // Exactly one model is Active — never zero (with a runnable model
+            // present) and never several.
+            let active = models
+                .iter()
+                .filter(|m| to_model_info(m, resolved).selected)
+                .count();
+            assert_eq!(
+                active, 1,
+                "expected one Active model (configured: {configured:?})"
+            );
+        }
+    }
+
+    /// A configured model this build cannot run is ignored rather than honoured —
+    /// e.g. a config.json carried from macOS to Linux.
+    #[test]
+    fn unrunnable_configured_model_falls_back() {
+        let models = selection_fixture();
+        let resolved = resolve_selected_id(&models, Some("fluidaudio-parakeet-tdt-coreml"));
+
+        #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
+        {
+            assert!(resolved.is_some());
+            assert_ne!(resolved.unwrap(), "fluidaudio-parakeet-tdt-coreml");
+        }
+        #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+        assert_eq!(resolved.unwrap(), "fluidaudio-parakeet-tdt-coreml");
+    }
+
+    /// The same check against the real bundled manifest rather than a fixture, so
+    /// it fails if the shipped manifest ever marks an unrunnable model recommended.
+    ///
+    /// This is the exact reported case: `transcription.model_id = null` on a build
+    /// without `fluidaudio` showed "Parakeet TDT v3 (Neural Engine)" with an
+    /// `Active` badge and an `Unavailable` button at once.
+    #[test]
+    fn bundled_manifest_default_is_runnable() {
+        let manifest = get_fallback_manifest();
+        let resolved =
+            resolve_selected_id(&manifest.models, None).expect("bundled manifest must be usable");
+
+        let model = manifest
+            .models
+            .iter()
+            .find(|m| m.id == resolved)
+            .expect("resolved id must exist in the bundled manifest");
+
+        assert!(
+            is_backend_available(&model.model_type),
+            "bundled manifest defaults to {} ({}), whose backend this build lacks",
+            model.id,
+            model.model_type
+        );
+
+        #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
+        assert_ne!(
+            model.model_type, "fluidaudio_coreml",
+            "selected a CoreML model without the fluidaudio feature"
+        );
+
+        // And no model in the real manifest may be both Active and unavailable.
+        for m in &manifest.models {
+            let info = to_model_info(m, Some(resolved));
+            if info.selected {
+                assert!(
+                    info.backend_available,
+                    "{} is Active but unavailable",
+                    info.id
+                );
+            }
+        }
+    }
+
+    /// A runnable configured model is honoured over the recommended one.
+    #[test]
+    fn runnable_configured_model_wins_over_recommended() {
+        let models = selection_fixture();
+        assert_eq!(
+            resolve_selected_id(&models, Some("whisper-large-v3-turbo")),
+            Some("whisper-large-v3-turbo")
+        );
+    }
+
+    /// Nothing runnable means nothing Active, rather than defaulting to something
+    /// the build cannot execute.
+    #[test]
+    fn no_runnable_model_selects_nothing() {
+        let models: Vec<RemoteModelInfo> = selection_fixture()
+            .into_iter()
+            .filter(|m| m.model_type == "fluidaudio_coreml")
+            .collect();
+
+        #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
+        assert_eq!(resolve_selected_id(&models, None), None);
+        #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
+        assert!(resolve_selected_id(&models, None).is_some());
     }
 }
