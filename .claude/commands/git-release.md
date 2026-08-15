@@ -22,15 +22,32 @@ A Thoth release is:
 
 **CRITICAL**: Always use current date in AEST (Australia/Brisbane, UTC+10)
 
+Compute the next version from the last tag — never count the patch number by
+hand. Hand-counting is what produced the June 2026 regression, where the in-tree
+version ran to `2026.6.10` and was then reset to `2026.6.2`.
+
 ```bash
-# Get current date in AEST
-TZ=Australia/Brisbane date +"%Y.%-m.0"
+# Last released version, and the current calendar month in AEST
+LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+LAST_VERSION="${LAST_TAG#v}"
+THIS_MONTH=$(TZ=Australia/Brisbane date +"%Y.%-m")
+
+# Same month as the last release -> patch bump; new month -> reset patch to 0
+if [[ "$LAST_VERSION" == "$THIS_MONTH".* ]]; then
+  NEXT_VERSION="$THIS_MONTH.$(( ${LAST_VERSION##*.} + 1 ))"
+else
+  NEXT_VERSION="$THIS_MONTH.0"
+fi
+echo "Last: $LAST_VERSION  ->  Next: $NEXT_VERSION"
 ```
 
-- **Patch bump** (fixes only): `2026.2.0` → `2026.2.1`
-- **Month bump** (features, breaking): `2026.2.1` → `2026.3.0` (if new month)
+- **Patch bump** (fixes only, same month): `2026.2.0` → `2026.2.1`
+- **Month bump** (first release of a new month): `2026.2.1` → `2026.3.0`
 
-Ask user to confirm the new version number.
+Ask the user to confirm `$NEXT_VERSION`. The bump script re-checks
+monotonicity and refuses anything that is not strictly greater than both the
+last tag and the current in-tree version, so a miscount fails loudly rather
+than shipping.
 
 ### 2. Review Changes Since Last Release
 
@@ -59,11 +76,21 @@ Analyse changes and summarise for release notes:
 ./scripts/bump-version.sh <VERSION>
 ```
 
-This updates:
+The script is the single authority on which files carry a version — do not
+restate the list here, or it drifts (see the "Single source of truth" rule in
+`.claude/CLAUDE.md`). `flake.nix` rotted for exactly this reason: it carried a
+version, was in nobody's list, and sat at `2026.6.3` while the app shipped
+`2026.6.7`.
 
-- `src-tauri/Cargo.toml`
-- `src-tauri/tauri.conf.json`
-- `package.json`
+The script refuses to run if:
+
+- the new version is not strictly greater than both the last tag and the
+  current in-tree version; or
+- any file it does not rewrite declares the outgoing version — which means a
+  new version-bearing file was added without teaching the script about it.
+
+Both guards run before anything is written, so a failure never leaves a
+half-bumped tree.
 
 ### 4. Review Version Changes
 
@@ -71,7 +98,7 @@ This updates:
 git diff
 ```
 
-Verify only version fields changed in the three files.
+Verify only version fields changed, in the files the script reports.
 
 ### 5. Commit and Tag
 
@@ -131,8 +158,17 @@ Remind user:
 Before pushing (step 5):
 
 - [ ] Version determined using AEST date
+- [ ] **Version is strictly greater than the last tag** — `git describe --tags --abbrev=0`
+      must report a version lower than the one being released. Never retag, delete or
+      move a published tag to fix a numbering mistake: released tags are monotonic and
+      rewriting one breaks auto-updates for everyone who already upgraded. Roll forward
+      with the next patch instead.
+- [ ] **Version is strictly greater than the previous in-tree version** — a source
+      build (Nix) reports the in-tree version, so an in-tree regression outranks the
+      real release even when tags look fine.
 - [ ] Changes reviewed and summarized
-- [ ] Bump script ran successfully
+- [ ] Bump script ran successfully (it enforces both checks above and exits non-zero
+      otherwise)
 - [ ] Only version fields changed (git diff clean)
 - [ ] Commit message format correct
 - [ ] Tag format is `v<VERSION>`
@@ -160,9 +196,15 @@ git push --delete origin v<VERSION>
 ## Example Session
 
 ```bash
-# 1. Determine version (16 Feb 2026 in AEST)
-TZ=Australia/Brisbane date +"%Y.%-m.0"
-# Output: 2026.2.0 (or .1, .2 if already released this month)
+# 1. Determine version (16 Feb 2026 in AEST) — derived, never counted by hand
+LAST_VERSION=$(git describe --tags --abbrev=0 | sed 's/^v//')
+THIS_MONTH=$(TZ=Australia/Brisbane date +"%Y.%-m")
+if [[ "$LAST_VERSION" == "$THIS_MONTH".* ]]; then
+  NEXT_VERSION="$THIS_MONTH.$(( ${LAST_VERSION##*.} + 1 ))"
+else
+  NEXT_VERSION="$THIS_MONTH.0"
+fi
+# Last: 2026.2.2 -> Next: 2026.2.3
 
 # 2. Review changes
 LAST_TAG=$(git describe --tags --abbrev=0)
