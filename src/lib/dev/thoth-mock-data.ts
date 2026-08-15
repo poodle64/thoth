@@ -399,6 +399,9 @@ const MOCK_TRASH_ENTRIES: Array<{
 export const thothMockCommands: CommandMap = {
   // -- Startup-critical (must resolve for initialise() to complete) --
   get_config: () => MOCK_CONFIG,
+  // The frontend's only source of defaults (#127). Mocked with the same shape as
+  // get_config so the dev harness exercises the real code path.
+  get_default_config: () => MOCK_CONFIG,
   init_database: () => undefined,
   is_transcription_ready: () => true,
   get_model_directory: () => '/Users/dev/.thoth/models',

@@ -401,10 +401,19 @@ function getDefaultConfig(): Config {
       sentenceCase: false,
       voiceFormattingCommands: true,
     },
+    // Shortcut defaults are NOT restated here. They live in ShortcutConfig::default()
+    // in src-tauri/src/config.rs and arrive via get_default_config(); this placeholder
+    // is only what renders in the instant before that resolves. Retyping them here is
+    // what let toggle_recording_alt disagree with the backend from February 2026
+    // onward (#127) — the Rust value silently won on every write while the UI
+    // advertised a binding that was never bound.
+    //
+    // shortcut_defaults_match_typescript in config.rs fails the build if real values
+    // reappear in this block.
     shortcuts: {
-      toggleRecording: 'F13',
-      toggleRecordingAlt: 'CommandOrControl+Shift+Space',
-      copyLast: 'F14',
+      toggleRecording: '',
+      toggleRecordingAlt: null,
+      copyLast: null,
       toggleEnhancement: null,
       recordingMode: 'toggle',
     },
@@ -471,9 +480,30 @@ function createConfigStore() {
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load configuration';
       console.error('Failed to load config:', e);
+
+      // Fall back to the backend's own defaults rather than the placeholder in
+      // getDefaultConfig(), so the UI shows the bindings that are actually
+      // registered. Deliberately does not set isInitialised: save() must still
+      // refuse, so a failed load can never overwrite the user's persisted
+      // settings with defaults.
+      try {
+        config = parseConfig(await invoke<ConfigRaw>('get_default_config'));
+      } catch (defaultsError) {
+        console.error('Failed to load default config:', defaultsError);
+      }
     } finally {
       isLoading = false;
     }
+  }
+
+  /**
+   * Fetch the backend's default configuration.
+   *
+   * The single definition lives in Rust (`Config::default()`); this is the only
+   * way the frontend should obtain defaults. Do not reintroduce a hardcoded copy.
+   */
+  async function loadDefaults(): Promise<Config> {
+    return parseConfig(await invoke<ConfigRaw>('get_default_config'));
   }
 
   /**
@@ -670,6 +700,7 @@ function createConfigStore() {
 
     // Actions
     load,
+    loadDefaults,
     save,
     reset,
     getConfigPath,

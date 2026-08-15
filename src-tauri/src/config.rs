@@ -351,7 +351,17 @@ impl Default for ShortcutConfig {
     fn default() -> Self {
         Self {
             toggle_recording: "F13".to_string(),
-            toggle_recording_alt: Some("ShiftRight".to_string()),
+            // Decided value, superseding the "ShiftRight" introduced in 0aa8347.
+            // A modifier-only binding is unavailable on Wayland (see
+            // docs/development/linux-setup.md), so it could never be the default
+            // on a platform Thoth supports first-class. This is also the value
+            // the frontend has advertised since the initial commit, so it is the
+            // one users have been told to expect.
+            //
+            // The frontend no longer restates this — it reads it from
+            // get_default_config, and shortcut_defaults_match_typescript asserts
+            // no copy has crept back in.
+            toggle_recording_alt: Some("CommandOrControl+Shift+Space".to_string()),
             copy_last: Some("F14".to_string()),
             toggle_enhancement: None,
             recording_mode: RecordingMode::default(),
@@ -771,6 +781,22 @@ pub fn get_config() -> Result<Config, Error> {
     Ok(config.with_masked_loki_auth())
 }
 
+/// Return the built-in default configuration.
+///
+/// The single definition of every default. The frontend seeds its own defaults
+/// from this instead of restating them in TypeScript, which is how
+/// `toggle_recording_alt` came to disagree across the two languages from
+/// February 2026 onward (#127). See the "Single source of truth" rule in
+/// `.claude/CLAUDE.md`.
+///
+/// This reads nothing from disk and mutates nothing — it is `Config::default()`
+/// with the same `loki_auth` masking `get_config` applies, so no token can cross
+/// the IPC boundary even in the default case.
+#[tauri::command]
+pub fn get_default_config() -> Config {
+    Config::default().with_masked_loki_auth()
+}
+
 /// Update the configuration
 ///
 /// Replaces the current configuration with the provided config and persists
@@ -1139,11 +1165,90 @@ mod tests {
         assert_eq!(shortcuts.toggle_recording, "F13");
         assert_eq!(
             shortcuts.toggle_recording_alt,
-            Some("ShiftRight".to_string())
+            Some("CommandOrControl+Shift+Space".to_string())
         );
         assert_eq!(shortcuts.copy_last, Some("F14".to_string()));
         assert_eq!(shortcuts.toggle_enhancement, None);
         assert_eq!(shortcuts.recording_mode, RecordingMode::Toggle);
+    }
+
+    /// `get_default_config` is the frontend's only source of defaults, so it must
+    /// agree with `Config::default()` rather than drifting into its own values.
+    #[test]
+    fn get_default_config_returns_the_real_defaults() {
+        let defaults = get_default_config();
+        let expected = ShortcutConfig::default();
+        assert_eq!(
+            defaults.shortcuts.toggle_recording,
+            expected.toggle_recording
+        );
+        assert_eq!(
+            defaults.shortcuts.toggle_recording_alt,
+            expected.toggle_recording_alt
+        );
+        assert_eq!(defaults.shortcuts.copy_last, expected.copy_last);
+        assert_eq!(
+            defaults.shortcuts.toggle_recording_alt,
+            Some("CommandOrControl+Shift+Space".to_string())
+        );
+    }
+
+    /// The TypeScript placeholder must not restate the shortcut defaults.
+    ///
+    /// `toggle_recording_alt` was defined in both languages with different values
+    /// from February 2026 (#127): Rust said `ShiftRight`, TypeScript said
+    /// `CommandOrControl+Shift+Space`. Because `ShortcutConfig` carries
+    /// `#[serde(default)]`, the Rust value filled the field and won on every
+    /// write, so users got a binding the UI never advertised.
+    ///
+    /// The fix is that the frontend reads defaults from `get_default_config`.
+    /// This test fails if a hardcoded copy creeps back into the placeholder,
+    /// which is the only way the two can diverge again. It asserts the *absence*
+    /// of a second definition rather than comparing two copies, because the point
+    /// is that there is exactly one.
+    #[test]
+    fn shortcut_defaults_match_typescript() {
+        let ts_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../src/lib/stores/config.svelte.ts");
+        let source = std::fs::read_to_string(&ts_path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", ts_path.display()));
+
+        // Isolate the shortcuts block of getDefaultConfig()'s return value.
+        //
+        // Anchor on the function first: `    shortcuts: {` also appears in
+        // parseConfig()'s mapper, which is earlier in the file and contains only
+        // `raw.shortcuts.*` reads. Searching the whole file finds that block and
+        // the assertion passes vacuously no matter what the defaults say.
+        let fn_start = source
+            .find("function getDefaultConfig()")
+            .expect("getDefaultConfig() not found — update this test");
+        let rest = &source[fn_start..];
+        let start = rest
+            .find("shortcuts: {")
+            .expect("getDefaultConfig() no longer has a shortcuts block — update this test");
+        let end = rest[start..]
+            .find("},")
+            .expect("unterminated shortcuts block")
+            + start;
+        let block = &rest[start..end];
+
+        let defaults = ShortcutConfig::default();
+        let real_values = [
+            defaults.toggle_recording.clone(),
+            defaults.toggle_recording_alt.clone().unwrap_or_default(),
+            defaults.copy_last.clone().unwrap_or_default(),
+        ];
+
+        for value in real_values.iter().filter(|v| !v.is_empty()) {
+            assert!(
+                !block.contains(value.as_str()),
+                "src/lib/stores/config.svelte.ts restates the shortcut default {value:?}.\n\
+                 Shortcut defaults have exactly one definition: ShortcutConfig::default() \
+                 in this file, reached from the frontend via get_default_config().\n\
+                 Remove the hardcoded value — see the single-source-of-truth rule in \
+                 .claude/CLAUDE.md."
+            );
+        }
     }
 
     #[test]
