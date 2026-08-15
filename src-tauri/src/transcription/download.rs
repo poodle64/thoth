@@ -58,22 +58,17 @@ pub fn check_model_downloaded(model_id: Option<String>) -> bool {
     // Get the model info from manifest
     let manifest = get_fallback_manifest();
 
-    // Use provided model_id, or get from config, or fall back to recommended
+    // Use the provided model_id, else resolve the effective selection. Resolution
+    // filters on backend availability (#128), so this no longer reports on a model
+    // the build cannot run — the recommended model is macOS-only.
     let model_id = model_id.unwrap_or_else(|| {
-        // Try to get from config first
-        crate::config::get_config()
+        let configured = crate::config::get_config()
             .ok()
-            .and_then(|c| c.transcription.model_id.clone())
-            .unwrap_or_else(|| {
-                // Fall back to recommended model from manifest
-                manifest
-                    .models
-                    .iter()
-                    .find(|m| m.recommended)
-                    .or_else(|| manifest.models.first())
-                    .map(|m| m.id.clone())
-                    .unwrap_or_else(|| "ggml-large-v3-turbo".to_string())
-            })
+            .and_then(|c| c.transcription.model_id.clone());
+
+        super::manifest::resolve_selected_id(&manifest.models, configured.as_deref())
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "ggml-large-v3-turbo".to_string())
     });
 
     let model = manifest.models.iter().find(|m| m.id == model_id);
@@ -160,13 +155,13 @@ pub async fn download_model(app: AppHandle, model_id: Option<String>) -> Result<
 
     // Get model info from manifest
     let manifest = get_fallback_manifest();
+    // An explicit model_id is honoured as-is (the user clicked Download on that
+    // model). Only the implicit fallback is filtered on backend availability, so
+    // a bare download_model() cannot start fetching the macOS-only recommended
+    // model on a build that could never run it (#128).
     let model_id = model_id.unwrap_or_else(|| {
-        manifest
-            .models
-            .iter()
-            .find(|m| m.recommended)
-            .or_else(|| manifest.models.first())
-            .map(|m| m.id.clone())
+        super::manifest::resolve_selected_id(&manifest.models, None)
+            .map(|id| id.to_string())
             .unwrap_or_else(|| "ggml-large-v3-turbo".to_string())
     });
 
@@ -769,10 +764,13 @@ pub fn get_model_info() -> Vec<super::manifest::ModelInfo> {
         .ok()
         .and_then(|c| c.transcription.model_id.clone());
 
+    let resolved_id =
+        super::manifest::resolve_selected_id(&manifest.models, selected_id.as_deref());
+
     manifest
         .models
         .iter()
-        .map(|m| super::manifest::to_model_info(m, selected_id.as_deref()))
+        .map(|m| super::manifest::to_model_info(m, resolved_id))
         .collect()
 }
 
