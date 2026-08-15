@@ -269,7 +269,13 @@
         # ---------------------------------------------------------------------
         thothPackage = rustPlatform.buildRustPackage (finalAttrs: {
           pname = "thoth";
-          version = "2026.6.3";
+          # Read from tauri.conf.json rather than hardcoding: scripts/bump-version.sh
+          # only rewrites Cargo.toml, tauri.conf.json and package.json, so a literal
+          # here silently rots at every release (it sat at 2026.6.3 while the app
+          # shipped 2026.6.7, naming the store path after a version that did not
+          # match the binary). Deriving it means the two cannot disagree.
+          version =
+            (builtins.fromJSON (builtins.readFile ./src-tauri/tauri.conf.json)).version;
           src = ./.;
 
           cargoRoot = "src-tauri";
