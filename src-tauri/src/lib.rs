@@ -700,6 +700,7 @@ pub fn run() {
             export::get_transcriptions,
             // Config
             config::get_config,
+            config::get_default_config,
             config::set_config,
             config::set_shortcut_config,
             config::set_enhancement_api_key,
