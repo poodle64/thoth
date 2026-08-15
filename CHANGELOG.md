@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **A failed auto-paste on macOS no longer fails silently, and no longer loses the transcription.** Pasting synthesises Cmd+V through Core Graphics, which macOS silently discards when the app is not Accessibility-trusted — and Thoth resets that permission after every update, so an updated-but-not-yet-re-granted app pasted nothing while reporting success. Worse, the clipboard was then restored to its previous contents a second later, so the transcription was gone too. Thoth now checks the Accessibility permission before pasting and tells you (with a toast and the exact System Settings path) when it is missing, and a failed insertion skips the clipboard restore so the transcription stays on the clipboard and can be pasted manually with Cmd+V.
 - **The bundled MCP server no longer echoes the whole dictionary/canonical list on every edit.** Adding, updating or deleting a dictionary entry — or a canonical term — returned the entire list (~150 entries) in the tool response each time, spending the agent's context on data it never asked for. These actions now return a compact acknowledgement (`{ok, action, index, count}`); use the `list` action when you actually want the full list back.
 
 ## [2026.6.7] - 2026-06-25

@@ -280,6 +280,16 @@ function createPipelineStore() {
     });
     unlisteners.push(typingAdvisoryUnlisten);
 
+    // Auto-paste reached the end of the pipeline but the text never landed at
+    // the cursor — most often a missing macOS Accessibility grant, which makes
+    // the synthetic Cmd+V a silent no-op. The transcription is still in history
+    // and (on the clipboard route) still on the clipboard, so this is a warning
+    // rather than a pipeline failure.
+    const insertionFailedUnlisten = await listen<string>('text-insertion-failed', (event) => {
+      toast.warning(event.payload, { duration: 15000 });
+    });
+    unlisteners.push(insertionFailedUnlisten);
+
     // Notify when the configured microphone is unavailable and recording fell
     // back to the system default (e.g. an unplugged USB mic). Deduped in Rust to
     // one toast per distinct missing device.
