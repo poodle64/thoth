@@ -87,6 +87,7 @@ const MOCK_MODELS = [
     selected: true,
     model_type: 'whisper',
     backend_available: true,
+    accelerator: 'whisper.cpp (Metal GPU)',
   },
   {
     id: 'whisper-small-en',
@@ -103,6 +104,7 @@ const MOCK_MODELS = [
     selected: false,
     model_type: 'whisper',
     backend_available: true,
+    accelerator: 'whisper.cpp (Metal GPU)',
   },
 ];
 

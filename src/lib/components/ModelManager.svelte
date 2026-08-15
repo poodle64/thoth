@@ -25,6 +25,12 @@
     selected: boolean;
     model_type: string;
     backend_available: boolean;
+    /**
+     * Accelerator for this build and platform, derived by the backend
+     * (`accelerator_label` in manifest.rs) — e.g. "whisper.cpp (Vulkan GPU)".
+     * Optional so an older backend without the field degrades to model_type.
+     */
+    accelerator?: string;
   }
 
   interface DownloadProgress {
@@ -260,18 +266,21 @@
     });
   }
 
-  /** Friendly backend label for the detail row */
-  function backendLabel(modelType: string): string {
-    switch (modelType) {
-      case 'fluidaudio_coreml':
-        return 'Apple Neural Engine';
-      case 'nemo_transducer':
-        return 'Sherpa-ONNX (CPU)';
-      case 'whisper_ggml':
-        return 'whisper.cpp (Metal GPU)';
-      default:
-        return modelType;
-    }
+  /**
+   * Friendly backend label for the detail row.
+   *
+   * The accelerator is computed by the backend (`accelerator_label` in
+   * manifest.rs), which is the only place that knows the host platform and the
+   * compiled feature set. These strings were previously hardcoded for macOS here
+   * and shown verbatim everywhere (#129): a Linux CUDA+Vulkan build claimed
+   * "whisper.cpp (Metal GPU)" — impossible on that platform — and "Sherpa-ONNX
+   * (CPU)" for a build that links CUDA.
+   *
+   * Do not reintroduce a switch on model_type. `model_type` remains the fallback
+   * only for a backend too old to send the field.
+   */
+  function backendLabel(model: ModelInfo): string {
+    return model.accelerator || model.model_type;
   }
 </script>
 
@@ -342,7 +351,7 @@
 
           <!-- Metadata row -->
           <div class="text-muted-foreground flex flex-wrap items-center gap-0 text-xs">
-            <span class="whitespace-nowrap">{backendLabel(model.model_type)}</span>
+            <span class="whitespace-nowrap">{backendLabel(model)}</span>
             <span class="px-1.5 opacity-40">&middot;</span>
             <span class="whitespace-nowrap">{formatLanguages(model.languages)}</span>
             <span class="px-1.5 opacity-40">&middot;</span>
