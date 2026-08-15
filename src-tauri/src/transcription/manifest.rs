@@ -892,6 +892,10 @@ mod tests {
     #[test]
     fn accelerator_label_tracks_platform_and_features() {
         let whisper = accelerator_label("whisper_ggml");
+        assert!(
+            whisper.contains("whisper.cpp"),
+            "whisper_ggml should name its runtime: {whisper}"
+        );
 
         // Metal exists only on macOS. This is the reported Linux symptom.
         #[cfg(not(target_os = "macos"))]
@@ -927,8 +931,18 @@ mod tests {
             "CPU-only build should report CPU: {whisper}"
         );
 
-        // A CUDA-linked sherpa-onnx must not be described as CPU.
+        // Always asserted, so this binding is used on every feature combination.
+        // CI's Linux leg builds `--no-default-features --features vulkan`, i.e.
+        // with no parakeet feature at all; without an unconditional assertion
+        // both cfg arms below vanish and `-D warnings` fails on the unused
+        // binding rather than on anything real.
         let parakeet = accelerator_label("nemo_transducer");
+        assert!(
+            parakeet.contains("Sherpa-ONNX"),
+            "nemo_transducer should name its runtime: {parakeet}"
+        );
+
+        // A CUDA-linked sherpa-onnx must not be described as CPU.
         #[cfg(feature = "parakeet-cuda")]
         assert!(
             parakeet.contains("CUDA") && !parakeet.contains("CPU"),
