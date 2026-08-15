@@ -19,10 +19,16 @@ repos:
     hooks:
       - id: check-pii
         name: "security - Detect PII (names, mobiles, personal emails)"
-        # The script lives in the household Claude harness, symlinked in and
-        # gitignored (see .gitignore), so it is absent in most clones and in CI.
-        # Skip silently when it is missing rather than failing every commit.
-        entry: bash -c 'test -f .claude/hooks/master/precommit/pii.py || exit 0; exec python3 .claude/hooks/master/precommit/pii.py "$@"' --
+        # Path corrected: .claude/hooks/master/precommit/pii.py never existed —
+        # the real script is check-pii.py, which takes staged filenames as argv
+        # exactly as pre-commit passes them.
+        #
+        # Hooks now come from the mimir plugin rather than a symlink (see the
+        # master setup-symlinks command), and mimir is not installed here, so
+        # this is currently INERT: the guard skips when the script is absent
+        # rather than failing every commit. It starts working again on any
+        # machine that provides the path, with no config change.
+        entry: bash -c 'test -f .claude/hooks/master/check-pii.py || exit 0; exec python3 .claude/hooks/master/check-pii.py "$@"' --
         language: system
         types: [text]
 
