@@ -6,7 +6,7 @@ Privacy-first, offline-capable voice-to-text for macOS and Linux: record on a ho
 
 - Does: capture audio from any input device, transcribe it locally and offline, optionally enhance the result with a local Ollama model, and paste it at the cursor in whatever app has focus.
 - Does not: sync anything to the cloud, change the system's default audio device, or require network access for the transcription path itself.
-- Paste-at-cursor must restore the user's prior clipboard contents afterward — never leave the transcription sitting in the clipboard.
+- Paste-at-cursor must restore the user's prior clipboard contents afterward — never leave the transcription sitting in the clipboard. The sole exception is a _failed_ insertion: the restore is skipped so the transcription survives on the clipboard for a manual paste, since restoring would otherwise discard it along with the failure.
 - Recording toggles on one global hotkey (press to start, press again to stop); the hotkey itself is user-configurable, not hardcoded.
 
 ## Running it

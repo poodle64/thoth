@@ -820,6 +820,7 @@ async fn process_audio(
             }
         }
 
+        let mut insertion_failed = false;
         if config.auto_paste {
             tracing::debug!("Pipeline: Pasting text...");
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -832,6 +833,23 @@ async fn process_audio(
 
             if let Err(e) = insert_result {
                 tracing::warn!("Pipeline: Failed to insert text: {}", e);
+                insertion_failed = true;
+                // Surface the failure instead of leaving it in the log only. The
+                // transcription itself succeeded and is still saved to history,
+                // so this is deliberately not a `PipelineState::Failed` — only a
+                // toast telling the user the text did not reach their cursor and
+                // (on the clipboard route) that it is still on the clipboard.
+                let advisory = if config.insertion_method == "typing" {
+                    format!("Thoth could not type the transcription: {e}")
+                } else {
+                    format!(
+                        "Thoth could not paste the transcription: {e}\n\nThe text has been left \
+                         on your clipboard — press Cmd+V to paste it manually."
+                    )
+                };
+                if let Err(emit_err) = app.emit("text-insertion-failed", advisory) {
+                    tracing::warn!("Failed to emit text-insertion-failed event: {emit_err}");
+                }
             } else {
                 tracing::debug!("Pipeline: Pasted text successfully");
             }
@@ -841,7 +859,21 @@ async fn process_audio(
         // Uses the configurable restore delay from clipboard settings to give
         // the target application time to process the paste before we overwrite
         // the clipboard again.
-        if let Some(original) = saved_clipboard {
+        //
+        // Skipped when insertion failed. The transcription is on the clipboard
+        // at this point (the paste route put it there) but never reached the
+        // cursor, so restoring would overwrite it with the pre-recording
+        // content and leave the user with neither the pasted text nor anything
+        // to paste manually — the transcription would only be recoverable from
+        // history. Keeping it on the clipboard makes a failed auto-paste
+        // recoverable with a manual Cmd+V, at the cost of not restoring the
+        // previous clipboard in that one case; the toast above says so.
+        if insertion_failed {
+            tracing::warn!(
+                "Pipeline: Skipping clipboard restore — text insertion failed; leaving the \
+                 transcription on the clipboard so it can be pasted manually"
+            );
+        } else if let Some(original) = saved_clipboard {
             let restore_delay = clipboard::get_restore_delay();
             tracing::debug!("Pipeline: Restoring clipboard in {}ms", restore_delay);
             tokio::time::sleep(tokio::time::Duration::from_millis(restore_delay)).await;

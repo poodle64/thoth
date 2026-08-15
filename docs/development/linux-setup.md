@@ -16,7 +16,7 @@ sudo apt-get install -y \
 
 - `libgtk-3-dev`, `libwebkit2gtk-4.1-dev`, `librsvg2-dev`, `patchelf` — Tauri's webview and bundler.
 - `libappindicator3-dev` — system tray.
-- `libasound2-dev` — ALSA, for cpal audio capture.
+- `libasound2-dev` — ALSA, for cpal audio capture and for the synthesised recording start/stop cues.
 - `libvulkan-dev`, `glslc`, `spirv-headers` — the Vulkan GPU backend. whisper.cpp's GGML Vulkan backend compiles its shaders at build time via CMake (`find_package(Vulkan COMPONENTS glslc REQUIRED)` and `find_package(SPIRV-Headers REQUIRED)`); `glslang-tools` does **not** satisfy this. Omit these only if you build CPU-only without `--features vulkan`.
 
 The toolchain otherwise is the standard one: a recent stable Rust (via `rustup`), Node.js LTS, and `pnpm`. `direnv` loads the project environment from `.envrc` (run `direnv allow` once), and on Debian/Ubuntu you install the system packages above through apt. On NixOS — or any machine with Nix — the committed `flake.nix` provides the entire toolchain and every build dependency (Rust, Node, pnpm, GTK/WebKit, the Vulkan toolchain, CUDA); run `nix develop` and build inside that shell instead of installing the apt packages.

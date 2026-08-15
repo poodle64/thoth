@@ -593,6 +593,22 @@ pub fn emit_linux_typing_advisory(app: &tauri::AppHandle) {
 /// event tap. Uses an event source in `HIDSystemState` so the synthetic event
 /// behaves like real hardware input. Requires only the Accessibility permission
 /// and is safe to call from any thread.
+///
+/// `CGEventPost` returns void and reports nothing when the process is not
+/// Accessibility-trusted — the event is simply dropped. Without the guard below
+/// this function returned `Ok(())` on a paste that never happened, so callers
+/// logged success while the user saw nothing inserted. That is not theoretical:
+/// the post-update `tccutil reset` in `platform::reset_permissions_after_update`
+/// revokes Accessibility on every version change, so a freshly updated Thoth
+/// lands here untrusted until the user re-grants. Check trust up front and fail
+/// loudly instead.
+///
+/// The check is `AXIsProcessTrusted()` (cheap, local) rather than
+/// `verify_accessibility_functional()`, which round-trips to the focused app's
+/// accessibility server and can block for the AX timeout if that app is
+/// unresponsive — not acceptable on the paste path, which runs while the
+/// pipeline holds `OUTPUT_LOCK`. The rarer stale-TCC case (trusted but
+/// non-functional) is still reported by the startup diagnostic in `lib.rs`.
 #[cfg(target_os = "macos")]
 fn post_paste_cgevent() -> Result<(), String> {
     use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
@@ -600,6 +616,16 @@ fn post_paste_cgevent() -> Result<(), String> {
 
     /// ANSI virtual key code for the V key.
     const KEY_V: u16 = 0x09;
+
+    if !crate::platform::check_accessibility() {
+        return Err(
+            "Accessibility permission not granted — the paste keystroke would be silently \
+             discarded. Grant Thoth Accessibility access in System Settings › Privacy & \
+             Security › Accessibility (remove and re-add Thoth if it is already listed, as \
+             an update invalidates the existing grant)."
+                .to_string(),
+        );
+    }
 
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|_| "Failed to create CGEventSource for paste".to_string())?;
