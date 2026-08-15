@@ -36,6 +36,15 @@ desktop.ini
 .claude/agents/
 .claude/scheduled_tasks.lock
 
+# Symlinks into the household Claude harness (master rules, hooks, commands,
+# skills). They resolve only on a machine with that layout, so committing them
+# leaves every other clone — and this public repo — with dangling links.
+.claude/commands/master
+.claude/hooks/master
+.claude/rules/core
+.claude/rules/stacks
+.claude/skills
+
 # ============================================================================
 # Environment & Secrets
 # ============================================================================

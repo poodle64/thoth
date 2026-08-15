@@ -19,7 +19,10 @@ repos:
     hooks:
       - id: check-pii
         name: "security - Detect PII (names, mobiles, personal emails)"
-        entry: python3 .claude/hooks/master/precommit/pii.py
+        # The script lives in the household Claude harness, symlinked in and
+        # gitignored (see .gitignore), so it is absent in most clones and in CI.
+        # Skip silently when it is missing rather than failing every commit.
+        entry: bash -c 'test -f .claude/hooks/master/precommit/pii.py || exit 0; exec python3 .claude/hooks/master/precommit/pii.py "$@"' --
         language: system
         types: [text]
 
