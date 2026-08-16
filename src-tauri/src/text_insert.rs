@@ -754,6 +754,173 @@ pub fn insert_text(text: String, method: Option<String>) -> Result<(), Error> {
     service.insert_text(&text).map_err(Into::into)
 }
 
+// ============================================================================
+// Auto-submit
+// ============================================================================
+
+/// Send the configured submit combination after a successful insertion.
+///
+/// A no-op for [`AutoSubmit::Off`], which is the default: dictation must never
+/// press keys the user did not ask for.
+///
+/// Deliberately separate from the insertion call rather than folded into it.
+/// Submitting is only correct once the text has actually landed, so the caller
+/// invokes this after checking the insertion succeeded; a failed paste followed
+/// by a stray Return would send an empty or half-written message.
+pub fn send_auto_submit(combo: crate::config::AutoSubmit) -> Result<(), String> {
+    use crate::config::AutoSubmit;
+
+    if combo == AutoSubmit::Off {
+        return Ok(());
+    }
+
+    debug!("Sending auto-submit combination {:?}", combo);
+
+    #[cfg(target_os = "macos")]
+    {
+        post_submit_cgevent(combo)
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        send_submit_linux(combo)
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        Err("Auto-submit is not supported on this platform".to_string())
+    }
+}
+
+/// Synthesise the submit keystroke on macOS via Core Graphics.
+///
+/// Mirrors [`post_paste_cgevent`], including its Accessibility guard: an
+/// untrusted process has its events dropped silently, so without the check the
+/// caller would report a submit that never happened.
+#[cfg(target_os = "macos")]
+fn post_submit_cgevent(combo: crate::config::AutoSubmit) -> Result<(), String> {
+    use crate::config::AutoSubmit;
+    use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+    /// ANSI virtual key code for Return.
+    const KEY_RETURN: u16 = 0x24;
+
+    if !crate::platform::check_accessibility() {
+        return Err(
+            "Accessibility permission not granted — the auto-submit keystroke would be \
+             silently discarded. Grant Thoth Accessibility access in System Settings › \
+             Privacy & Security › Accessibility."
+                .to_string(),
+        );
+    }
+
+    let flags = match combo {
+        AutoSubmit::Off => return Ok(()),
+        AutoSubmit::Enter => CGEventFlags::CGEventFlagNull,
+        AutoSubmit::CtrlEnter => CGEventFlags::CGEventFlagControl,
+        AutoSubmit::CmdEnter => CGEventFlags::CGEventFlagCommand,
+    };
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| "Failed to create CGEventSource for auto-submit".to_string())?;
+
+    let key_down = CGEvent::new_keyboard_event(source.clone(), KEY_RETURN, true)
+        .map_err(|_| "Failed to create key-down event for auto-submit".to_string())?;
+    key_down.set_flags(flags);
+    key_down.post(CGEventTapLocation::HID);
+
+    let key_up = CGEvent::new_keyboard_event(source, KEY_RETURN, false)
+        .map_err(|_| "Failed to create key-up event for auto-submit".to_string())?;
+    key_up.set_flags(flags);
+    key_up.post(CGEventTapLocation::HID);
+
+    debug!("Auto-submit sent via CGEvent");
+    Ok(())
+}
+
+/// Send the submit keystroke on Linux, preferring `wtype` on Wayland and
+/// falling back to enigo (X11/XWayland), matching the paste path's tiering.
+#[cfg(target_os = "linux")]
+fn send_submit_linux(combo: crate::config::AutoSubmit) -> Result<(), String> {
+    use crate::config::AutoSubmit;
+    use std::process::Command;
+
+    // There is no Command key on Linux, so CmdEnter collapses to Ctrl+Enter
+    // rather than silently doing nothing on a cross-platform config.
+    let with_ctrl = matches!(combo, AutoSubmit::CtrlEnter | AutoSubmit::CmdEnter);
+
+    if is_wayland() {
+        let mut args: Vec<&str> = Vec::new();
+        if with_ctrl {
+            args.extend_from_slice(&["-M", "ctrl"]);
+        }
+        args.extend_from_slice(&["-k", "Return"]);
+        if with_ctrl {
+            args.extend_from_slice(&["-m", "ctrl"]);
+        }
+
+        match Command::new("wtype").args(&args).status() {
+            Ok(status) if status.success() => {
+                debug!("Auto-submit sent via wtype");
+                return Ok(());
+            }
+            // wtype missing or refused; fall through to enigo below rather than
+            // failing, since XWayland often still works.
+            _ => warn!("wtype could not send the auto-submit key; falling back to enigo"),
+        }
+    }
+
+    send_submit_with_enigo(with_ctrl)
+}
+
+/// Synthesise Return (optionally with Control) via enigo.
+#[cfg(target_os = "linux")]
+fn send_submit_with_enigo(with_ctrl: bool) -> Result<(), String> {
+    use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+
+    let mut enigo = Enigo::new(&Settings::default())
+        .map_err(|e| format!("Failed to initialise enigo for auto-submit: {e}"))?;
+
+    if with_ctrl {
+        enigo
+            .key(Key::Control, Direction::Press)
+            .map_err(|e| format!("Failed to press Control: {e}"))?;
+    }
+
+    let click = enigo
+        .key(Key::Return, Direction::Click)
+        .map_err(|e| format!("Failed to press Return: {e}"));
+
+    // Always release Control, even if the Return click failed, so a stuck
+    // modifier cannot leak into the user's next keystroke.
+    if with_ctrl && let Err(e) = enigo.key(Key::Control, Direction::Release) {
+        tracing::error!("Failed to release Control after auto-submit: {e}");
+    }
+
+    click?;
+    debug!("Auto-submit sent via enigo");
+    Ok(())
+}
+
+/// Append a single trailing space when the setting is enabled.
+///
+/// Kept as a named function rather than an inline `if` so both insertion paths
+/// (paste and typing) apply exactly the same rule, and so the "only one space,
+/// never two" behaviour is testable without a cursor.
+pub fn apply_trailing_space(text: &str, enabled: bool) -> String {
+    if !enabled || text.is_empty() {
+        return text.to_string();
+    }
+    // Don't double up: the filter pipeline can already leave a trailing space,
+    // and two spaces before the next dictation is the bug this setting exists
+    // to avoid.
+    if text.ends_with(' ') {
+        return text.to_string();
+    }
+    format!("{text} ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -799,6 +966,63 @@ mod tests {
         let service = TextInsertService::new();
         let result = service.insert_text("");
         assert!(result.is_ok());
+    }
+
+    /// The setting exists so consecutive dictations into one field are
+    /// word-spaced; appending unconditionally would produce a double space when
+    /// the filter pipeline already left one.
+    #[test]
+    fn trailing_space_is_appended_once_and_only_when_enabled() {
+        assert_eq!(apply_trailing_space("hello", true), "hello ");
+        assert_eq!(apply_trailing_space("hello", false), "hello");
+
+        // Already spaced: must not double up.
+        assert_eq!(apply_trailing_space("hello ", true), "hello ");
+
+        // Empty text gets nothing, so a failed or empty transcription cannot
+        // insert a lone space.
+        assert_eq!(apply_trailing_space("", true), "");
+
+        // Other trailing whitespace is not a space and is left alone rather than
+        // guessed at.
+        assert_eq!(apply_trailing_space("hello\n", true), "hello\n ");
+
+        // Punctuation is unaffected.
+        assert_eq!(apply_trailing_space("Right.", true), "Right. ");
+    }
+
+    /// Off is the default: dictation must never press keys the user did not ask
+    /// for, and send_auto_submit must return Ok without touching the keyboard.
+    #[test]
+    fn auto_submit_defaults_to_off_and_is_a_noop() {
+        use crate::config::AutoSubmit;
+
+        assert_eq!(AutoSubmit::default(), AutoSubmit::Off);
+        assert_eq!(
+            crate::config::TranscriptionConfig::default().auto_submit,
+            AutoSubmit::Off
+        );
+        // Safe to call in a headless test precisely because it short-circuits.
+        assert!(send_auto_submit(AutoSubmit::Off).is_ok());
+    }
+
+    /// The config round-trips through JSON as snake_case, so a saved value is
+    /// still understood on the next launch.
+    #[test]
+    fn auto_submit_serialises_as_snake_case() {
+        use crate::config::AutoSubmit;
+
+        for (value, expected) in [
+            (AutoSubmit::Off, "\"off\""),
+            (AutoSubmit::Enter, "\"enter\""),
+            (AutoSubmit::CtrlEnter, "\"ctrl_enter\""),
+            (AutoSubmit::CmdEnter, "\"cmd_enter\""),
+        ] {
+            let json = serde_json::to_string(&value).unwrap();
+            assert_eq!(json, expected);
+            let back: AutoSubmit = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, value);
+        }
     }
 
     #[cfg(target_os = "macos")]

@@ -27,6 +27,10 @@ export interface TranscriptionConfig {
   autoPaste: boolean;
   /** Whether to add space before pasted text */
   addLeadingSpace: boolean;
+  /** Whether to append a single space after the inserted text */
+  appendTrailingSpace: boolean;
+  /** Key combination sent after a successful insertion */
+  autoSubmit: AutoSubmit;
   /** Whether to remove hesitation sounds (um, uh, er, ah) from transcription */
   removeFillers: boolean;
   /** Whether to convert US spellings to Australian/British equivalents */
@@ -45,6 +49,13 @@ export interface TranscriptionConfig {
 
 /** Recording mode options */
 export type RecordingMode = 'toggle';
+
+/**
+ * Key combination sent after a successful insertion.
+ *
+ * Mirrors the Rust `AutoSubmit` enum; serialised snake_case over IPC.
+ */
+export type AutoSubmit = 'off' | 'enter' | 'ctrl_enter' | 'cmd_enter';
 
 /** Keyboard shortcut configuration */
 export interface ShortcutConfig {
@@ -184,6 +195,8 @@ interface ConfigRaw {
     auto_copy: boolean;
     auto_paste: boolean;
     add_leading_space: boolean;
+    append_trailing_space: boolean;
+    auto_submit: AutoSubmit;
     remove_fillers: boolean;
     australian_spelling: boolean;
     spoken_numbers_to_digits: boolean;
@@ -253,6 +266,8 @@ function parseConfig(raw: ConfigRaw): Config {
       autoCopy: raw.transcription.auto_copy,
       autoPaste: raw.transcription.auto_paste,
       addLeadingSpace: raw.transcription.add_leading_space,
+      appendTrailingSpace: raw.transcription.append_trailing_space ?? false,
+      autoSubmit: raw.transcription.auto_submit ?? 'off',
       removeFillers: raw.transcription.remove_fillers,
       australianSpelling: raw.transcription.australian_spelling,
       spokenNumbersToDigits: raw.transcription.spoken_numbers_to_digits,
@@ -323,6 +338,8 @@ function serialiseConfig(config: Config): ConfigRaw {
       auto_copy: config.transcription.autoCopy,
       auto_paste: config.transcription.autoPaste,
       add_leading_space: config.transcription.addLeadingSpace,
+      append_trailing_space: config.transcription.appendTrailingSpace,
+      auto_submit: config.transcription.autoSubmit,
       remove_fillers: config.transcription.removeFillers,
       australian_spelling: config.transcription.australianSpelling,
       spoken_numbers_to_digits: config.transcription.spokenNumbersToDigits,
@@ -393,6 +410,8 @@ function getDefaultConfig(): Config {
       autoCopy: false,
       autoPaste: true,
       addLeadingSpace: false,
+      appendTrailingSpace: false,
+      autoSubmit: 'off',
       removeFillers: true,
       australianSpelling: false,
       spokenNumbersToDigits: false,

@@ -81,6 +81,12 @@ pub struct PipelineConfig {
     pub auto_paste: bool,
     /// Insertion method: "typing" or "paste"
     pub insertion_method: String,
+    /// Whether to append a single space after the inserted text (#112)
+    #[serde(default)]
+    pub append_trailing_space: bool,
+    /// Key combination to send after a successful insertion (#112)
+    #[serde(default)]
+    pub auto_submit: crate::config::AutoSubmit,
 }
 
 impl Default for PipelineConfig {
@@ -101,6 +107,8 @@ impl Default for PipelineConfig {
             auto_copy: false,
             auto_paste: true,
             insertion_method: "paste".to_string(),
+            append_trailing_space: false,
+            auto_submit: crate::config::AutoSubmit::Off,
         }
     }
 }
@@ -139,6 +147,8 @@ pub(crate) fn effective_pipeline_config() -> Result<PipelineConfig, Error> {
         auto_copy: t.auto_copy,
         auto_paste: t.auto_paste,
         insertion_method: "paste".to_string(),
+        append_trailing_space: t.append_trailing_space,
+        auto_submit: t.auto_submit,
     })
 }
 
@@ -825,10 +835,17 @@ async fn process_audio(
             tracing::debug!("Pipeline: Pasting text...");
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
+            // Trailing space applies to the inserted text only, not to what is
+            // saved in history, so the stored transcription stays clean (#112).
+            let insert_text = crate::text_insert::apply_trailing_space(
+                &output_text,
+                config.append_trailing_space,
+            );
+
             let insert_result = if config.insertion_method == "typing" {
-                crate::text_insert::insert_text_by_typing(output_text.clone(), None, None)
+                crate::text_insert::insert_text_by_typing(insert_text, None, None)
             } else {
-                crate::text_insert::insert_text_by_paste(output_text.clone(), None)
+                crate::text_insert::insert_text_by_paste(insert_text, None)
             };
 
             if let Err(e) = insert_result {
@@ -852,6 +869,13 @@ async fn process_audio(
                 }
             } else {
                 tracing::debug!("Pipeline: Pasted text successfully");
+
+                // Only after a confirmed insertion (#112). Submitting on a failed
+                // paste would send an empty or half-written message, which is
+                // worse than not submitting at all.
+                if let Err(e) = crate::text_insert::send_auto_submit(config.auto_submit) {
+                    tracing::warn!("Pipeline: Failed to send auto-submit key: {}", e);
+                }
             }
         }
 
