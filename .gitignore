@@ -143,3 +143,11 @@ docs/branding/app-icon-prompt.md
 *.tmp
 *.temp
 .mcp.json
+
+# ============================================================================
+# Testing / Playwright
+# ============================================================================
+test-results/
+playwright-report/
+blob-report/
+.playwright-mcp/

@@ -15,6 +15,9 @@
     "lint:css:fix": "stylelint --fix \"src/**/*.css\"",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -39,6 +42,7 @@
   "devDependencies": {
     "@internationalized/date": "^3.12.2",
     "@lucide/svelte": "^1.17.0",
+    "@playwright/test": "1.60.0",
     "@sveltejs/adapter-static": "3.0.10",
     "@sveltejs/kit": "2.63.0",
     "@sveltejs/vite-plugin-svelte": "7.1.2",
