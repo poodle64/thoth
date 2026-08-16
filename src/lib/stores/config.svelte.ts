@@ -19,8 +19,6 @@ export interface AudioConfig {
 
 /** Transcription engine configuration */
 export interface TranscriptionConfig {
-  /** Transcription language code (e.g., "en", "auto") */
-  language: string;
   /** Whether to automatically copy transcription to clipboard */
   autoCopy: boolean;
   /** Whether to automatically paste transcription at cursor */
@@ -180,7 +178,6 @@ interface ConfigRaw {
     play_sounds: boolean;
   };
   transcription: {
-    language: string;
     auto_copy: boolean;
     auto_paste: boolean;
     add_leading_space: boolean;
@@ -249,7 +246,6 @@ function parseConfig(raw: ConfigRaw): Config {
       playSounds: raw.audio.play_sounds,
     },
     transcription: {
-      language: raw.transcription.language,
       autoCopy: raw.transcription.auto_copy,
       autoPaste: raw.transcription.auto_paste,
       addLeadingSpace: raw.transcription.add_leading_space,
@@ -319,7 +315,6 @@ function serialiseConfig(config: Config): ConfigRaw {
       play_sounds: config.audio.playSounds,
     },
     transcription: {
-      language: config.transcription.language,
       auto_copy: config.transcription.autoCopy,
       auto_paste: config.transcription.autoPaste,
       add_leading_space: config.transcription.addLeadingSpace,
@@ -389,7 +384,6 @@ function getDefaultConfig(): Config {
       playSounds: true,
     },
     transcription: {
-      language: 'en',
       autoCopy: false,
       autoPaste: true,
       addLeadingSpace: false,

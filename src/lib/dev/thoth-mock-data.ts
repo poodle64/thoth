@@ -25,7 +25,6 @@ const MOCK_CONFIG = {
   version: 1,
   audio: { device_id: null, sample_rate: 16000, play_sounds: true },
   transcription: {
-    language: 'en',
     auto_copy: false,
     auto_paste: true,
     add_leading_space: false,
