@@ -757,6 +757,8 @@ pub fn run() {
             sound::play_error_sound,
             sound::are_sounds_enabled,
             sound::set_sounds_enabled,
+            sound::get_sound_volume,
+            sound::set_sound_volume,
             // Pipeline (full recording -> transcription -> output flow)
             pipeline::pipeline_start_recording,
             pipeline::pipeline_stop_and_process,

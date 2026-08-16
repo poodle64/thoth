@@ -393,6 +393,34 @@
                   onCheckedChange={() => soundStore.toggle()}
                 />
               </div>
+              {#if soundStore.isEnabled}
+                <div
+                  class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3"
+                >
+                  <div class="flex flex-1 flex-col gap-1">
+                    <span class="text-sm font-medium text-foreground">Sound Volume</span>
+                    <span class="text-xs text-muted-foreground"
+                      >How loud the start and stop cues are</span
+                    >
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="5"
+                      class="accent-primary h-1 w-32 cursor-pointer"
+                      aria-label="Sound volume"
+                      value={Math.round(soundStore.volume * 100)}
+                      oninput={(e) =>
+                        soundStore.setVolume(Number(e.currentTarget.value) / 100)}
+                    />
+                    <span class="text-muted-foreground w-9 text-right text-xs tabular-nums">
+                      {Math.round(soundStore.volume * 100)}%
+                    </span>
+                  </div>
+                </div>
+              {/if}
               <div class="row-separator"></div>
               <div
                 class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3"

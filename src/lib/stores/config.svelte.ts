@@ -15,6 +15,8 @@ export interface AudioConfig {
   sampleRate: number;
   /** Whether to play audio feedback sounds */
   playSounds: boolean;
+  /** Recording cue volume, 0.0 (silent) to 1.0 (full) */
+  soundVolume: number;
 }
 
 /** Transcription engine configuration */
@@ -178,6 +180,7 @@ interface ConfigRaw {
     device_id: string | null;
     sample_rate: number;
     play_sounds: boolean;
+    sound_volume: number;
   };
   transcription: {
     language: string;
@@ -247,6 +250,7 @@ function parseConfig(raw: ConfigRaw): Config {
       deviceId: raw.audio.device_id,
       sampleRate: raw.audio.sample_rate,
       playSounds: raw.audio.play_sounds,
+      soundVolume: raw.audio.sound_volume ?? 1,
     },
     transcription: {
       language: raw.transcription.language,
@@ -317,6 +321,7 @@ function serialiseConfig(config: Config): ConfigRaw {
       device_id: config.audio.deviceId,
       sample_rate: config.audio.sampleRate,
       play_sounds: config.audio.playSounds,
+      sound_volume: config.audio.soundVolume,
     },
     transcription: {
       language: config.transcription.language,
@@ -387,6 +392,7 @@ function getDefaultConfig(): Config {
       deviceId: null,
       sampleRate: 16000,
       playSounds: true,
+      soundVolume: 1,
     },
     transcription: {
       language: 'en',

@@ -23,7 +23,7 @@ import type { CommandMap } from './tauri-mock';
 
 const MOCK_CONFIG = {
   version: 1,
-  audio: { device_id: null, sample_rate: 16000, play_sounds: true },
+  audio: { device_id: null, sample_rate: 16000, play_sounds: true, sound_volume: 1 },
   transcription: {
     language: 'en',
     auto_copy: false,
@@ -413,6 +413,8 @@ export const thothMockCommands: CommandMap = {
 
   // -- Sounds (called during soundStore.load()) --
   are_sounds_enabled: () => true,
+  get_sound_volume: () => 1,
+  set_sound_volume: () => undefined,
 
   // -- Shortcuts store initialise() --
   get_default_shortcuts: () => MOCK_SHORTCUTS,
