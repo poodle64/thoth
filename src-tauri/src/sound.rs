@@ -75,14 +75,26 @@ impl SoundEvent {
     }
 }
 
+/// Clamp a configured volume into the usable 0.0..=1.0 range.
+///
+/// NaN maps to silence rather than propagating into the waveform, where it would
+/// produce a stream of NaN samples instead of a tone.
+fn clamp_volume(volume: f32) -> f32 {
+    if volume.is_nan() {
+        0.0
+    } else {
+        volume.clamp(0.0, 1.0)
+    }
+}
+
 /// Play a sound for the given event if sounds are enabled in config
 pub fn play_sound(event: SoundEvent) {
     // Check if sounds are enabled in config
-    let sounds_enabled = match config::get_config() {
-        Ok(cfg) => cfg.audio.play_sounds,
+    let (sounds_enabled, volume) = match config::get_config() {
+        Ok(cfg) => (cfg.audio.play_sounds, cfg.audio.sound_volume),
         Err(e) => {
             tracing::warn!("Failed to get config for sound check: {}", e);
-            true // Default to playing sounds if config fails
+            (true, 1.0) // Default to playing sounds at full volume if config fails
         }
     };
 
@@ -91,14 +103,23 @@ pub fn play_sound(event: SoundEvent) {
         return;
     }
 
+    // Clamped rather than trusted: the value round-trips through config.json and
+    // the IPC boundary, and a negative volume would invert the waveform while a
+    // value above 1.0 would clip.
+    let volume = clamp_volume(volume);
+    if volume <= f32::EPSILON {
+        tracing::debug!("Cue volume is zero, skipping {:?}", event);
+        return;
+    }
+
     #[cfg(target_os = "macos")]
     {
-        play_macos_sound(event.sound_path());
+        play_macos_sound(event.sound_path(), volume);
     }
 
     #[cfg(target_os = "linux")]
     {
-        play_linux_sound(event);
+        play_linux_sound(event, volume);
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -126,7 +147,7 @@ const CUE_RAMP_SECS: f32 = 0.006;
 /// Each segment is an enveloped sine: a linear fade in and out so segment edges
 /// (and the cue's start and end) are click-free.
 #[cfg(target_os = "linux")]
-fn render_cue(segments: &[(f32, u32)], sample_rate: f32) -> Vec<f32> {
+fn render_cue(segments: &[(f32, u32)], sample_rate: f32, volume: f32) -> Vec<f32> {
     let mut samples = Vec::new();
 
     for &(frequency, duration_ms) in segments {
@@ -146,7 +167,7 @@ fn render_cue(segments: &[(f32, u32)], sample_rate: f32) -> Vec<f32> {
                 1.0
             };
             let phase = std::f32::consts::TAU * frequency * (i as f32 / sample_rate);
-            samples.push(phase.sin() * envelope * CUE_AMPLITUDE);
+            samples.push(phase.sin() * envelope * CUE_AMPLITUDE * volume);
         }
     }
 
@@ -199,7 +220,7 @@ where
 /// is the one path that behaves identically on every Linux install and needs no
 /// bundled asset.
 #[cfg(target_os = "linux")]
-fn play_cue(segments: &'static [(f32, u32)]) -> Result<(), String> {
+fn play_cue(segments: &'static [(f32, u32)], volume: f32) -> Result<(), String> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use std::time::Duration;
 
@@ -214,7 +235,7 @@ fn play_cue(segments: &'static [(f32, u32)]) -> Result<(), String> {
     let config: cpal::StreamConfig = supported.into();
     let sample_rate = config.sample_rate as f32;
 
-    let samples = render_cue(segments, sample_rate);
+    let samples = render_cue(segments, sample_rate, volume);
     if samples.is_empty() {
         return Ok(());
     }
@@ -243,10 +264,10 @@ fn play_cue(segments: &'static [(f32, u32)]) -> Result<(), String> {
 /// cue's duration both block, and the start cue fires on the hotkey path where
 /// any delay is audible as lag.
 #[cfg(target_os = "linux")]
-fn play_linux_sound(event: SoundEvent) {
+fn play_linux_sound(event: SoundEvent, volume: f32) {
     let segments = event.cue();
     std::thread::spawn(move || {
-        if let Err(e) = play_cue(segments) {
+        if let Err(e) = play_cue(segments, volume) {
             tracing::warn!("Failed to play {:?} cue: {}", event, e);
         }
     });
@@ -260,7 +281,7 @@ fn play_linux_sound(event: SoundEvent) {
 /// does not clip it. A fresh player is created per cue, prepared, played, and
 /// leaked for its short lifetime; the OS reclaims it once playback ends.
 #[cfg(target_os = "macos")]
-fn play_macos_sound(path: &'static str) {
+fn play_macos_sound(path: &'static str, volume: f32) {
     use objc2::AnyThread;
     use objc2_avf_audio::AVAudioPlayer;
     use objc2_foundation::{NSString, NSURL};
@@ -281,6 +302,9 @@ fn play_macos_sound(path: &'static str) {
 
     // SAFETY: standard AVAudioPlayer calls; safe to call from any thread.
     unsafe {
+        // AVAudioPlayer's volume is per-player and relative to the system
+        // volume, so this scales the cue without touching the user's output.
+        player.setVolume(volume);
         player.prepareToPlay();
         if !player.play() {
             tracing::warn!("AVAudioPlayer failed to start playing {}", path);
@@ -333,6 +357,27 @@ pub fn set_sounds_enabled(enabled: bool) -> Result<(), Error> {
     cfg.audio.play_sounds = enabled;
     config::set_config(cfg)?;
     tracing::info!("Sounds enabled: {}", enabled);
+    Ok(())
+}
+
+/// Get the recording cue volume (0.0 to 1.0).
+#[tauri::command]
+pub fn get_sound_volume() -> Result<f32, Error> {
+    Ok(clamp_volume(config::get_config()?.audio.sound_volume))
+}
+
+/// Set the recording cue volume.
+///
+/// Clamped before persisting, so an out-of-range value from the IPC boundary is
+/// corrected once here rather than needing to be defended against at every
+/// playback site.
+#[tauri::command]
+pub fn set_sound_volume(volume: f32) -> Result<(), Error> {
+    let volume = clamp_volume(volume);
+    let mut cfg = config::get_config()?;
+    cfg.audio.sound_volume = volume;
+    config::set_config(cfg)?;
+    tracing::info!("Sound volume: {:.2}", volume);
     Ok(())
 }
 
@@ -396,7 +441,7 @@ mod tests {
                 SoundEvent::TranscriptionComplete,
                 SoundEvent::Error,
             ] {
-                let samples = render_cue(event.cue(), rate);
+                let samples = render_cue(event.cue(), rate, 1.0);
                 assert!(!samples.is_empty(), "{event:?} rendered nothing at {rate}");
 
                 let peak = samples.iter().fold(0.0f32, |a, s| a.max(s.abs()));
@@ -417,7 +462,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn test_cue_fades_in_and_out() {
-        let samples = render_cue(SoundEvent::RecordingStart.cue(), 48_000.0);
+        let samples = render_cue(SoundEvent::RecordingStart.cue(), 48_000.0, 1.0);
 
         assert!(
             samples[0].abs() < 1e-6,
@@ -437,7 +482,7 @@ mod tests {
 
         for event in [SoundEvent::RecordingStart, SoundEvent::RecordingStop] {
             let expected_ms: u32 = event.cue().iter().map(|(_, ms)| ms).sum();
-            let frames = render_cue(event.cue(), RATE).len() as f32;
+            let frames = render_cue(event.cue(), RATE, 1.0).len() as f32;
             let actual_ms = (frames / RATE * 1000.0).round() as u32;
             assert!(
                 actual_ms.abs_diff(expected_ms) <= 1,
@@ -446,14 +491,57 @@ mod tests {
         }
     }
 
+    /// Volume must scale the waveform linearly, so the slider does what it says.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn volume_scales_the_waveform() {
+        let peak = |volume: f32| {
+            render_cue(SoundEvent::RecordingStart.cue(), 48_000.0, volume)
+                .iter()
+                .fold(0.0f32, |a, s| a.max(s.abs()))
+        };
+
+        let full = peak(1.0);
+        let half = peak(0.5);
+        let quiet = peak(0.1);
+
+        assert!((half / full - 0.5).abs() < 0.01, "half was {half}/{full}");
+        assert!(
+            (quiet / full - 0.1).abs() < 0.01,
+            "tenth was {quiet}/{full}"
+        );
+        assert_eq!(peak(0.0), 0.0, "zero volume still produced signal");
+    }
+
+    /// A configured volume can arrive from config.json or IPC, so out-of-range and
+    /// NaN values must be corrected rather than reaching the waveform. A negative
+    /// volume would invert the tone; NaN would fill the buffer with NaN samples.
+    #[test]
+    fn volume_is_clamped() {
+        assert_eq!(clamp_volume(0.5), 0.5);
+        assert_eq!(clamp_volume(0.0), 0.0);
+        assert_eq!(clamp_volume(1.0), 1.0);
+        assert_eq!(clamp_volume(-1.0), 0.0, "negative volume not clamped");
+        assert_eq!(clamp_volume(5.0), 1.0, "over-unity volume not clamped");
+        assert_eq!(clamp_volume(f32::NAN), 0.0, "NaN volume not handled");
+        assert_eq!(clamp_volume(f32::INFINITY), 1.0);
+        assert_eq!(clamp_volume(f32::NEG_INFINITY), 0.0);
+    }
+
+    /// The default must be full volume, so existing installs sound unchanged.
+    #[test]
+    fn default_volume_is_full() {
+        assert_eq!(crate::config::AudioConfig::default().sound_volume, 1.0);
+    }
+
     /// A zero-length segment must not panic or emit samples.
     #[cfg(target_os = "linux")]
     #[test]
     fn test_render_cue_handles_degenerate_input() {
-        assert!(render_cue(&[], 48_000.0).is_empty());
-        assert!(render_cue(&[(440.0, 0)], 48_000.0).is_empty());
+        assert!(render_cue(&[], 48_000.0, 1.0).is_empty());
+        assert!(render_cue(&[(440.0, 0)], 48_000.0, 1.0).is_empty());
         // A one-frame segment is inaudible but must not panic on the ramp maths.
-        let _ = render_cue(&[(440.0, 1)], 1_000.0);
+        let _ = render_cue(&[(440.0, 1)], 1_000.0, 1.0);
     }
 
     /// Audible end-to-end check against the real default output device.
@@ -466,7 +554,7 @@ mod tests {
     fn manual_play_recording_cues() {
         for event in [SoundEvent::RecordingStart, SoundEvent::RecordingStop] {
             println!("playing {event:?}: {:?}", event.cue());
-            play_cue(event.cue()).unwrap_or_else(|e| panic!("{event:?} failed to play: {e}"));
+            play_cue(event.cue(), 1.0).unwrap_or_else(|e| panic!("{event:?} failed to play: {e}"));
             std::thread::sleep(std::time::Duration::from_millis(250));
         }
     }

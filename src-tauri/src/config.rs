@@ -233,6 +233,12 @@ pub struct AudioConfig {
     pub sample_rate: u32,
     /// Whether to play audio feedback sounds
     pub play_sounds: bool,
+    /// Volume for the recording cues, 0.0 (silent) to 1.0 (full).
+    ///
+    /// Defaulted rather than required so configs written before the setting
+    /// existed keep working and simply play at full volume.
+    #[serde(default = "default_sound_volume")]
+    pub sound_volume: f32,
     /// Keep the cpal input stream open between recordings ("warm stream").
     ///
     /// When true (default), the device is opened once and kept playing with an
@@ -250,6 +256,7 @@ impl Default for AudioConfig {
             device_id: None,
             sample_rate: 16000,
             play_sounds: true,
+            sound_volume: default_sound_volume(),
             warm_stream: true,
         }
     }
@@ -299,6 +306,11 @@ pub struct TranscriptionConfig {
 
 fn default_true() -> bool {
     true
+}
+
+/// Recording cues play at full volume unless the user turns them down.
+fn default_sound_volume() -> f32 {
+    1.0
 }
 
 impl Default for TranscriptionConfig {
@@ -1372,6 +1384,7 @@ mod tests {
                 device_id: Some("test-device".to_string()),
                 sample_rate: 44100,
                 play_sounds: false,
+                sound_volume: 1.0,
                 warm_stream: true,
             },
             transcription: TranscriptionConfig {
@@ -1479,6 +1492,7 @@ mod tests {
             device_id: Some("custom-mic".to_string()),
             sample_rate: 48000,
             play_sounds: false,
+            sound_volume: 1.0,
             warm_stream: false,
         };
 

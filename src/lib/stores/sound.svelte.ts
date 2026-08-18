@@ -5,14 +5,20 @@
  * Sounds can be enabled/disabled via settings.
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from "@tauri-apps/api/core";
 
 /** Sound event types matching the Rust SoundEvent enum */
-export type SoundEvent = 'recording_start' | 'recording_stop' | 'transcription_complete' | 'error';
+export type SoundEvent =
+  | "recording_start"
+  | "recording_stop"
+  | "transcription_complete"
+  | "error";
 
 /** Create the sound service store with reactive state */
 function createSoundStore() {
   let isEnabled = $state<boolean>(true);
+  /** Cue volume, 0.0 (silent) to 1.0 (full). Backend clamps and persists it. */
+  let volume = $state<number>(1);
   let isLoading = $state<boolean>(false);
   let error = $state<string | null>(null);
 
@@ -24,12 +30,35 @@ function createSoundStore() {
     error = null;
 
     try {
-      isEnabled = await invoke<boolean>('are_sounds_enabled');
+      isEnabled = await invoke<boolean>("are_sounds_enabled");
+      volume = await invoke<number>("get_sound_volume");
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to load sound settings';
-      console.error('Failed to load sound settings:', e);
+      error = e instanceof Error ? e.message : "Failed to load sound settings";
+      console.error("Failed to load sound settings:", e);
     } finally {
       isLoading = false;
+    }
+  }
+
+  /**
+   * Set the cue volume (0.0 to 1.0).
+   *
+   * Applies optimistically so the slider tracks the pointer, then reverts on
+   * failure; a slider that lags a round-trip per pixel feels broken.
+   */
+  async function setVolume(next: number): Promise<boolean> {
+    const previous = volume;
+    volume = Math.min(1, Math.max(0, next));
+    error = null;
+
+    try {
+      await invoke("set_sound_volume", { volume });
+      return true;
+    } catch (e) {
+      volume = previous;
+      error = e instanceof Error ? e.message : "Failed to update sound volume";
+      console.error("Failed to update sound volume:", e);
+      return false;
     }
   }
 
@@ -41,12 +70,13 @@ function createSoundStore() {
     error = null;
 
     try {
-      await invoke('set_sounds_enabled', { enabled });
+      await invoke("set_sounds_enabled", { enabled });
       isEnabled = enabled;
       return true;
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to update sound settings';
-      console.error('Failed to update sound settings:', e);
+      error =
+        e instanceof Error ? e.message : "Failed to update sound settings";
+      console.error("Failed to update sound settings:", e);
       return false;
     } finally {
       isLoading = false;
@@ -65,9 +95,9 @@ function createSoundStore() {
    */
   async function playRecordingStart(): Promise<void> {
     try {
-      await invoke('play_recording_start_sound');
+      await invoke("play_recording_start_sound");
     } catch (e) {
-      console.error('Failed to play recording start sound:', e);
+      console.error("Failed to play recording start sound:", e);
     }
   }
 
@@ -76,9 +106,9 @@ function createSoundStore() {
    */
   async function playRecordingStop(): Promise<void> {
     try {
-      await invoke('play_recording_stop_sound');
+      await invoke("play_recording_stop_sound");
     } catch (e) {
-      console.error('Failed to play recording stop sound:', e);
+      console.error("Failed to play recording stop sound:", e);
     }
   }
 
@@ -87,9 +117,9 @@ function createSoundStore() {
    */
   async function playTranscriptionComplete(): Promise<void> {
     try {
-      await invoke('play_transcription_complete_sound');
+      await invoke("play_transcription_complete_sound");
     } catch (e) {
-      console.error('Failed to play transcription complete sound:', e);
+      console.error("Failed to play transcription complete sound:", e);
     }
   }
 
@@ -98,9 +128,9 @@ function createSoundStore() {
    */
   async function playError(): Promise<void> {
     try {
-      await invoke('play_error_sound');
+      await invoke("play_error_sound");
     } catch (e) {
-      console.error('Failed to play error sound:', e);
+      console.error("Failed to play error sound:", e);
     }
   }
 
@@ -109,13 +139,13 @@ function createSoundStore() {
    */
   async function play(event: SoundEvent): Promise<void> {
     switch (event) {
-      case 'recording_start':
+      case "recording_start":
         return playRecordingStart();
-      case 'recording_stop':
+      case "recording_stop":
         return playRecordingStop();
-      case 'transcription_complete':
+      case "transcription_complete":
         return playTranscriptionComplete();
-      case 'error':
+      case "error":
         return playError();
     }
   }
@@ -132,6 +162,9 @@ function createSoundStore() {
     get isEnabled() {
       return isEnabled;
     },
+    get volume() {
+      return volume;
+    },
     get isLoading() {
       return isLoading;
     },
@@ -142,6 +175,7 @@ function createSoundStore() {
     // Actions
     load,
     setEnabled,
+    setVolume,
     toggle,
     play,
     playRecordingStart,
