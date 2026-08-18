@@ -73,6 +73,98 @@ pub struct ClipboardHistoryEntry {
     pub source: String,
 }
 
+/// Clipboard contents captured before a paste, so the matching type can be put back.
+///
+/// Preserving only text is what caused #101: `get_text()` errors when the
+/// clipboard holds an image, so the saved value was `None` and the image was
+/// destroyed with nothing to restore. That breaks the clipboard-restore
+/// invariant in `.claude/CLAUDE.md`, which is not qualified by content type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SavedClipboard {
+    /// Plain text contents.
+    Text(String),
+    /// Raw RGBA image contents.
+    Image {
+        width: usize,
+        height: usize,
+        bytes: Vec<u8>,
+    },
+}
+
+/// Decide what to preserve from what the clipboard offered.
+///
+/// Split from the I/O in [`SavedClipboard::capture`] so the rule is testable
+/// without a system clipboard — CI is headless and has none. Text wins when both
+/// are present, matching the behaviour before images were handled at all.
+fn choose_saved_clipboard(
+    text: Option<String>,
+    image: Option<(usize, usize, Vec<u8>)>,
+) -> Option<SavedClipboard> {
+    // An empty string is treated as "no text": some platforms return Ok("")
+    // rather than an error when the clipboard holds only non-text content, and
+    // restoring an empty string would be indistinguishable from wiping it.
+    if let Some(text) = text.filter(|t| !t.is_empty()) {
+        return Some(SavedClipboard::Text(text));
+    }
+    image.map(|(width, height, bytes)| SavedClipboard::Image {
+        width,
+        height,
+        bytes,
+    })
+}
+
+impl SavedClipboard {
+    /// Capture the current clipboard, preferring text and falling back to an image.
+    ///
+    /// Returns `None` when the clipboard is empty, unreadable, or holds a type
+    /// Thoth cannot round-trip — in which case the caller must not restore, since
+    /// writing back a wrong or empty value is worse than leaving the clipboard be.
+    pub fn capture() -> Option<Self> {
+        let mut clipboard = arboard::Clipboard::new().ok()?;
+        let text = clipboard.get_text().ok();
+        // Only pay for the image read when there is no text to save.
+        let image = if text.as_deref().is_none_or(str::is_empty) {
+            clipboard
+                .get_image()
+                .ok()
+                .map(|img| (img.width, img.height, img.bytes.into_owned()))
+        } else {
+            None
+        };
+        choose_saved_clipboard(text, image)
+    }
+
+    /// Write the captured contents back to the clipboard.
+    pub fn restore(&self) -> Result<(), String> {
+        let mut clipboard =
+            arboard::Clipboard::new().map_err(|e| format!("Failed to open clipboard: {e}"))?;
+        match self {
+            Self::Text(text) => clipboard
+                .set_text(text.clone())
+                .map_err(|e| format!("Failed to restore clipboard text: {e}")),
+            Self::Image {
+                width,
+                height,
+                bytes,
+            } => clipboard
+                .set_image(arboard::ImageData {
+                    width: *width,
+                    height: *height,
+                    bytes: std::borrow::Cow::Borrowed(bytes),
+                })
+                .map_err(|e| format!("Failed to restore clipboard image: {e}")),
+        }
+    }
+
+    /// Short description for logging, without dumping clipboard contents.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Text(text) => format!("{} chars of text", text.len()),
+            Self::Image { width, height, .. } => format!("{width}x{height} image"),
+        }
+    }
+}
+
 /// Manages clipboard state and history
 pub struct ClipboardManager {
     /// Current settings
@@ -414,9 +506,11 @@ pub async fn paste_transcription(
     let settings = manager.settings().clone();
     drop(manager);
 
-    // Save current clipboard BEFORE any modification
+    // Save current clipboard BEFORE any modification. Captures an image when
+    // there is no text, so a screenshot on the clipboard survives a dictation
+    // paste instead of being silently destroyed (#101).
     let saved_clipboard = if settings.preserve_clipboard {
-        app.clipboard().read_text().ok()
+        SavedClipboard::capture()
     } else {
         None
     };
@@ -475,11 +569,11 @@ pub async fn paste_transcription(
     // logged.
     if let Some(original) = saved_clipboard {
         let delay = settings.restore_delay_ms;
-        let app_clone = app.clone();
         tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-            match app_clone.clipboard().write_text(&original) {
-                Ok(()) => debug!("Clipboard restored after {}ms", delay),
+            let what = original.describe();
+            match original.restore() {
+                Ok(()) => debug!("Clipboard restored ({what}) after {}ms", delay),
                 Err(e) => tracing::warn!("Failed to restore clipboard: {}", e),
             }
         });
@@ -593,5 +687,111 @@ mod tests {
 
         let deserialised: ClipboardFormat = serde_json::from_str(&serialised).unwrap();
         assert_eq!(deserialised, ClipboardFormat::PlainText);
+    }
+
+    fn image(bytes: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
+        Some((2, 1, bytes.to_vec()))
+    }
+
+    /// The #101 regression: an image on the clipboard with no text must be
+    /// preserved, not dropped.
+    ///
+    /// Previously the save was `read_text().ok()`, which returns `Err` for an
+    /// image, so nothing was saved and the image was destroyed by the paste with
+    /// nothing to restore.
+    #[test]
+    fn image_with_no_text_is_preserved() {
+        let saved = choose_saved_clipboard(None, image(&[1, 2, 3, 4, 5, 6, 7, 8]));
+        assert_eq!(
+            saved,
+            Some(SavedClipboard::Image {
+                width: 2,
+                height: 1,
+                bytes: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            })
+        );
+    }
+
+    /// Some platforms return `Ok("")` rather than an error when the clipboard
+    /// holds only non-text content, so an empty string must not shadow an image.
+    #[test]
+    fn empty_text_does_not_shadow_an_image() {
+        let saved = choose_saved_clipboard(Some(String::new()), image(&[9, 9, 9, 9]));
+        assert!(
+            matches!(saved, Some(SavedClipboard::Image { .. })),
+            "empty text shadowed the image: {saved:?}"
+        );
+    }
+
+    /// Text still wins when both are present — the behaviour before images were
+    /// handled at all, so this change cannot regress the common path.
+    #[test]
+    fn text_wins_over_image() {
+        let saved = choose_saved_clipboard(Some("hello".to_string()), image(&[1, 2, 3, 4]));
+        assert_eq!(saved, Some(SavedClipboard::Text("hello".to_string())));
+    }
+
+    #[test]
+    fn text_alone_is_preserved() {
+        assert_eq!(
+            choose_saved_clipboard(Some("hi".to_string()), None),
+            Some(SavedClipboard::Text("hi".to_string()))
+        );
+    }
+
+    /// Nothing to save must stay `None`. The caller skips the restore entirely in
+    /// that case; writing back an empty value would wipe whatever arrived in the
+    /// meantime, which is worse than leaving the clipboard alone.
+    #[test]
+    fn nothing_to_save_is_none() {
+        assert_eq!(choose_saved_clipboard(None, None), None);
+        assert_eq!(choose_saved_clipboard(Some(String::new()), None), None);
+    }
+
+    #[test]
+    fn describe_does_not_leak_contents() {
+        let secret = SavedClipboard::Text("hunter2 correct horse".to_string());
+        let described = secret.describe();
+        assert!(!described.contains("hunter2"), "leaked text: {described}");
+        assert_eq!(described, "21 chars of text");
+
+        assert_eq!(
+            SavedClipboard::Image {
+                width: 800,
+                height: 600,
+                bytes: vec![0; 16],
+            }
+            .describe(),
+            "800x600 image"
+        );
+    }
+
+    /// Round-trips real content through the system clipboard. Ignored by default:
+    /// CI is headless and has no clipboard.
+    ///
+    /// Run with: `cargo test --lib clipboard -- --ignored --nocapture`
+    #[test]
+    #[ignore = "requires a system clipboard (headless CI has none)"]
+    fn manual_image_round_trip() {
+        // 2x1 RGBA, deliberately not uniform so a truncated round-trip shows up.
+        let original = SavedClipboard::Image {
+            width: 2,
+            height: 1,
+            bytes: vec![255, 0, 0, 255, 0, 0, 255, 255],
+        };
+        original.restore().expect("failed to write image");
+
+        let recaptured = SavedClipboard::capture().expect("clipboard read back empty");
+        match recaptured {
+            SavedClipboard::Image {
+                width,
+                height,
+                bytes,
+            } => {
+                assert_eq!((width, height), (2, 1));
+                assert_eq!(bytes.len(), 8, "RGBA byte count changed in the round trip");
+            }
+            other => panic!("expected an image back, got {}", other.describe()),
+        }
     }
 }

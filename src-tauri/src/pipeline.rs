@@ -800,10 +800,10 @@ async fn process_audio(
         // Save the user's original clipboard BEFORE any modification.
         // This must happen before copy_transcription or insert_text_by_paste,
         // both of which overwrite the clipboard.
+        // Captures an image when there is no text, so a screenshot on the
+        // clipboard survives a dictation paste rather than being destroyed (#101).
         let saved_clipboard = if uses_clipboard_paste {
-            arboard::Clipboard::new()
-                .ok()
-                .and_then(|mut cb| cb.get_text().ok())
+            clipboard::SavedClipboard::capture()
         } else {
             None
         };
@@ -877,8 +877,9 @@ async fn process_audio(
             let restore_delay = clipboard::get_restore_delay();
             tracing::debug!("Pipeline: Restoring clipboard in {}ms", restore_delay);
             tokio::time::sleep(tokio::time::Duration::from_millis(restore_delay)).await;
-            match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(original)) {
-                Ok(()) => tracing::debug!("Pipeline: Clipboard restored"),
+            let what = original.describe();
+            match original.restore() {
+                Ok(()) => tracing::debug!("Pipeline: Clipboard restored ({what})"),
                 Err(e) => tracing::warn!("Pipeline: Failed to restore clipboard: {}", e),
             }
         }
