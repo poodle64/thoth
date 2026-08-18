@@ -55,6 +55,12 @@ jobs:
     # be tested natively.
     runs-on: ${{ matrix.platform }}
 
+    # Hard ceiling on the whole job. GitHub's default is 6 hours, which is long
+    # enough that a stalled step reads as "still building" — on 2026-08-18 a hung
+    # apt fetch ran 3.5 hours unnoticed. A cold-cache Linux build is ~33 minutes,
+    # so 60 leaves headroom while turning a stall into a prompt failure.
+    timeout-minutes: 60
+
     # macOS Apple Silicon runners: whisper.cpp's GGML detects the i8mm CPU
     # feature via -march=native and emits vmmlaq_s32 intrinsics, then fails to
     # compile because the target feature isn't enabled for the function being
@@ -69,25 +75,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
+      # Runs before the build so a drift regression fails in seconds rather
+      # than after a 30-minute compile.
+      - name: Guard shared Vulkan install (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: ./scripts/test-install-vulkan-sdk.sh
+
+      # The install lives in scripts/install-vulkan-sdk.sh so this and
+      # release.yaml share one definition instead of two copies that drift.
+      # timeout-minutes is a backstop: the script bounds its own network calls,
+      # but a step with no ceiling can burn the job's whole budget if something
+      # stalls in a way the script does not anticipate.
       - name: Install Vulkan SDK (Linux)
         if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          # whisper.cpp's GGML Vulkan backend compiles compute shaders at build
-          # time; its CMake does find_package(Vulkan COMPONENTS glslc REQUIRED)
-          # and find_package(SPIRV-Headers REQUIRED). The glslc binary is NOT
-          # packaged in Ubuntu 22.04 (jammy) at all — it only appears from noble
-          # onward — so the LunarG apt repo is the supported way to get it on a
-          # jammy runner. vulkan-sdk pulls in glslc, the loader/headers, and the
-          # SPIRV headers, replacing libvulkan-dev/spirv-headers.
-          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc \
-            | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc > /dev/null
-          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list \
-            http://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
-          sudo apt-get update
-          sudo apt-get install -y vulkan-sdk
+        timeout-minutes: 10
+        run: ./scripts/install-vulkan-sdk.sh
 
       - name: Install system dependencies (Linux)
         if: matrix.platform == 'ubuntu-22.04'
+        timeout-minutes: 10
         run: |
           # GUI + audio libs Tauri needs to compile. desktop-file-utils provides
           # desktop-file-validate used below. The Vulkan toolchain is installed
@@ -144,6 +150,12 @@ jobs:
   frontend:
     name: Frontend
     runs-on: [self-hosted, atlas]
+
+    # Tighter than the rust job's ceiling: this one takes ~1.5 minutes, and it
+    # runs on the self-hosted box, where a hung job holds the runner hostage
+    # rather than just burning hosted minutes.
+    timeout-minutes: 20
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5

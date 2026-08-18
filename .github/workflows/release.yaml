@@ -39,6 +39,10 @@ jobs:
     # Vulkan/Wayland — which the household self-hosted runner cannot provide.
     runs-on: ${{ matrix.platform }}
 
+    # Hard ceiling on the whole job — see the same note in ci.yaml. A release
+    # bundles as well as compiles, so this is more generous than CI's 60.
+    timeout-minutes: 120
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -76,26 +80,17 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
 
+      # Shared with ci.yaml — see scripts/install-vulkan-sdk.sh for why the SDK
+      # is needed and why its network calls are bounded. timeout-minutes is a
+      # backstop against a stall the script does not anticipate.
       - name: Install Vulkan SDK (Linux)
         if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          # whisper.cpp's GGML Vulkan backend compiles its compute shaders at
-          # build time; its CMake requires the glslc compiler
-          # (find_package(Vulkan COMPONENTS glslc REQUIRED)) and SPIRV-Headers.
-          # The glslc binary is NOT packaged in Ubuntu 22.04 (jammy) — it only
-          # appears from noble onward — so the LunarG apt repo is the supported
-          # way to get it on a jammy runner. vulkan-sdk supplies glslc, the
-          # loader/headers, and the SPIRV headers. At runtime users need only
-          # libvulkan.so.1 plus a GPU Vulkan driver.
-          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc \
-            | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc > /dev/null
-          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list \
-            http://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
-          sudo apt-get update
-          sudo apt-get install -y vulkan-sdk
+        timeout-minutes: 10
+        run: ./scripts/install-vulkan-sdk.sh
 
       - name: Install system dependencies (Linux)
         if: matrix.platform == 'ubuntu-22.04'
+        timeout-minutes: 10
         run: |
           # GUI + audio libs Tauri needs to compile. The Vulkan toolchain is
           # installed by the Vulkan SDK step above.
