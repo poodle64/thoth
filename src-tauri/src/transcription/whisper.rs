@@ -182,10 +182,21 @@ impl WhisperTranscriptionService {
         // Configure transcription parameters
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
 
-        // English language for speed (no language detection)
+        // English-only is a deliberate current scope limit, not an oversight
+        // (#102). Whisper's language auto-detection costs an extra inference
+        // pass before decoding, which is a latency hit on the hot path, so the
+        // language is pinned rather than detected.
+        //
+        // A `transcription.language` config field used to sit alongside this
+        // and was never read; it was removed rather than left looking
+        // functional. Making this configurable means resolving an effective
+        // language per request and adding UI for it: reopen #102 if multilingual
+        // transcription is wanted.
         params.set_language(Some("en"));
 
-        // Disable translation, we want transcription
+        // Disable translation, we want transcription. Same scope note as above:
+        // the bundled large-v3-turbo model is translate-capable, but exposing it
+        // needs a user-facing toggle, not a silent default.
         params.set_translate(false);
 
         // No timestamps needed for basic transcription

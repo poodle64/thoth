@@ -262,8 +262,6 @@ pub struct TranscriptionConfig {
     /// Selected model ID (e.g., "ggml-large-v3-turbo", "parakeet-tdt-0.6b-v2-int8")
     /// If None, uses the recommended model from the manifest
     pub model_id: Option<String>,
-    /// Transcription language code (e.g., "en", "auto")
-    pub language: String,
     /// Whether to automatically copy transcription to clipboard
     pub auto_copy: bool,
     /// Whether to automatically paste transcription at cursor
@@ -307,7 +305,6 @@ impl Default for TranscriptionConfig {
     fn default() -> Self {
         Self {
             model_id: None,
-            language: "en".to_string(),
             auto_copy: false,
             auto_paste: true,
             add_leading_space: false,
@@ -1132,10 +1129,6 @@ mod tests {
         assert_eq!(deserialised.version, config.version);
         assert_eq!(deserialised.audio.sample_rate, config.audio.sample_rate);
         assert_eq!(
-            deserialised.transcription.language,
-            config.transcription.language
-        );
-        assert_eq!(
             deserialised.shortcuts.toggle_recording,
             config.shortcuts.toggle_recording
         );
@@ -1153,10 +1146,31 @@ mod tests {
     #[test]
     fn test_transcription_config_defaults() {
         let transcription = TranscriptionConfig::default();
-        assert_eq!(transcription.language, "en");
         assert!(!transcription.auto_copy);
         assert!(transcription.auto_paste);
         assert!(!transcription.add_leading_space);
+    }
+
+    /// A config written before `transcription.language` was removed (#102) must
+    /// still load, with the stale key ignored rather than failing the parse.
+    ///
+    /// This holds because `Config` does not set `deny_unknown_fields`. The test
+    /// exists so that adding it later cannot silently break every existing
+    /// install's config on upgrade.
+    #[test]
+    fn stale_language_key_is_ignored_not_fatal() {
+        let json = r#"{
+            "language": "de",
+            "auto_copy": true,
+            "auto_paste": false
+        }"#;
+
+        let parsed: TranscriptionConfig =
+            serde_json::from_str(json).expect("a stale language key must not fail the parse");
+
+        // The rest of the object still round-trips.
+        assert!(parsed.auto_copy);
+        assert!(!parsed.auto_paste);
     }
 
     #[test]
@@ -1306,7 +1320,6 @@ mod tests {
         assert_eq!(config.version, 1);
         assert_eq!(config.audio.sample_rate, 48000);
         assert_eq!(config.audio.device_id, None); // Default
-        assert_eq!(config.transcription.language, "en"); // Default
     }
 
     #[test]
@@ -1363,7 +1376,6 @@ mod tests {
             },
             transcription: TranscriptionConfig {
                 model_id: Some("test-model".to_string()),
-                language: "de".to_string(),
                 auto_copy: false,
                 auto_paste: true,
                 add_leading_space: true,
@@ -1419,7 +1431,6 @@ mod tests {
         assert_eq!(restored.audio.sample_rate, 44100);
         assert!(!restored.audio.play_sounds);
 
-        assert_eq!(restored.transcription.language, "de");
         assert!(!restored.transcription.auto_copy);
         assert!(restored.transcription.add_leading_space);
 
