@@ -1,0 +1,147 @@
+name: Nix
+
+# Two-tier Nix gate (issue #117).
+#
+# Nothing else in CI evaluates flake.nix, so packaging breakage — a stale
+# pnpmDeps hash, a flake output that no longer evaluates, a NixOS module that
+# stopped instantiating — only ever surfaced when somebody ran `nix build` by
+# hand. But a full `nix build` compiles the whole Rust tree plus whisper.cpp
+# and pulls the CUDA sherpa-onnx prebuilt, which is far too slow to run on
+# every PR that touches a Svelte component.
+#
+# So it is split:
+#
+#   Tier 1 (eval)  — runs on every PR. Evaluation only, plus a build of the
+#                    pnpm dependency derivation. Cheap.
+#   Tier 2 (build) — full `nix build`. Runs only when a file that changes how
+#                    the package is *built* has changed.
+#
+# Tier 1 deliberately builds `.#thoth.pnpmDeps` rather than only evaluating.
+# That derivation is fixed-output, so its hash is only verified when it is
+# actually realised — and it is the single most drift-prone value in the repo
+# (it must be refreshed by hand whenever pnpm-lock.yaml changes, and has been
+# missed before). Evaluation alone would not catch it. It costs seconds.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nix-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    name: Flake eval
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    outputs:
+      packaging-changed: ${{ steps.filter.outputs.packaging }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so the tier-2 path filter below can diff against the
+          # base commit; the default shallow clone has no merge base.
+          fetch-depth: 0
+
+      # Decides whether tier 2 runs. Deliberately scoped to files that change
+      # how the package is BUILT (packaging inputs, lockfiles, manifests) —
+      # not to src-tauri/**, whose compilation is already gated by ci.yaml's
+      # Rust job. Including application source here would make the expensive
+      # build run on nearly every PR and defeat the tiering.
+      - name: Detect packaging changes
+        id: filter
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+
+          # workflow_dispatch has no diff base, and a first push to a branch
+          # reports an all-zero "before" SHA. Build in both cases rather than
+          # silently skipping the expensive tier.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
+            || [ -z "$BASE_SHA" ] \
+            || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "packaging=true" >> "$GITHUB_OUTPUT"
+            echo "No usable diff base (${{ github.event_name }}); running the full build."
+            exit 0
+          fi
+
+          changed=$(git diff --name-only "$BASE_SHA" "${{ github.sha }}")
+          echo "Changed files:"
+          while IFS= read -r file; do
+            echo "  $file"
+          done <<< "$changed"
+
+          if echo "$changed" | grep -qE '^(flake\.nix|flake\.lock|package\.json|pnpm-lock\.yaml|nix/|src-tauri/Cargo\.(toml|lock)|\.github/workflows/nix-check\.yaml)'; then
+            echo "packaging=true" >> "$GITHUB_OUTPUT"
+            echo "Packaging-relevant change detected; the full build will run."
+          else
+            echo "packaging=false" >> "$GITHUB_OUTPUT"
+            echo "No packaging-relevant change; skipping the full build."
+          fi
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      # Evaluates every flake output: packages, devShells, and any `checks`
+      # (which is where the NixOS/home-manager module instantiation tests
+      # live). --no-build keeps this to evaluation, which is the whole point
+      # of the fast tier — for a module check, evaluating the configuration
+      # IS the assertion.
+      - name: Flake check (evaluation only)
+        run: nix flake check --no-build --show-trace
+
+      - name: Build pnpm dependency derivation
+        run: nix build .#thoth.pnpmDeps --no-link --show-trace
+
+  build:
+    name: Flake build
+    needs: eval
+    if: needs.eval.outputs.packaging-changed == 'true'
+    runs-on: ubuntu-22.04
+
+    # Generous, because a cold build compiles the Rust tree and whisper.cpp
+    # from scratch — but still a ceiling, so a stalled fetch cannot sit for
+    # GitHub's default six hours (see the note in ci.yaml).
+    timeout-minutes: 120
+
+    steps:
+      # The runner ships ~25GB of preinstalled toolchains this build never
+      # uses, and the CUDA sherpa-onnx prebuilt plus a full Rust target dir
+      # will otherwise run the disk out.
+      - name: Free disk space
+        run: |
+          set -euo pipefail
+          before=$(df --output=avail -BG / | tail -1 | tr -dc '0-9')
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force > /dev/null 2>&1 || true
+          after=$(df --output=avail -BG / | tail -1 | tr -dc '0-9')
+          echo "Free disk: ${before}G -> ${after}G"
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Build the package
+        run: nix build .#thoth --no-link --print-build-logs
