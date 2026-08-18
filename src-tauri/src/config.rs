@@ -262,6 +262,27 @@ impl Default for AudioConfig {
     }
 }
 
+/// Key combination sent after a successful insertion to submit the text.
+///
+/// Chat interfaces disagree on the send binding (Enter in Slack and iMessage,
+/// Ctrl/Cmd+Enter in Discord threads, Gmail and many web forms), so this is a
+/// choice rather than a boolean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoSubmit {
+    /// Send nothing after inserting. The default: dictation must not press keys
+    /// the user did not ask for.
+    #[default]
+    Off,
+    /// Plain Return.
+    Enter,
+    /// Control+Return.
+    CtrlEnter,
+    /// Command+Return on macOS; Control+Return elsewhere, since there is no
+    /// Command key to press.
+    CmdEnter,
+}
+
 /// Transcription engine configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -275,6 +296,18 @@ pub struct TranscriptionConfig {
     pub auto_paste: bool,
     /// Whether to add space before pasted text
     pub add_leading_space: bool,
+    /// Whether to append a single space after the inserted text.
+    ///
+    /// Off by default. Useful when dictating several times into the same field,
+    /// so consecutive transcriptions are word-spaced without manual editing.
+    #[serde(default)]
+    pub append_trailing_space: bool,
+    /// Key combination to send after a successful insertion, to submit the text.
+    ///
+    /// Off by default. Different chat interfaces bind different send shortcuts,
+    /// hence the choice rather than a plain boolean.
+    #[serde(default)]
+    pub auto_submit: AutoSubmit,
     /// Whether to remove hesitation sounds (um, uh, er, ah) from transcription
     #[serde(default = "default_true")]
     pub remove_fillers: bool,
@@ -320,6 +353,8 @@ impl Default for TranscriptionConfig {
             auto_copy: false,
             auto_paste: true,
             add_leading_space: false,
+            append_trailing_space: false,
+            auto_submit: AutoSubmit::Off,
             remove_fillers: true,
             australian_spelling: true,
             spoken_numbers_to_digits: false,
@@ -1392,6 +1427,8 @@ mod tests {
                 auto_copy: false,
                 auto_paste: true,
                 add_leading_space: true,
+                append_trailing_space: false,
+                auto_submit: AutoSubmit::Off,
                 remove_fillers: false,
                 australian_spelling: false,
                 spoken_numbers_to_digits: false,

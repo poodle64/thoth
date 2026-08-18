@@ -28,6 +28,8 @@ const MOCK_CONFIG = {
     auto_copy: false,
     auto_paste: true,
     add_leading_space: false,
+    append_trailing_space: false,
+    auto_submit: 'off' as const,
     remove_fillers: true,
     australian_spelling: true,
     spoken_numbers_to_digits: false,

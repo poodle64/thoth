@@ -35,7 +35,7 @@
   import OverviewPane from '../components/OverviewPane.svelte';
   import AboutDialog from '../components/AboutDialog.svelte';
   import ShortcutInput from '../components/ShortcutInput.svelte';
-  import { configStore, type IndicatorStyle } from '../stores/config.svelte';
+  import { configStore, type IndicatorStyle, type AutoSubmit } from '../stores/config.svelte';
   import { pipelineStore } from '../stores/pipeline.svelte';
   import { shortcutsStore, type ShortcutInfo } from '../stores/shortcuts.svelte';
   import { soundStore } from '../stores/sound.svelte';
@@ -648,6 +648,65 @@
                   </button>
                 </div>
               {/if}
+            </div>
+          </section>
+
+          <!-- Text Insertion Section -->
+          <section class="flex flex-col">
+            <div class="mb-3">
+              <h2 class="text-base font-semibold text-foreground m-0">Text Insertion</h2>
+              <p class="text-xs text-muted-foreground m-0">
+                What happens after a transcription reaches your cursor
+              </p>
+            </div>
+            <div class="flex flex-col gap-2">
+              <div
+                class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3"
+              >
+                <div class="flex flex-1 flex-col gap-1">
+                  <span class="text-sm font-medium text-foreground">Append Trailing Space</span>
+                  <span class="text-xs text-muted-foreground"
+                    >Add a space after the text, so consecutive dictations into the same field stay
+                    word-spaced</span
+                  >
+                </div>
+                <Switch
+                  checked={configStore.transcription.appendTrailingSpace}
+                  onCheckedChange={async (checked) => {
+                    configStore.updateTranscription('appendTrailingSpace', checked);
+                    await configStore.save();
+                  }}
+                />
+              </div>
+              <div class="row-separator"></div>
+              <div
+                class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3"
+              >
+                <div class="flex flex-1 flex-col gap-1">
+                  <span class="text-sm font-medium text-foreground">Auto-Submit</span>
+                  <span class="text-xs text-muted-foreground"
+                    >Send a key combination after inserting, to submit the message. Only fires when
+                    the insertion succeeded.</span
+                  >
+                </div>
+                <select
+                  class="border-border bg-card text-foreground rounded-md border px-2 py-1 text-sm"
+                  aria-label="Auto-submit key combination"
+                  value={configStore.transcription.autoSubmit}
+                  onchange={async (e) => {
+                    configStore.updateTranscription(
+                      'autoSubmit',
+                      e.currentTarget.value as AutoSubmit
+                    );
+                    await configStore.save();
+                  }}
+                >
+                  <option value="off">Off</option>
+                  <option value="enter">Enter</option>
+                  <option value="ctrl_enter">Ctrl+Enter</option>
+                  <option value="cmd_enter">Cmd+Enter</option>
+                </select>
+              </div>
             </div>
           </section>
         </div>

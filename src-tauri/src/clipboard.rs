@@ -545,11 +545,28 @@ pub async fn paste_transcription(
         manager.add_to_history(text, source);
     }
 
+    // Trailing space and auto-submit are transcription settings rather than
+    // clipboard settings, so they are read from the config here rather than
+    // from ClipboardSettings (#112).
+    let transcription_cfg = crate::config::get_config()
+        .map(|c| c.transcription)
+        .unwrap_or_default();
+
     // Perform paste
-    crate::text_insert::insert_text_by_paste(formatted_text, Some(50)).map_err(|e| {
+    let insert_text = crate::text_insert::apply_trailing_space(
+        &formatted_text,
+        transcription_cfg.append_trailing_space,
+    );
+    crate::text_insert::insert_text_by_paste(insert_text, Some(50)).map_err(|e| {
         error!("Failed to paste transcription: {}", e);
         format!("Failed to paste: {}", e)
     })?;
+
+    // Only after the paste succeeded: submitting a failed paste would send an
+    // empty or half-written message.
+    if let Err(e) = crate::text_insert::send_auto_submit(transcription_cfg.auto_submit) {
+        tracing::warn!("Failed to send auto-submit key: {}", e);
+    }
 
     info!(
         "Transcription pasted (enhanced: {}, preserve: {})",

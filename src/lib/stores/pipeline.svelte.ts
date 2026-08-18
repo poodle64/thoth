@@ -13,7 +13,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { toast } from 'svelte-sonner';
-import { configStore } from './config.svelte';
+import { configStore, type AutoSubmit } from './config.svelte';
 import { settingsStore } from './settings.svelte';
 import { soundStore } from './sound.svelte';
 
@@ -66,6 +66,10 @@ export interface PipelineConfig {
   autoPaste: boolean;
   /** Insertion method: "typing" or "paste" */
   insertionMethod: string;
+  /** Whether to append a single space after the inserted text */
+  appendTrailingSpace: boolean;
+  /** Key combination sent after a successful insertion */
+  autoSubmit: AutoSubmit;
 }
 
 /** Pipeline execution result */
@@ -145,6 +149,8 @@ async function getDefaultConfig(): Promise<PipelineConfig> {
     autoCopy: config.transcription.autoCopy,
     autoPaste: config.transcription.autoPaste && settingsStore.autoPaste,
     insertionMethod: 'paste',
+    appendTrailingSpace: config.transcription.appendTrailingSpace,
+    autoSubmit: config.transcription.autoSubmit,
   };
 }
 
@@ -485,6 +491,9 @@ function createPipelineStore() {
         ...defaultConfig,
         autoCopy: false,
         autoPaste: false,
+        // File transcription writes nowhere, so auto-submit would fire a stray
+        // Return into whatever happens to be focused (#112).
+        autoSubmit: 'off',
       };
 
       const result = await invoke<PipelineResult>('pipeline_transcribe_file', {
