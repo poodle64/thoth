@@ -2,5 +2,18 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "local>poodle64/master-project"
+  ],
+  "packageRules": [
+    {
+      "description": "sherpa-onnx-sys 1.13.5 fails to link on macOS ('could not find native static library sherpa-onnx-c-api'), breaking the default-features build that the macOS CI leg and macOS releases use. Linux is unaffected because it builds --no-default-features and excludes Parakeet, so Linux CI cannot catch a regression here. Hold at the last known-good 1.13.2 until #149 is resolved; remove this rule in the same commit that fixes it.",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchPackageNames": [
+        "sherpa-onnx",
+        "sherpa-onnx-sys"
+      ],
+      "allowedVersions": "<=1.13.2"
+    }
   ]
 }
