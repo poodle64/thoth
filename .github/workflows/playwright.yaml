@@ -1,0 +1,90 @@
+name: Playwright
+
+# Frontend boot smoke tests (#114).
+#
+# Separate from ci.yaml's Frontend job on purpose. That job type-checks, lints
+# and runs vitest, all of which are fast and need no browser. This one installs
+# a Chromium build and boots a dev server, so it is gated on frontend paths
+# rather than running on every push: a Rust-only change has nothing to gain from
+# launching a browser.
+#
+# Scope is a boot check, not a UI suite. It answers "does the frontend still
+# start and mount", which is exactly the regression class the Rust test suite
+# cannot see.
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/e2e/**"
+      - "playwright.config.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "vite.config.ts"
+      - "svelte.config.js"
+      - ".github/workflows/playwright.yaml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "tests/e2e/**"
+      - "playwright.config.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "vite.config.ts"
+      - "svelte.config.js"
+      - ".github/workflows/playwright.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: playwright-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Frontend smoke (Playwright)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      # pnpm must be installed before setup-node, or setup-node's cache
+      # auto-detection cannot find the pnpm store path (same ordering as ci.yaml).
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+          cache: "pnpm"
+          # No registry-url/scope: the @poodle64 packages are public on npmjs,
+          # and setting it here repoints the scope at GitHub Packages, which
+          # 404s every published version. Matches ci.yaml.
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Only Chromium: the smoke tests assert the app boots, which does not vary
+      # by engine enough to justify tripling install time and CI minutes.
+      # --with-deps pulls the system libraries the browser needs on a bare runner.
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      # playwright.config.ts starts the dev server itself via `webServer`, so
+      # there is no separate start step to keep in sync here.
+      - name: Run smoke tests
+        run: pnpm test:e2e
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
