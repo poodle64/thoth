@@ -383,5 +383,126 @@
 
         devShells.default = mkThothShell { };
         devShells.cuda = mkThothShell { gpuParakeet = true; };
-      });
+
+        # Module instantiation checks (issue #117).
+        #
+        # The modules below are the only outputs nothing else exercises: a
+        # package break shows up in `nix build`, but a module that stopped
+        # instantiating — a renamed package attribute, an option type that no
+        # longer accepts its default — is invisible until a NixOS user tries
+        # to rebuild. These make `nix flake check` catch that, which the Nix
+        # workflow runs on every PR (.github/workflows/nix-check.yaml).
+        #
+        # Evaluation IS the assertion here, so these stay cheap and are still
+        # meaningful under `nix flake check --no-build`.
+        checks = nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          # Full NixOS evaluation. Proves the module imports, that
+          # `programs.thoth.enable` wires the package default through
+          # `self.packages`, and that the package lands in systemPackages.
+          nixos-module =
+            let
+              sys = nixpkgs.lib.nixosSystem {
+                inherit system;
+                modules = [
+                  self.nixosModules.default
+                  {
+                    programs.thoth.enable = true;
+                    # Minimum a NixOS evaluation needs to be complete.
+                    boot.loader.grub.devices = [ "/dev/sda" ];
+                    fileSystems."/" = { device = "/dev/sda1"; fsType = "ext4"; };
+                    system.stateVersion = "25.05";
+                  }
+                ];
+              };
+              hasThoth = builtins.any
+                (p: (p.pname or "") == "thoth")
+                sys.config.environment.systemPackages;
+            in
+            assert hasThoth;
+            pkgs.runCommand "thoth-nixos-module-check" { } "touch $out";
+
+          # The home-manager module, evaluated against stub option
+          # declarations rather than real home-manager.
+          #
+          # Deliberate: taking home-manager as a flake input would drag it
+          # into the lock of every downstream consumer of `inputs.thoth`,
+          # purely for a test. The stubs cover what actually rots here — the
+          # module's own option declarations, the package wiring, and the
+          # generated systemd unit. They do NOT verify compatibility with
+          # home-manager's real option types; that is the gap this trades
+          # for not inflating consumers' dependency graphs.
+          home-manager-module =
+            let
+              evaluated = nixpkgs.lib.evalModules {
+                modules = [
+                  self.homeManagerModules.default
+                  {
+                    # Stand-ins for the home-manager options the module sets.
+                    options = {
+                      home.packages = nixpkgs.lib.mkOption {
+                        type = nixpkgs.lib.types.listOf nixpkgs.lib.types.package;
+                        default = [ ];
+                      };
+                      systemd.user.services = nixpkgs.lib.mkOption {
+                        type = nixpkgs.lib.types.attrsOf (nixpkgs.lib.types.attrsOf nixpkgs.lib.types.anything);
+                        default = { };
+                      };
+                    };
+                  }
+                  { _module.args.pkgs = pkgs; }
+                  { services.thoth.enable = true; }
+                ];
+              };
+              unit = evaluated.config.systemd.user.services.thoth;
+              # The module assigns ExecStart as a plain string; real
+              # home-manager coerces it to a list, the stubs above do not.
+              # Accept either so this does not depend on that coercion.
+              execStart =
+                if builtins.isList unit.Service.ExecStart
+                then builtins.head unit.Service.ExecStart
+                else unit.Service.ExecStart;
+              startsThoth = nixpkgs.lib.hasSuffix "/bin/thoth" execStart;
+              autostarts = builtins.elem "graphical-session.target" unit.Install.WantedBy;
+            in
+            assert startsThoth;
+            assert autostarts;
+            pkgs.runCommand "thoth-home-manager-module-check" { } "touch $out";
+        };
+      })
+    // {
+      # NixOS and home-manager modules (issue #117). Defined outside
+      # eachDefaultSystem: they are system-agnostic, and the package default
+      # is wired lazily via `self.packages` when a user's configuration
+      # evaluates, so `inputs.thoth.nixosModules.default` gives a working
+      # declarative install out of the box.
+      nixosModules.default = {
+        lib,
+        pkgs,
+        ...
+      }: {
+        imports = [ ./nix/module.nix ];
+        programs.thoth.package =
+          lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.thoth;
+      };
+
+      homeManagerModules.default = {
+        lib,
+        pkgs,
+        ...
+      }: {
+        imports = [ ./nix/hm-module.nix ];
+        services.thoth.package =
+          lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.thoth;
+      };
+
+      # macOS home-manager module. Thoth does not yet build for darwin through
+      # this flake (the package is meta.platforms x86_64-linux only), so there
+      # is no package default to wire — darwin users must set
+      # `services.thoth.package` to a darwin-capable build themselves.
+      homeManagerModules.darwin = {
+        ...
+      }: {
+        imports = [ ./nix/hm-module-darwin.nix ];
+      };
+    };
 }
