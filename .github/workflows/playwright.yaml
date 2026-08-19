@@ -52,7 +52,7 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # pnpm must be installed before setup-node, or setup-node's cache
       # auto-detection cannot find the pnpm store path (same ordering as ci.yaml).
