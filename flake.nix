@@ -396,6 +396,46 @@
         # Evaluation IS the assertion here, so these stay cheap and are still
         # meaningful under `nix flake check --no-build`.
         checks = nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          # package.json's packageManager pin and the pnpm this flake supplies
+          # are two copies of one version, and nothing used to assert they
+          # agreed (the "Single source of truth" rule in .claude/CLAUDE.md).
+          #
+          # They must agree because they are used in the same build: CI's
+          # pnpm/action-setup reads packageManager to pick a pnpm, while
+          # fetchPnpmDeps and the dev shell use the nixpkgs one. A mismatch
+          # means the lockfile is resolved by one pnpm and consumed by
+          # another, and the pnpmDeps hash is computed against a store layout
+          # the other may not reproduce.
+          #
+          # This is why the pnpm bump in #123 was held back rather than
+          # applied to package.json alone: nixpkgs is the constraint, so the
+          # two must move together. This check makes that non-optional — the
+          # next attempt to bump one side fails here with both versions named,
+          # instead of drifting quietly the way the app version, the shortcut
+          # defaults, and the desktop-file-utils list each did.
+          pnpm-version-matches =
+            let
+              declared =
+                (builtins.fromJSON (builtins.readFile ./package.json)).packageManager;
+              expected = "pnpm@${pkgs.pnpm.version}";
+            in
+            if declared != expected then
+              throw ''
+                pnpm version drift between package.json and nixpkgs.
+
+                  package.json packageManager : ${declared}
+                  nixpkgs pnpm                : ${expected}
+
+                These must match. To change the pnpm version, move BOTH:
+                update the packageManager field and bump the nixpkgs input to
+                one carrying that pnpm (check with
+                `nix eval --raw nixpkgs#pnpm.version`). Bumping package.json
+                alone leaves the Nix build resolving the lockfile with a
+                different pnpm than CI does.
+              ''
+            else
+              pkgs.runCommand "thoth-pnpm-version-check" { } "touch $out";
+
           # Full NixOS evaluation. Proves the module imports, that
           # `programs.thoth.enable` wires the package default through
           # `self.packages`, and that the package lands in systemPackages.
