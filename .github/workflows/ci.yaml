@@ -58,8 +58,9 @@ jobs:
     # Hard ceiling on the whole job. GitHub's default is 6 hours, which is long
     # enough that a stalled step reads as "still building" — on 2026-08-18 a hung
     # apt fetch ran 3.5 hours unnoticed. A cold-cache Linux build is ~33 minutes,
-    # so 60 leaves headroom while turning a stall into a prompt failure.
-    timeout-minutes: 60
+    # so 60 left headroom — but bounded apt retries can legitimately add ~15
+    # minutes on a bad mirror day, so 75 keeps that from tripping the ceiling.
+    timeout-minutes: 75
 
     # macOS Apple Silicon runners: whisper.cpp's GGML detects the i8mm CPU
     # feature via -march=native and emits vmmlaq_s32 intrinsics, then fails to
@@ -81,26 +82,20 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: ./scripts/test-linux-build-scripts.sh
 
-      # Both installs live in scripts/ so this and release.yaml share one
-      # definition each instead of copies that drift.
+      # The setup lives in scripts/install-linux-ci-deps.sh so this and
+      # release.yaml share one definition instead of copies that drift.
       #
-      # The ceilings below are deliberately generous. They exist to catch a
-      # genuine hang, not to police slowness: between them these steps pull
-      # ~100 packages including the WebKitGTK stack, and on 2026-08-18 a slow
-      # Azure mirror blew through a 10-minute ceiling and failed a build that
-      # would otherwise have succeeded. The scripts bound each *connection*
-      # instead, so a mirror that has died still fails fast while one that is
-      # merely slow is allowed to finish. The 60-minute job ceiling above is
-      # the real backstop against a hang.
-      - name: Install Vulkan SDK (Linux)
+      # The script bounds and retries every network operation itself, which is
+      # what actually survives a bad mirror — apt's own Acquire timeouts do
+      # not, because they bound individual socket operations rather than the
+      # invocation (a stalled mirror sat here for 24.5 minutes on 2026-08-19
+      # with those options set). This ceiling is only a backstop for a stall
+      # the script does not anticipate, so it is generous by design; policing
+      # slowness with it is what broke the build on 2026-08-18.
+      - name: Install Linux CI dependencies
         if: matrix.platform == 'ubuntu-22.04'
-        timeout-minutes: 25
-        run: ./scripts/install-vulkan-sdk.sh
-
-      - name: Install system dependencies (Linux)
-        if: matrix.platform == 'ubuntu-22.04'
-        timeout-minutes: 25
-        run: ./scripts/install-linux-build-deps.sh
+        timeout-minutes: 30
+        run: ./scripts/install-linux-ci-deps.sh
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
