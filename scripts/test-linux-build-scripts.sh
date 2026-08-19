@@ -13,8 +13,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPTS=(
-    "$REPO_ROOT/scripts/install-vulkan-sdk.sh"
-    "$REPO_ROOT/scripts/install-linux-build-deps.sh"
+    "$REPO_ROOT/scripts/install-linux-ci-deps.sh"
 )
 WORKFLOWS=(
     "$REPO_ROOT/.github/workflows/ci.yaml"
@@ -52,16 +51,14 @@ done
 for workflow in "${WORKFLOWS[@]}"; do
     name="$(basename "$workflow")"
 
-    # Every workflow must call BOTH shared scripts. Anchored on the `run:`
-    # line, not a bare filename match — the surrounding comments also name the
-    # scripts, so a loose grep would pass even with the call deleted.
-    for script in install-vulkan-sdk install-linux-build-deps; do
-        if grep -qE "^\s*run: \./scripts/${script}\.sh\s*$" "$workflow"; then
-            check "$name calls $script.sh" ok
-        else
-            check "$name calls $script.sh" no
-        fi
-    done
+    # Every workflow must call the shared script. Anchored on the `run:` line,
+    # not a bare filename match — the surrounding comments also name the
+    # script, so a loose grep would pass even with the call deleted.
+    if grep -qE '^\s*run: \./scripts/install-linux-ci-deps\.sh\s*$' "$workflow"; then
+        check "$name calls install-linux-ci-deps.sh" ok
+    else
+        check "$name calls install-linux-ci-deps.sh" no
+    fi
 
     # The apt package list must live in the script, not back in the workflow.
     if grep -qE 'apt-get +install' "$workflow"; then
@@ -87,6 +84,17 @@ for workflow in "${WORKFLOWS[@]}"; do
         check "$name sets a job-level timeout" no
     fi
 done
+
+# The wall-clock bound on each apt attempt is what survives a stalled mirror;
+# apt's own Acquire timeouts demonstrably do not (2026-08-19, 24.5 minutes of
+# silence with them set). Losing this silently reintroduces that hang.
+#
+# shellcheck disable=SC2016  # matching the literal $APT_ATTEMPT_TIMEOUT in the source
+if grep -qE 'timeout "\$APT_ATTEMPT_TIMEOUT" apt-get' "$REPO_ROOT/scripts/install-linux-ci-deps.sh"; then
+    check "apt calls are wall-clock bounded" ok
+else
+    check "apt calls are wall-clock bounded" no
+fi
 
 echo
 echo "passed: $pass  failed: $fail"
