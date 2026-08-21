@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@poodle64/design-tokens": "^2026.8.0",
-    "@poodle64/ui": "^2026.8.7",
+    "@poodle64/ui": "^2026.8.10",
     "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-autostart": "2.5.1",
     "@tauri-apps/plugin-clipboard-manager": "2.3.2",
@@ -42,9 +42,9 @@
   "devDependencies": {
     "@internationalized/date": "^3.12.2",
     "@lucide/svelte": "^1.17.0",
-    "@playwright/test": "1.60.0",
+    "@playwright/test": "1.62.1",
     "@sveltejs/adapter-static": "3.0.10",
-    "@sveltejs/kit": "2.70.2",
+    "@sveltejs/kit": "2.70.3",
     "@sveltejs/vite-plugin-svelte": "7.3.0",
     "@tailwindcss/vite": "^4.3.0",
     "@tauri-apps/cli": "2.11.4",
@@ -63,7 +63,7 @@
     "svelte-check": "4.7.6",
     "tailwindcss": "^4.3.0",
     "typescript": "6.0.3",
-    "vite": "8.2.1",
+    "vite": "8.2.2",
     "vitest": "^4.1.10"
   }
 }

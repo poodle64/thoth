@@ -89,7 +89,7 @@ tokio = { version = "1", features = ["full"] }
 
 # Local Control API (loopback HTTP server)
 axum = "0.8"
-tower-http = { version = "0.6", features = ["validate-request", "cors", "trace"] }
+tower-http = { version = "0.7", features = ["validate-request", "cors", "trace"] }
 # Constant-time bearer-token comparison (already resolved transitively via the
 # TLS stack; promoted to a direct dep for the auth-layer comparison).
 subtle = "2.6"
@@ -181,7 +181,7 @@ whisper-rs = { version = "0.16", default-features = false }
 # XDG Desktop Portal for Wayland global shortcuts
 ashpd = { version = "0.13", default-features = false, features = ["tokio", "global_shortcuts"] }
 # X11 support for display server detection and mouse tracking
-x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
+x11rb = { version = "0.14", features = ["allow-unsafe-code"] }
 
 # Windows - CPU mode with optional GPU via features
 [target.'cfg(target_os = "windows")'.dependencies]
