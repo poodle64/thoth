@@ -8,12 +8,14 @@ pub mod download;
 pub mod filter;
 #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
 pub mod fluidaudio;
+pub mod gate;
 pub mod manifest;
 #[cfg(feature = "parakeet")]
 pub mod parakeet;
 pub mod whisper;
 
 pub use filter::{FilterOptions, OutputFilter};
+pub use gate::Priority;
 pub use manifest::{ModelInfo, fetch_model_manifest, get_manifest_update_time};
 
 use crate::error::Error;
@@ -248,8 +250,24 @@ const MIN_SPEECH_RMS: f32 = 0.002;
 ///
 /// Returns empty string if the audio is essentially silent (no speech detected),
 /// which prevents Whisper from hallucinating phrases like "Thank you" on silent input.
+///
+/// Runs at [`Priority::Interactive`]: this is the entry point the live dictation
+/// pipeline uses, so it takes the model ahead of queued background file jobs.
+/// Background callers must use [`transcribe_file_with_priority`] instead.
 #[tauri::command]
 pub fn transcribe_file(audio_path: String) -> Result<String, Error> {
+    transcribe_file_with_priority(audio_path, Priority::Interactive)
+}
+
+/// Transcribe a file at an explicit [`Priority`].
+///
+/// See [`transcription::gate`](gate) for why the tier matters: the model is a
+/// single process-wide instance, and without a priority the user's own
+/// dictation queues behind whatever batch work is outstanding (#118).
+pub fn transcribe_file_with_priority(
+    audio_path: String,
+    priority: Priority,
+) -> Result<String, Error> {
     let input = PathBuf::from(&audio_path);
 
     // Decide whether a transcode is needed.
@@ -281,6 +299,11 @@ pub fn transcribe_file(audio_path: String) -> Result<String, Error> {
         return Ok(String::new());
     }
 
+    // Take the gate only now: transcoding and the silence check do not touch
+    // the model, so background jobs can do that work without holding the
+    // resource the interactive path is waiting for.
+    let _permit = gate::gate().acquire(priority);
+
     let mut guard = get_service().lock();
     let service = guard
         .as_mut()
@@ -290,7 +313,8 @@ pub fn transcribe_file(audio_path: String) -> Result<String, Error> {
         .transcribe(&wav_path)
         .map_err(|e| e.to_string())
         .map_err(Into::into)
-    // _temp drops here, deleting the temp file (if any) on both Ok and Err paths.
+    // _permit drops here, releasing the model to the next waiter; _temp drops
+    // too, deleting the temp file (if any) on both Ok and Err paths.
 }
 
 /// Check if a WAV file contains speech (has sufficient audio energy)
