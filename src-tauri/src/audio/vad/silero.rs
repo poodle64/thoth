@@ -1,221 +1,252 @@
-//! Silero v5 neural VAD, run on `tract` (a pure-Rust ONNX engine).
+//! Silero neural VAD, run through the ONNX Runtime `sherpa-onnx` already
+//! carries.
 //!
-//! # Why tract and not ONNX Runtime
+//! # Why this engine
 //!
-//! Every Silero wrapper on crates.io (`vad-rs`, `silero-vad-rs`,
-//! `vad-silero-rs`) depends on `ort`, whose `ort-sys` build script downloads
-//! prebuilt ONNX Runtime binaries. Thoth builds in a Nix sandbox with no
-//! network, so that cannot work here, and it would also land a second ONNX
-//! runtime in Parakeet builds next to the one `sherpa-onnx` already carries.
-//! `tract` is pure Rust: nothing to link, nothing to download, and it stays
-//! out of the way of the optional `parakeet` feature (#103).
+//! Silero is an ONNX model and needs an inference engine. Three were weighed
+//! (#103):
 //!
-//! # Model contract
+//! - **`tract`** (pure Rust) was tried first and rejected on evidence: it
+//!   cannot load any published Silero export. All three fail on the model's
+//!   `If` nodes (`silero_vad.onnx` on a Squeeze axis, `op18_ifless` on a Pad
+//!   batch unification, `16k_op15` on mismatched If branch facts).
+//! - **`ort`** is what every Silero crate on crates.io uses, but `ort-sys`
+//!   downloads prebuilt ONNX Runtime binaries at build time, which the Nix
+//!   sandbox cannot do, and it would put a second ONNX runtime next to the one
+//!   `sherpa-onnx` already links.
+//! - **`sherpa-onnx`**, which ships a complete Silero VAD API and is already a
+//!   dependency of the default feature set. No new native dependency.
 //!
-//! Silero v5 (`silero_vad.onnx`, ~2.2 MB) takes three inputs and returns two:
+//! # Build-configuration caveat
 //!
-//! | Name    | Type | Shape             | Meaning                       |
-//! |---------|------|-------------------|-------------------------------|
-//! | `input` | f32  | `[1, 512]`        | one frame of mono audio       |
-//! | `state` | f32  | `[2, 1, 128]`     | recurrent state               |
-//! | `sr`    | i64  | scalar            | sample rate                   |
-//! | `output`| f32  | `[1, 1]`          | probability the frame is speech |
-//! | `stateN`| f32  | `[2, 1, 128]`     | state to feed the next frame  |
+//! `sherpa-onnx` is optional and enabled by the `parakeet` feature, which is in
+//! `default`. The Linux GPU build uses `--no-default-features --features vulkan`
+//! and therefore has no Silero. That is deliberate rather than an oversight:
+//! [`is_available`] reports false there and callers fall back to the WebRTC
+//! path, which is the graceful degradation #103 asks for. It does mean VAD
+//! quality varies by build configuration, so anything user-facing should read
+//! [`is_available`] rather than assume neural VAD is present.
 //!
-//! The 512-sample window is not a free choice: v5 is trained on it and gives
-//! meaningless output at other sizes. At 16 kHz that is 32 ms per frame, which
-//! is why the smoothing layer derives its frame counts from a duration rather
-//! than assuming the 30 ms WebRTC frame.
+//! # Smoothing
 //!
-//! The model is **stateful across frames**: `stateN` must be fed back in as
-//! `state`. Feeding a zeroed state every frame silently degrades accuracy
-//! rather than failing, so [`SileroVad::reset`] exists to clear it explicitly
-//! between recordings.
+//! sherpa's detector does its own onset/hangover smoothing, configured through
+//! `min_speech_duration` and `min_silence_duration`. Those are driven from
+//! [`HangoverPolicy`] here so the neural path and the WebRTC path share one set
+//! of policy constants instead of drifting apart.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use tract_onnx::prelude::*;
+use super::smoothed::HangoverPolicy;
 
-/// Samples per frame at 16 kHz. Fixed by the model; see the module docs.
-pub const FRAME_SAMPLES: usize = 512;
+/// Samples per Silero window at 16 kHz. Fixed by the model.
+pub const WINDOW_SAMPLES: i32 = 512;
 
 /// Sample rate the model is used at.
-pub const SAMPLE_RATE: i64 = 16_000;
+pub const SAMPLE_RATE: u32 = 16_000;
 
-/// Frame duration in milliseconds, derived from the two constants above so it
-/// cannot disagree with them.
-pub const FRAME_MS: usize = (FRAME_SAMPLES * 1000) / SAMPLE_RATE as usize;
-
-/// Size of the recurrent state tensor: `[2, 1, 128]`.
-const STATE_DIMS: [usize; 3] = [2, 1, 128];
-
-/// Probability above which a frame counts as speech.
-///
-/// Silero's own examples use 0.5. The smoothing layer is what provides
-/// robustness here, so this stays at the model's default rather than being
-/// tuned to compensate for missing debounce/hangover.
+/// Probability above which a frame counts as speech. Silero's own default.
 pub const DEFAULT_SPEECH_THRESHOLD: f32 = 0.5;
+
+/// Shortest run of speech that opens a segment, in seconds. Mirrors the onset
+/// debounce in [`super::smoothed`]: long enough to reject a keystroke or a
+/// chair creak, short enough not to eat a word.
+pub const MIN_SPEECH_SECS: f32 = 0.064;
+
+/// Longest single segment before the detector forces a cut, in seconds.
+/// Without a bound, continuous speech never emits a segment.
+pub const MAX_SPEECH_SECS: f32 = 30.0;
+
+/// Ring buffer the detector keeps, in seconds. Only meaningful when an engine
+/// is linked.
+#[cfg(feature = "parakeet")]
+const BUFFER_SECS: f32 = 60.0;
 
 /// File name the model is stored under.
 pub const MODEL_FILE_NAME: &str = "silero_vad.onnx";
 
-/// Model id used for the on-disk directory, matching the transcription models'
-/// layout under `~/.thoth/models/`.
+/// Model id, giving the on-disk directory under `~/.thoth/models/`.
 pub const MODEL_ID: &str = "silero-vad-v5";
-
-/// `into_runnable` hands back an `Arc`, so the alias has to carry it.
-type Model = std::sync::Arc<TypedRunnableModel>;
 
 /// Where the Silero model is expected on disk.
 pub fn model_path() -> PathBuf {
     crate::transcription::manifest::get_model_directory(MODEL_ID).join(MODEL_FILE_NAME)
 }
 
-/// Whether the Silero model has been downloaded.
+/// Whether neural VAD can actually run: the model is present **and** this build
+/// links an inference engine.
 ///
-/// Callers use this to decide whether to run neural VAD or fall back to the
-/// WebRTC path, so a missing model degrades quality rather than blocking
-/// recording.
+/// Callers use this to choose between the neural path and the WebRTC fallback,
+/// so a missing model or a `--no-default-features` build degrades quality
+/// rather than blocking recording.
 pub fn is_available() -> bool {
-    model_path().is_file()
+    cfg!(feature = "parakeet") && model_path().is_file()
 }
 
-/// A loaded Silero VAD.
-pub struct SileroVad {
-    model: Model,
-    /// Recurrent state carried between frames.
-    state: Tensor,
-    threshold: f32,
-    /// Input slots, resolved by name at load time; see [`SileroVad::load_from`].
-    input_idx: usize,
-    sr_idx: usize,
-    state_idx: usize,
-}
-
-/// The optimised graph is not `Debug`, so report only what is useful to a
-/// reader. This exists so `Result<SileroVad, _>` can be unwrapped in tests.
-impl std::fmt::Debug for SileroVad {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SileroVad")
-            .field("threshold", &self.threshold)
-            .field("frame_samples", &FRAME_SAMPLES)
-            .finish_non_exhaustive()
+/// Why neural VAD is unavailable, for logging and for the settings UI.
+///
+/// Returns `None` when it is available.
+pub fn unavailable_reason() -> Option<String> {
+    if !cfg!(feature = "parakeet") {
+        return Some(
+            "this build has no ONNX runtime (built --no-default-features); \
+             falling back to WebRTC VAD"
+                .to_string(),
+        );
     }
+    if !model_path().is_file() {
+        return Some(format!(
+            "Silero model not downloaded to {}; falling back to WebRTC VAD",
+            model_path().display()
+        ));
+    }
+    None
 }
 
-impl SileroVad {
-    /// Load the model from the default location.
-    pub fn load() -> anyhow::Result<Self> {
-        Self::load_from(&model_path())
-    }
+/// Detector tuning derived from a [`HangoverPolicy`].
+///
+/// Kept as a plain struct so the mapping from policy to sherpa's knobs is
+/// testable without an ONNX runtime or a model, which matters because the
+/// `--no-default-features` build has neither.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SileroSettings {
+    pub threshold: f32,
+    pub min_silence_duration: f32,
+    pub min_speech_duration: f32,
+    pub max_speech_duration: f32,
+    pub window_size: i32,
+}
 
-    /// Load the model from an explicit path.
-    pub fn load_from(path: &Path) -> anyhow::Result<Self> {
-        if !path.is_file() {
-            anyhow::bail!(
-                "Silero VAD model not found at {}. Download it to enable neural VAD.",
-                path.display()
-            );
-        }
-
-        let mut model = tract_onnx::onnx().model_for_path(path)?;
-
-        // Resolve inputs by name rather than by position. The exports do not
-        // agree on order (the combined model is input/state/sr, the ifless one
-        // is input/sr/state), and getting it wrong does not fail cleanly: it
-        // surfaces as an unrelated shape-inference error deep in the graph.
-        let names: Vec<String> = model
-            .input_outlets()?
-            .iter()
-            .map(|o| model.node(o.node).name.clone())
-            .collect();
-        let index_of = |want: &str| -> anyhow::Result<usize> {
-            names.iter().position(|n| n == want).ok_or_else(|| {
-                anyhow::anyhow!("Silero model has no `{want}` input; found {names:?}")
-            })
-        };
-        let input_idx = index_of("input")?;
-        let sr_idx = index_of("sr")?;
-        let state_idx = index_of("state")?;
-
-        // Shapes are pinned rather than left symbolic: tract optimises far
-        // better against concrete shapes, and only these are ever used.
-        model = model.with_input_fact(input_idx, f32::fact([1, FRAME_SAMPLES]).into())?;
-        model = model.with_input_fact(sr_idx, i64::fact::<[usize; 0]>([]).into())?;
-        model = model.with_input_fact(state_idx, f32::fact(STATE_DIMS).into())?;
-
-        let model = model.into_optimized()?.into_runnable()?;
-
-        Ok(Self {
-            model,
-            state: Self::zero_state(),
+impl SileroSettings {
+    /// Build settings for a hangover policy.
+    pub fn for_policy(policy: HangoverPolicy) -> Self {
+        Self {
             threshold: DEFAULT_SPEECH_THRESHOLD,
-            input_idx,
-            sr_idx,
-            state_idx,
-        })
+            // The hangover is the tail that stops a pause for breath ending an
+            // utterance; sherpa calls it min_silence_duration.
+            min_silence_duration: policy.hangover_ms() as f32 / 1000.0,
+            min_speech_duration: MIN_SPEECH_SECS,
+            max_speech_duration: MAX_SPEECH_SECS,
+            window_size: WINDOW_SAMPLES,
+        }
+    }
+}
+
+#[cfg(feature = "parakeet")]
+pub use engine::SileroVad;
+
+#[cfg(feature = "parakeet")]
+mod engine {
+    use super::*;
+    use sherpa_onnx::{SileroVadModelConfig, VadModelConfig, VoiceActivityDetector};
+
+    /// A speech segment the detector has emitted.
+    #[derive(Debug, Clone)]
+    pub struct Segment {
+        /// Offset of the segment in samples from the start of the stream.
+        pub start: usize,
+        /// The segment's audio.
+        pub samples: Vec<f32>,
     }
 
-    fn zero_state() -> Tensor {
-        Tensor::zero::<f32>(&STATE_DIMS).expect("zero tensor of a constant shape cannot fail")
+    /// Live Silero VAD over a stream of 16 kHz mono samples.
+    pub struct SileroVad {
+        detector: VoiceActivityDetector,
+        settings: SileroSettings,
     }
 
-    /// Override the speech probability threshold.
-    pub fn with_threshold(mut self, threshold: f32) -> Self {
-        self.threshold = threshold;
-        self
+    impl std::fmt::Debug for SileroVad {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("SileroVad")
+                .field("settings", &self.settings)
+                .finish_non_exhaustive()
+        }
     }
 
-    /// The threshold currently in use.
-    pub fn threshold(&self) -> f32 {
-        self.threshold
-    }
-
-    /// Clear the recurrent state.
-    ///
-    /// Must be called between recordings: leftover state from a previous
-    /// utterance biases the first frames of the next one, and because the
-    /// model still returns plausible numbers it fails quietly rather than
-    /// loudly.
-    pub fn reset(&mut self) {
-        self.state = Self::zero_state();
-    }
-
-    /// Probability that one frame contains speech.
-    ///
-    /// `frame` must be exactly [`FRAME_SAMPLES`] mono samples in `[-1.0, 1.0]`
-    /// at 16 kHz. Advances the recurrent state.
-    pub fn speech_probability(&mut self, frame: &[f32]) -> anyhow::Result<f32> {
-        if frame.len() != FRAME_SAMPLES {
-            anyhow::bail!(
-                "Silero v5 requires exactly {} samples per frame, got {}",
-                FRAME_SAMPLES,
-                frame.len()
-            );
+    impl SileroVad {
+        /// Load the model from the default location using a hangover policy.
+        pub fn new(policy: HangoverPolicy) -> anyhow::Result<Self> {
+            Self::with_settings(SileroSettings::for_policy(policy))
         }
 
-        // Placed by resolved index, not in literal order, for the reason given
-        // in `load_from`.
-        let mut inputs: TVec<TValue> = tvec!(Tensor::from(0i64).into(); 3);
-        inputs[self.input_idx] = Tensor::from_shape(&[1, FRAME_SAMPLES], frame)?.into();
-        inputs[self.sr_idx] = Tensor::from(SAMPLE_RATE).into();
-        inputs[self.state_idx] =
-            std::mem::replace(&mut self.state, Self::zero_state()).into();
+        /// Load the model with explicit settings.
+        pub fn with_settings(settings: SileroSettings) -> anyhow::Result<Self> {
+            let path = model_path();
+            if !path.is_file() {
+                anyhow::bail!(
+                    "Silero VAD model not found at {}. Download it to enable neural VAD.",
+                    path.display()
+                );
+            }
 
-        let outputs = self.model.run(inputs)?;
+            let config = VadModelConfig {
+                silero_vad: SileroVadModelConfig {
+                    model: Some(path.to_string_lossy().into_owned()),
+                    threshold: settings.threshold,
+                    min_silence_duration: settings.min_silence_duration,
+                    min_speech_duration: settings.min_speech_duration,
+                    window_size: settings.window_size,
+                    max_speech_duration: settings.max_speech_duration,
+                },
+                sample_rate: SAMPLE_RATE as i32,
+                // Both of these must be set explicitly. `Default` gives
+                // num_threads = 0 and a null provider, which ONNX Runtime does
+                // not accept; the failure is a `free(): invalid pointer` abort
+                // inside the C library rather than a returned error.
+                num_threads: 1,
+                provider: Some("cpu".to_string()),
+                ..Default::default()
+            };
 
-        // Feed the new state forward before reading the probability, so an
-        // error reading the output cannot leave a stale state behind.
-        self.state = outputs[1].clone().into_tensor();
+            let detector = VoiceActivityDetector::create(&config, BUFFER_SECS)
+                .ok_or_else(|| anyhow::anyhow!("failed to create the Silero detector"))?;
 
-        let probability = outputs[0].to_plain_array_view::<f32>()?.iter().copied().next();
+            Ok(Self { detector, settings })
+        }
 
-        probability.ok_or_else(|| anyhow::anyhow!("Silero returned an empty probability tensor"))
-    }
+        /// The settings in use.
+        pub fn settings(&self) -> SileroSettings {
+            self.settings
+        }
 
-    /// Whether one frame contains speech, per the current threshold.
-    pub fn is_speech(&mut self, frame: &[f32]) -> anyhow::Result<bool> {
-        Ok(self.speech_probability(frame)? >= self.threshold)
+        /// Feed audio. Samples must be 16 kHz mono in `[-1.0, 1.0]`.
+        pub fn accept(&mut self, samples: &[f32]) {
+            self.detector.accept_waveform(samples);
+        }
+
+        /// Whether speech is being detected right now.
+        ///
+        /// This is the live signal #88 (hands-free auto-stop) needs: it is
+        /// available during capture rather than only after the fact.
+        pub fn is_speech_active(&self) -> bool {
+            self.detector.detected()
+        }
+
+        /// Take the next completed speech segment, if one is ready.
+        pub fn next_segment(&mut self) -> Option<Segment> {
+            let segment = self.detector.front()?;
+            let out = Segment {
+                start: segment.start().max(0) as usize,
+                samples: segment.samples().to_vec(),
+            };
+            // `front()` hands back a view onto the queue's own segment, but the
+            // wrapper's `SpeechSegment` still runs `SherpaOnnxDestroySpeechSegment`
+            // on drop. Letting it drop and then calling `pop()` frees the same
+            // pointer twice, which aborts with `free(): invalid pointer`. The
+            // data is already copied out above, so suppress the destructor and
+            // let `pop()` own the free.
+            std::mem::forget(segment);
+            self.detector.pop();
+            Some(out)
+        }
+
+        /// Clear all state between recordings.
+        ///
+        /// Leftover state biases the first frames of the next utterance, and
+        /// because the model still returns plausible numbers it fails quietly.
+        pub fn reset(&mut self) {
+            self.detector.reset();
+            self.detector.clear();
+        }
     }
 }
 
@@ -223,125 +254,129 @@ impl SileroVad {
 mod tests {
     use super::*;
 
-    /// Frame of silence.
-    fn silence() -> Vec<f32> {
-        vec![0.0; FRAME_SAMPLES]
-    }
-
-    /// Frame of loud broadband noise. Not speech, but energetic, which is
-    /// exactly what an energy-threshold VAD mistakes for speech.
-    fn noise(seed: u32) -> Vec<f32> {
-        let mut x = seed.wrapping_mul(2_654_435_761).wrapping_add(1);
-        (0..FRAME_SAMPLES)
-            .map(|_| {
-                x ^= x << 13;
-                x ^= x >> 17;
-                x ^= x << 5;
-                (x as f32 / u32::MAX as f32) * 2.0 - 1.0
-            })
-            .collect()
-    }
-
     #[test]
-    fn frame_duration_is_derived_from_the_model_constants() {
-        // 512 samples at 16 kHz is 32 ms. If either constant changes, this is
-        // the test that catches the smoothing layer being mistuned.
-        assert_eq!(FRAME_MS, 32);
+    fn window_is_the_size_silero_requires() {
+        // Silero v5 is trained on 512-sample windows at 16 kHz and gives
+        // meaningless output at other sizes.
+        assert_eq!(WINDOW_SAMPLES, 512);
+        assert_eq!(SAMPLE_RATE, 16_000);
     }
 
     #[test]
     fn model_path_lives_under_the_shared_model_directory() {
         let path = model_path();
-        assert!(path.ends_with(format!("{MODEL_ID}/{MODEL_FILE_NAME}")), "{path:?}");
+        assert!(
+            path.ends_with(format!("{MODEL_ID}/{MODEL_FILE_NAME}")),
+            "{path:?}"
+        );
     }
 
     #[test]
-    fn loading_a_missing_model_names_the_path() {
-        let err = SileroVad::load_from(Path::new("/nonexistent/silero_vad.onnx"))
-            .expect_err("a missing model must not load");
-        let msg = err.to_string();
-        assert!(msg.contains("/nonexistent/silero_vad.onnx"), "{msg}");
+    fn hangover_policy_drives_the_detector_silence_window() {
+        let offline = SileroSettings::for_policy(HangoverPolicy::Offline);
+        let streaming = SileroSettings::for_policy(HangoverPolicy::Streaming);
+
+        // The policy constants live in one place; this pins that they actually
+        // reach the engine rather than the engine carrying its own copy.
+        assert!((offline.min_silence_duration - 0.450).abs() < 1e-6);
+        assert!((streaming.min_silence_duration - 1.650).abs() < 1e-6);
+        assert!(
+            streaming.min_silence_duration > offline.min_silence_duration,
+            "streaming must tolerate longer pauses than offline"
+        );
     }
 
-    // The tests below need the real model. They skip rather than fail when it
-    // is absent, so a fresh checkout without the download still runs green;
-    // CI with the model present exercises them.
-    fn load_or_skip() -> Option<SileroVad> {
-        if !is_available() {
-            eprintln!(
-                "skipping: Silero model not present at {}",
-                model_path().display()
-            );
-            return None;
+    #[test]
+    fn settings_use_silero_native_window() {
+        let s = SileroSettings::for_policy(HangoverPolicy::Offline);
+        assert_eq!(s.window_size, WINDOW_SAMPLES);
+        assert!(
+            s.min_speech_duration > 0.0 && s.min_speech_duration < 0.2,
+            "onset debounce should reject transients without eating a word, got {}",
+            s.min_speech_duration
+        );
+    }
+
+    #[test]
+    fn availability_requires_both_an_engine_and_a_model() {
+        // The two failure modes must be distinguishable, because they have
+        // different fixes: download a model, versus rebuild with features.
+        let available = is_available();
+        let reason = unavailable_reason();
+        assert_eq!(
+            available,
+            reason.is_none(),
+            "is_available and unavailable_reason must agree; reason={reason:?}"
+        );
+
+        if !cfg!(feature = "parakeet") {
+            let reason = reason.expect("a build without the engine must give a reason");
+            assert!(reason.contains("no ONNX runtime"), "{reason}");
         }
-        Some(SileroVad::load().expect("model present but failed to load"))
     }
 
-    #[test]
-    fn rejects_a_frame_of_the_wrong_length() {
-        let Some(mut vad) = load_or_skip() else {
-            return;
-        };
-        let err = vad
-            .speech_probability(&vec![0.0; FRAME_SAMPLES - 1])
-            .expect_err("a short frame must be rejected, not silently padded");
-        assert!(err.to_string().contains("512"), "{err}");
-    }
+    #[cfg(feature = "parakeet")]
+    mod engine_tests {
+        use super::*;
 
-    #[test]
-    fn silence_scores_below_the_threshold() {
-        let Some(mut vad) = load_or_skip() else {
-            return;
-        };
-        for _ in 0..10 {
-            let p = vad.speech_probability(&silence()).expect("inference failed");
-            assert!(
-                p < DEFAULT_SPEECH_THRESHOLD,
-                "silence scored {p}, at or above the speech threshold"
-            );
-        }
-    }
-
-    #[test]
-    fn loud_noise_is_not_mistaken_for_speech() {
-        // The whole reason for moving off an energy threshold: loud non-speech
-        // must not read as speech.
-        let Some(mut vad) = load_or_skip() else {
-            return;
-        };
-        let mut speech_frames = 0;
-        for seed in 0..20 {
-            if vad.is_speech(&noise(seed)).expect("inference failed") {
-                speech_frames += 1;
+        fn load_or_skip() -> Option<SileroVad> {
+            if !is_available() {
+                eprintln!("skipping: {:?}", unavailable_reason());
+                return None;
             }
+            Some(SileroVad::new(HangoverPolicy::Offline).expect("model present but failed to load"))
         }
-        assert!(
-            speech_frames <= 4,
-            "{speech_frames}/20 noise frames read as speech; neural VAD should \
-             reject broadband noise an energy threshold would accept"
-        );
-    }
 
-    #[test]
-    fn reset_clears_recurrent_state() {
-        let Some(mut vad) = load_or_skip() else {
-            return;
-        };
-
-        // Drive the state with noise, then reset and confirm silence scores
-        // the same as it does on a freshly loaded model.
-        let mut fresh = SileroVad::load().expect("model present but failed to load");
-        let baseline = fresh.speech_probability(&silence()).expect("inference failed");
-
-        for seed in 0..10 {
-            let _ = vad.speech_probability(&noise(seed));
+        /// Loud broadband noise. Not speech, but energetic, which is exactly
+        /// what an energy threshold mistakes for speech.
+        fn noise(seed: u32, n: usize) -> Vec<f32> {
+            let mut x = seed.wrapping_mul(2_654_435_761).wrapping_add(1);
+            (0..n)
+                .map(|_| {
+                    x ^= x << 13;
+                    x ^= x >> 17;
+                    x ^= x << 5;
+                    (x as f32 / u32::MAX as f32) * 2.0 - 1.0
+                })
+                .collect()
         }
-        vad.reset();
-        let after_reset = vad.speech_probability(&silence()).expect("inference failed");
 
-        assert!(
-            (after_reset - baseline).abs() < 1e-6,
-            "reset must restore the initial state: baseline {baseline}, after reset {after_reset}"
-        );
+        #[test]
+        fn silence_produces_no_speech_and_no_segments() {
+            let Some(mut vad) = load_or_skip() else {
+                return;
+            };
+            vad.accept(&vec![0.0; SAMPLE_RATE as usize * 2]);
+            assert!(!vad.is_speech_active(), "silence must not read as speech");
+            assert!(
+                vad.next_segment().is_none(),
+                "silence must not emit a speech segment"
+            );
+        }
+
+        #[test]
+        fn loud_noise_is_not_mistaken_for_speech() {
+            // The whole reason for moving off an energy threshold.
+            let Some(mut vad) = load_or_skip() else {
+                return;
+            };
+            vad.accept(&noise(7, SAMPLE_RATE as usize * 2));
+            assert!(
+                vad.next_segment().is_none(),
+                "broadband noise must not emit a speech segment; an energy \
+                 threshold would accept it"
+            );
+        }
+
+        #[test]
+        fn reset_clears_queued_state() {
+            let Some(mut vad) = load_or_skip() else {
+                return;
+            };
+            vad.accept(&noise(3, SAMPLE_RATE as usize));
+            vad.reset();
+            assert!(!vad.is_speech_active());
+            assert!(vad.next_segment().is_none(), "reset must drop queued state");
+        }
     }
 }
