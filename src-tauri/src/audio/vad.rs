@@ -6,6 +6,9 @@
 //! talking) from long recordings. The trailing edge is never trimmed — see
 //! `trim_silence` for why.
 
+pub mod silero;
+pub mod smoothed;
+
 use serde::{Deserialize, Serialize};
 use webrtc_vad::{SampleRate, Vad, VadMode};
 

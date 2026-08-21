@@ -33,6 +33,13 @@ rubato = "3.0"
 audioadapter-buffers = "3.0"
 crossbeam-channel = "0.5"
 webrtc-vad = "0.4"
+# Silero neural VAD inference. tract is a pure-Rust ONNX engine: no native
+# library, no build-time binary download, so it works in the Nix sandbox and
+# adds nothing to link. The `ort`-based Silero crates (vad-rs, silero-vad-rs)
+# were rejected for exactly that reason: ort-sys fetches prebuilt ONNX Runtime
+# binaries at build time, which a sandboxed build cannot do, and it would land
+# a second ONNX runtime in Parakeet builds alongside sherpa-onnx (#103).
+tract-onnx = "0.23"
 symphonia = { version = "0.6", features = ["mp3", "aac", "ogg", "vorbis", "flac", "wav", "pcm", "isomp4"] }
 
 # Transcription
