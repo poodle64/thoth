@@ -14,6 +14,19 @@
         "sherpa-onnx-sys"
       ],
       "allowedVersions": "<=1.13.2"
+    },
+    {
+      "description": "package.json's packageManager pin must equal the pnpm nixpkgs supplies; the pnpm-version-matches check in flake.nix fails the build when they drift, because CI's pnpm/action-setup resolves the lockfile with the declared pnpm while fetchPnpmDeps consumes it with the nixpkgs one. Renovate can only move one side, so every bump it proposes fails that check (#123). Bumping pnpm is a two-part change — packageManager plus the nixpkgs input — so it is done by hand, not by Renovate. Note this disables the update rather than capping it with allowedVersions: a cap would retype the nixpkgs pnpm version into a third location, which is the drift this rule exists to prevent.",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchDepTypes": [
+        "packageManager"
+      ],
+      "matchPackageNames": [
+        "pnpm"
+      ],
+      "enabled": false
     }
   ]
 }
