@@ -549,6 +549,64 @@ fn catch_post_processing<F: FnOnce() -> String>(f: F) -> Result<String, String> 
     })
 }
 
+/// Apply the text stages that follow ASR: output filters, the personal
+/// dictionary, and canonical replacements.
+///
+/// Shared by the live dictation path ([`run_transcription_pipeline`]) and by
+/// MCP/HTTP file transcription, so the two cannot drift apart. They used to:
+/// file transcription returned raw ASR text and skipped all of this, which
+/// mangled exactly the vocabulary the dictionary exists to fix (#118).
+///
+/// AI enhancement is deliberately not included. It is the one stage that
+/// rewrites content rather than normalising it, it is slow, and it needs a
+/// loaded Ollama model, so it stays opt-in on the interactive path where a
+/// human is watching the result.
+pub(crate) fn apply_text_post_processing(
+    text: String,
+    config: &PipelineConfig,
+) -> Result<String, String> {
+    if !config.apply_filtering && !config.apply_dictionary {
+        return Ok(text);
+    }
+
+    let apply_filtering = config.apply_filtering;
+    let apply_dictionary = config.apply_dictionary;
+    let filter_opts = if apply_filtering {
+        Some(transcription::FilterOptions {
+            remove_fillers: config.remove_fillers,
+            australian_spelling: config.australian_spelling,
+            spoken_numbers_to_digits: config.spoken_numbers_to_digits,
+            normalise_whitespace: config.normalise_whitespace,
+            cleanup_punctuation: config.cleanup_punctuation,
+            sentence_case: config.sentence_case,
+            voice_formatting_commands: config.voice_formatting_commands,
+            // The dictionary is applied separately below, gated by
+            // config.apply_dictionary. Disable it inside the filter so it
+            // runs exactly once and honours the user's dictionary setting
+            // (FilterOptions::default() would otherwise turn it on here and
+            // apply it a second time, ignoring config.apply_dictionary).
+            apply_dictionary: false,
+        })
+    } else {
+        None
+    };
+
+    catch_post_processing(move || {
+        let mut t = text;
+        if apply_filtering {
+            t = transcription::filter_transcription(t, filter_opts);
+            tracing::debug!("Post-processing: after filtering: {} chars", t.len());
+        }
+        if apply_dictionary {
+            t = dictionary::apply_dictionary(&t);
+            tracing::debug!("Post-processing: after dictionary: {} chars", t.len());
+            t = canonical::apply_canonical(&t);
+            tracing::debug!("Post-processing: after canonical: {} chars", t.len());
+        }
+        t
+    })
+}
+
 /// Output of the core transcription pipeline (transcribe + filter + enhance).
 ///
 /// Shared by [`process_audio`] (recordings/imports) and [`pipeline_retranscribe`].
@@ -655,42 +713,7 @@ async fn run_transcription_pipeline(
         );
         emit_progress(app, PipelineState::Filtering, "Applying filters...");
 
-        let apply_filtering = config.apply_filtering;
-        let apply_dictionary = config.apply_dictionary;
-        let filter_opts = if apply_filtering {
-            Some(transcription::FilterOptions {
-                remove_fillers: config.remove_fillers,
-                australian_spelling: config.australian_spelling,
-                spoken_numbers_to_digits: config.spoken_numbers_to_digits,
-                normalise_whitespace: config.normalise_whitespace,
-                cleanup_punctuation: config.cleanup_punctuation,
-                sentence_case: config.sentence_case,
-                voice_formatting_commands: config.voice_formatting_commands,
-                // The dictionary is applied separately below, gated by
-                // config.apply_dictionary. Disable it inside the filter so it
-                // runs exactly once and honours the user's dictionary setting
-                // (FilterOptions::default() would otherwise turn it on here and
-                // apply it a second time, ignoring config.apply_dictionary).
-                apply_dictionary: false,
-            })
-        } else {
-            None
-        };
-
-        text = catch_post_processing(move || {
-            let mut t = text;
-            if apply_filtering {
-                t = transcription::filter_transcription(t, filter_opts);
-                tracing::debug!("Pipeline: After filtering: {} chars", t.len());
-            }
-            if apply_dictionary {
-                t = dictionary::apply_dictionary(&t);
-                tracing::debug!("Pipeline: After dictionary: {} chars", t.len());
-                t = canonical::apply_canonical(&t);
-                tracing::debug!("Pipeline: After canonical: {} chars", t.len());
-            }
-            t
-        })?;
+        text = apply_text_post_processing(text, config)?;
 
         tracing::info!("Pipeline: Filtered text to {} characters", text.len());
     }
@@ -1366,6 +1389,95 @@ mod tests {
         assert!(!config.enhancement_enabled);
         assert!(!config.auto_copy);
         assert!(config.auto_paste);
+    }
+
+    // Which stages the post-ASR text pipeline applies.
+    //
+    // These exist because live dictation and MCP file transcription used to
+    // run different stages, silently (#118). Both now call
+    // `apply_text_post_processing`, so these tests pin the shared contract:
+    // any future change that adds, drops or reorders a stage for one caller
+    // changes it for both, and fails here rather than surprising a caller.
+
+    /// Config with every text stage off, as a baseline to switch on one at a time.
+    fn bare_config() -> PipelineConfig {
+        PipelineConfig {
+            apply_dictionary: false,
+            apply_filtering: false,
+            remove_fillers: false,
+            australian_spelling: false,
+            spoken_numbers_to_digits: false,
+            normalise_whitespace: false,
+            cleanup_punctuation: false,
+            sentence_case: false,
+            voice_formatting_commands: false,
+            ..PipelineConfig::default()
+        }
+    }
+
+    #[test]
+    fn post_processing_is_a_no_op_when_every_stage_is_disabled() {
+        let config = bare_config();
+        let input = "um so the  Thing is".to_string();
+
+        let out = apply_text_post_processing(input.clone(), &config)
+            .expect("post-processing must not fail");
+
+        assert_eq!(out, input, "no stage was enabled, so nothing may change");
+    }
+
+    #[test]
+    fn post_processing_applies_filters_when_filtering_is_enabled() {
+        let config = PipelineConfig {
+            apply_filtering: true,
+            remove_fillers: true,
+            ..bare_config()
+        };
+
+        let out = apply_text_post_processing("um so it works".to_string(), &config)
+            .expect("post-processing must not fail");
+
+        assert!(
+            !out.contains("um "),
+            "filler removal is a filter stage and must run: {out:?}"
+        );
+    }
+
+    #[test]
+    fn post_processing_applies_australian_spelling_when_enabled() {
+        let config = PipelineConfig {
+            apply_filtering: true,
+            australian_spelling: true,
+            ..bare_config()
+        };
+
+        let out = apply_text_post_processing("the color of the organization".to_string(), &config)
+            .expect("post-processing must not fail");
+
+        assert!(
+            out.contains("colour") && out.contains("organisation"),
+            "Australian spelling is a filter stage and must run: {out:?}"
+        );
+    }
+
+    #[test]
+    fn post_processing_never_applies_ai_enhancement() {
+        // Enhancement is the deliberate fork between the two paths: the live
+        // path may run it, file transcription never does. If enhancement ever
+        // moves into the shared function, this fails.
+        let config = PipelineConfig {
+            enhancement_enabled: true,
+            ..bare_config()
+        };
+        let input = "this text is not rewritten".to_string();
+
+        let out = apply_text_post_processing(input.clone(), &config)
+            .expect("post-processing must not fail");
+
+        assert_eq!(
+            out, input,
+            "enhancement_enabled must have no effect on the shared text stages"
+        );
     }
 
     #[test]

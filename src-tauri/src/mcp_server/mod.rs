@@ -104,6 +104,7 @@ pub struct TranscriptionParams {
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct TranscribeFileParams {
     /// Absolute or `~`-relative path to a local audio file (WAV, MP3, M4A, OGG, FLAC).
+    /// `~` and `~/...` are expanded; `~user/...` is not supported.
     pub path: String,
 }
 
@@ -416,7 +417,7 @@ impl ThothMcp {
     }
 
     #[tool(
-        description = "Transcribe a local audio file through Thoth (WAV, MP3, M4A, OGG, FLAC). Runs as a background job that does not disturb live recording. Returns a jobId; poll `transcribe_status` for the transcript."
+        description = "Transcribe a local audio file through Thoth (WAV, MP3, M4A, OGG, FLAC). Runs as a background job at lower priority than live recording: file jobs run one at a time and yield the transcription model to live dictation, so submitting a batch will not take the microphone away from someone dictating. The transcript has the same output filters, personal dictionary and canonical replacements applied as live dictation; it does NOT get AI enhancement. Returns a jobId; poll `transcribe_status` for the transcript."
     )]
     async fn transcribe_file(
         &self,

@@ -330,12 +330,52 @@ struct TranscribePayload {
     path: String,
 }
 
+/// Resolve a caller-supplied path, expanding a leading `~` to the home directory.
+///
+/// Supports `~` and `~/...`. `~user/...` is rejected rather than silently
+/// treated as a literal directory name, so the error names the real cause
+/// instead of surfacing as a confusing "file not found".
+pub(crate) fn expand_user_path(path: &str) -> Result<std::path::PathBuf, String> {
+    let Some(rest) = path.strip_prefix('~') else {
+        return Ok(std::path::PathBuf::from(path));
+    };
+
+    // `~` on its own, or `~/...`. Anything else is `~user`, which would need a
+    // passwd lookup to resolve and is not supported.
+    let rest = match rest {
+        "" => "",
+        r if r.starts_with('/') => &r[1..],
+        _ => {
+            return Err(format!(
+                "unsupported home-relative path: {}. Only `~` and `~/...` are \
+                 supported; `~user` paths are not. Use an absolute path instead.",
+                path
+            ));
+        }
+    };
+
+    let home = dirs::home_dir()
+        .ok_or_else(|| "could not determine the home directory to expand `~`".to_string())?;
+
+    Ok(if rest.is_empty() {
+        home
+    } else {
+        home.join(rest)
+    })
+}
+
 /// Submit a file for async transcription. Shared by the HTTP API and the MCP server.
 ///
 /// Validates the path, registers a job, spawns the transcription off the executor
 /// (and off the live recording pipeline), and returns the job id immediately.
 pub(crate) async fn submit_transcribe_job(path: String) -> Result<String, String> {
-    if !std::path::Path::new(&path).is_file() {
+    // Expand `~` before the existence check. The parameter has always been
+    // documented as accepting a home-relative path, but the expansion was never
+    // implemented, so `~/memo.m4a` failed as "file not found" and sent callers
+    // hunting for a missing file rather than an unimplemented feature (#118).
+    let resolved = expand_user_path(&path)?;
+
+    if !resolved.is_file() {
         return Err(format!("file not found or not readable: {}", path));
     }
 
@@ -365,8 +405,23 @@ pub(crate) async fn submit_transcribe_job(path: String) -> Result<String, String
         }
 
         // transcribe_file is synchronous and CPU-bound.
-        let result =
-            tokio::task::spawn_blocking(move || crate::transcription::transcribe_file(path)).await;
+        //
+        // Background priority: this is batch work with no human waiting on it,
+        // so it stands aside for live dictation instead of queueing ahead of it
+        // (#118). Post-processing then puts the transcript through the same
+        // filters, personal dictionary and canonical replacements the live path
+        // applies, so a batch transcript is not the one place the user's own
+        // vocabulary comes back mangled.
+        let result = tokio::task::spawn_blocking(move || {
+            let raw = crate::transcription::transcribe_file_with_priority(
+                resolved.to_string_lossy().into_owned(),
+                crate::transcription::Priority::Background,
+            )?;
+            let config = crate::pipeline::effective_pipeline_config()?;
+            crate::pipeline::apply_text_post_processing(raw, &config)
+                .map_err(crate::error::Error::from)
+        })
+        .await;
 
         let mut guard = get_jobs().await;
         if let Some(job) = guard.as_mut().unwrap().get_mut(&job_id_clone) {
@@ -771,5 +826,93 @@ mod tests {
         let a = generate_token();
         let b = generate_token();
         assert_ne!(a, b);
+    }
+
+    // Path handling for `transcribe_file`. The `path` parameter has always
+    // documented `~` support; these pin that the documentation and the code
+    // now agree, in either direction (#118).
+
+    #[test]
+    fn tilde_slash_path_expands_to_the_home_directory() {
+        let home = dirs::home_dir().expect("home directory required for this test");
+
+        let expanded = expand_user_path("~/memo.m4a").expect("`~/...` must expand");
+
+        assert_eq!(expanded, home.join("memo.m4a"));
+        assert!(
+            expanded.is_absolute(),
+            "expansion must yield an absolute path: {}",
+            expanded.display()
+        );
+    }
+
+    #[test]
+    fn bare_tilde_expands_to_the_home_directory() {
+        let home = dirs::home_dir().expect("home directory required for this test");
+        assert_eq!(expand_user_path("~").expect("`~` must expand"), home);
+    }
+
+    #[test]
+    fn absolute_path_is_returned_unchanged() {
+        let path = "/var/audio/memo.wav";
+        assert_eq!(
+            expand_user_path(path).expect("absolute paths must pass through"),
+            std::path::PathBuf::from(path)
+        );
+    }
+
+    #[test]
+    fn relative_path_is_returned_unchanged() {
+        // Not expanded, not rejected: resolved against the process working
+        // directory by the existence check, as any other relative path is.
+        let path = "audio/memo.wav";
+        assert_eq!(
+            expand_user_path(path).expect("relative paths must pass through"),
+            std::path::PathBuf::from(path)
+        );
+    }
+
+    #[test]
+    fn tilde_user_path_is_rejected_by_naming_the_real_cause() {
+        let err = expand_user_path("~someone/memo.wav")
+            .expect_err("`~user` paths must be rejected, not silently mangled");
+
+        // The point of the rejection is that it does NOT masquerade as a
+        // missing file, which is what sent the original reporter looking in
+        // the wrong place.
+        assert!(
+            !err.contains("file not found"),
+            "error must not look like a missing file: {err}"
+        );
+        assert!(
+            err.contains("~user"),
+            "error must name the unsupported form: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_file_still_reports_not_found() {
+        let err = submit_transcribe_job("/nonexistent/thoth/memo.wav".to_string())
+            .await
+            .expect_err("a missing file must not be accepted as a job");
+
+        assert!(
+            err.contains("file not found or not readable"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_file_under_tilde_reports_not_found_after_expansion() {
+        let err = submit_transcribe_job("~/nonexistent-thoth-test-file.wav".to_string())
+            .await
+            .expect_err("a missing file must not be accepted as a job");
+
+        // Expansion succeeded; the failure is a genuine missing file, so the
+        // not-found error is the honest one here.
+        assert!(
+            err.contains("file not found or not readable"),
+            "unexpected error: {err}"
+        );
     }
 }
