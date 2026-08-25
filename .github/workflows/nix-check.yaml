@@ -130,17 +130,32 @@ jobs:
         env:
           IS_PR: ${{ github.event_name == 'pull_request' }}
           FROM_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+
+          SCRIPT="scripts/update-pnpm-deps-hash.sh"
+
+          # On a PR, always run the BASE branch's copy of the script, never the
+          # one at the PR head. Two reasons, both real:
+          #   1. A branch opened before the script existed does not have it, and
+          #      the step died with "No such file or directory" (hit on #162).
+          #   2. This step runs with contents: write. A PR must not be able to
+          #      edit the script that then pushes to its own branch.
+          if [ "$IS_PR" = "true" ]; then
+            SCRIPT="$(mktemp)"
+            git show "${BASE_SHA}:scripts/update-pnpm-deps-hash.sh" > "$SCRIPT"
+            chmod +x "$SCRIPT"
+          fi
 
           if [ "$IS_PR" != "true" ]; then
             # main and workflow_dispatch: verify only. A stale hash here is a
             # signal that something skipped a PR, not something to paper over.
-            scripts/update-pnpm-deps-hash.sh --check
+            "$SCRIPT" --check
             exit 0
           fi
 
-          if scripts/update-pnpm-deps-hash.sh --check; then
+          if "$SCRIPT" --check; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -150,7 +165,7 @@ jobs:
             exit 1
           fi
 
-          scripts/update-pnpm-deps-hash.sh
+          "$SCRIPT"
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Commit the refreshed hash
