@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@poodle64/design-tokens": "^2026.8.0",
-    "@poodle64/ui": "^2026.8.10",
+    "@poodle64/ui": "^2026.8.13",
     "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-autostart": "2.5.1",
     "@tauri-apps/plugin-clipboard-manager": "2.3.2",
@@ -59,7 +59,7 @@
     "stylelint": "^16.26.1",
     "stylelint-config-html": "^1.1.0",
     "stylelint-config-standard": "^40.0.0",
-    "svelte": "5.56.9",
+    "svelte": "5.56.10",
     "svelte-check": "4.7.6",
     "tailwindcss": "^4.3.0",
     "typescript": "6.0.3",
