@@ -151,3 +151,7 @@ test-results/
 playwright-report/
 blob-report/
 .playwright-mcp/
+
+# Extracted by CI (nix-check.yaml) to run the base branch copy of the
+# pnpmDeps hash script; never committed.
+scripts/.ci-update-pnpm-deps-hash.sh

@@ -35,7 +35,14 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Prefer the enclosing git worktree over the script's own location: CI runs a
+# copy of this script extracted from the base branch (see nix-check.yaml), so
+# the path it was invoked from is not necessarily inside the repo.
+if REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  :
+else
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
 FLAKE="${REPO_ROOT}/flake.nix"
 
 # lib.fakeHash. Any value that cannot be the real one works; this is the
