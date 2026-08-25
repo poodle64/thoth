@@ -142,10 +142,16 @@ jobs:
           #      the step died with "No such file or directory" (hit on #162).
           #   2. This step runs with contents: write. A PR must not be able to
           #      edit the script that then pushes to its own branch.
+          # Written into scripts/ rather than /tmp on purpose. Older copies of
+          # the script derive the repo root from their own path, so running one
+          # from a temp directory made it look for flake.nix in the wrong place.
+          # Extracting it beside its normal home keeps that resolution correct
+          # whichever version of the script the base branch carries.
           if [ "$IS_PR" = "true" ]; then
-            SCRIPT="$(mktemp)"
+            SCRIPT="scripts/.ci-update-pnpm-deps-hash.sh"
             git show "${BASE_SHA}:scripts/update-pnpm-deps-hash.sh" > "$SCRIPT"
             chmod +x "$SCRIPT"
+            trap 'rm -f "scripts/.ci-update-pnpm-deps-hash.sh"' EXIT
           fi
 
           if [ "$IS_PR" != "true" ]; then
