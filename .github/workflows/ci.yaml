@@ -186,8 +186,17 @@ jobs:
       - name: CSS lint (stylelint)
         run: pnpm lint:css
 
+      - name: Design-system drift
+        run: pnpm lint:drift
+
+      - name: Design craft
+        run: pnpm lint:design
+
       - name: Unit tests (vitest)
         run: pnpm test:run
+
+      - name: Production build
+        run: pnpm build
 
       - name: Notify failure (ntfy infra)
         if: failure() && github.event_name != 'pull_request'
@@ -195,9 +204,12 @@ jobs:
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          # Inline ntfy notify: thoth is a private repo; composite actions from
-          # poodle64/master-project (also private) cannot be resolved at
-          # job-setup time on any runner. Atlas self-hosted reads the host token.
+          # Inline ntfy notify: poodle64/master-project is private, so its composite
+          # action cannot be resolved at job-setup time from thoth, which is PUBLIC
+          # (the reason is master-project's visibility, not thoth's — this comment
+          # said thoth was private until 27/08/2026). Per the household CI standard
+          # a public repo inlines this curl rather than calling the private action.
+          # Atlas self-hosted reads the host token.
           TOKEN=""
           for f in /etc/ntfy/tokens/ci-publisher.token /run/secrets/ntfy/systemd; do
             [ -r "$f" ] && TOKEN="$(cat "$f")" && break

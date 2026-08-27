@@ -11,7 +11,7 @@
   import { Button } from '@poodle64/ui/button';
   import { Alert, AlertDescription } from '@poodle64/ui/alert';
   import * as AlertDialog from '@poodle64/ui/alert-dialog';
-  import LoadingState from '$components/common/LoadingState.svelte';
+  import { LoadingState } from '$components/common';
   import { formatBytes } from '$lib/utils/format';
 
   interface StorageUsage {

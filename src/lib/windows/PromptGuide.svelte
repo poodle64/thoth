@@ -418,11 +418,17 @@
     font-style: italic;
   }
 
+  /* A full border rather than a left accent tab: the side-tab treatment is the
+     craft gate's `side-tab` finding, and it reads as a state marker (selected,
+     errored) rather than as the static callout this is. Bordered-and-tinted is
+     how @poodle64/ui's Alert treats the same surface; Alert itself is not used
+     here because it hardcodes role="alert", which would announce six static
+     reference callouts as live regions. */
   .info-box {
     margin: 16px 0;
     padding: 16px;
     background: color-mix(in srgb, var(--primary) 10%, transparent);
-    border-left: 4px solid var(--primary);
+    border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
     border-radius: var(--radius-md);
   }
 

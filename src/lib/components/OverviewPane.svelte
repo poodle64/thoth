@@ -21,7 +21,7 @@
   import * as Card from '@poodle64/ui/card';
   import * as AlertDialog from '@poodle64/ui/alert-dialog';
   import { Alert, AlertDescription } from '@poodle64/ui/alert';
-  import LoadingState from '$components/common/LoadingState.svelte';
+  import { LoadingState } from '$components/common';
 
   interface ModelStats {
     name: string;
@@ -609,7 +609,10 @@
           </p>
           {#if setupState === 'downloading'}
             <div class="progress-bar">
-              <div class="progress-fill" style="width: {Math.round(downloadProgress)}%"></div>
+              <div
+                class="progress-fill"
+                style="transform: translateX(-{100 - Math.round(downloadProgress)}%)"
+              ></div>
             </div>
           {:else if setupState === 'initialising'}
             <div class="progress-bar">
@@ -1335,7 +1338,11 @@
     transform: rotate(90deg);
   }
 
-  /* Progress bar (kept as bespoke — not a shadcn primitive) */
+  /* Progress bar. Bespoke because @poodle64/ui's Progress models the determinate
+     case only, and the indeterminate sweep below is the state this surface spends
+     most of its time in. The determinate fill is driven by transform rather than
+     width for the reason the craft gate enforces: animating a layout property
+     re-lays-out the subtree every frame. */
   .progress-bar {
     height: 6px;
     background: var(--muted);
@@ -1344,14 +1351,16 @@
   }
 
   .progress-fill {
+    width: 100%;
     height: 100%;
     background: var(--primary);
     border-radius: 9999px;
-    transition: width 0.3s ease;
+    transition: transform 0.3s ease;
   }
 
   .progress-fill.indeterminate {
     width: 40%;
+    transition: none;
     animation: indeterminate 1.2s ease-in-out infinite;
   }
 

@@ -36,6 +36,43 @@ repos:
   #                              File Validation                                  #
   # ---------------------------------------------------------------------------- #
 
+  # ---------------------------------------------------------------------------- #
+  #                              Frontend / Design                                #
+  # ---------------------------------------------------------------------------- #
+
+  - repo: local
+    hooks:
+      - id: svelte-check
+        name: svelte-check
+        entry: pnpm check
+        language: system
+        types_or: [svelte, ts]
+        pass_filenames: false
+
+      - id: stylelint
+        name: stylelint (blocks raw colour literals)
+        entry: pnpm lint:css
+        language: system
+        types_or: [svelte, css]
+        pass_filenames: false
+
+      # Both gate on NEW findings only, against a checked-in baseline, so they
+      # never fail on the backlog that existed when they landed. Rebank with
+      # `pnpm lint:drift --baseline` / `pnpm lint:design --baseline`.
+      - id: check-ui-drift
+        name: design - Hand-rolled what @poodle64/ui already ships
+        entry: pnpm lint:drift
+        language: system
+        types_or: [svelte, ts]
+        pass_filenames: false
+
+      - id: check-design-craft
+        name: design - Craft defects no other gate can see
+        entry: pnpm lint:design
+        language: system
+        types_or: [svelte, ts, css]
+        pass_filenames: false
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

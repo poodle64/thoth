@@ -5,7 +5,7 @@
   import { toast } from 'svelte-sonner';
   import { superForm, defaults } from 'sveltekit-superforms';
   import { zod4 } from 'sveltekit-superforms/adapters';
-  import LoadingState from '$components/common/LoadingState.svelte';
+  import { LoadingState } from '$components/common';
   import { dictionarySchema } from '$lib/schemas/dictionary';
   import { Button } from '@poodle64/ui/button';
   import { Input } from '@poodle64/ui/input';

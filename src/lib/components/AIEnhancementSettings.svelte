@@ -14,7 +14,7 @@
   import { Switch } from '@poodle64/ui/switch';
   import { Badge } from '@poodle64/ui/badge';
   import { Label } from '@poodle64/ui/label';
-  import LoadingState from '$components/common/LoadingState.svelte';
+  import { LoadingState } from '$components/common';
   import AlertCircle from '@lucide/svelte/icons/alert-circle';
   import Eye from '@lucide/svelte/icons/eye';
   import EyeOff from '@lucide/svelte/icons/eye-off';
