@@ -1525,7 +1525,7 @@
     background: var(--background);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    font-family: ui-monospace, 'SF Mono', 'Fira Code', monospace;
+    font-family: var(--ds-font-code);
     font-size: 11px;
     color: var(--foreground);
     word-break: break-all;

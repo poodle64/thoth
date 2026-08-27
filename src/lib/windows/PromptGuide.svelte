@@ -319,7 +319,7 @@
     padding: 2px 6px;
     background: var(--muted);
     border-radius: var(--radius-sm);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--ds-font-code);
     font-size: 0.9em;
     color: var(--primary);
   }
@@ -329,7 +329,7 @@
     padding: 12px;
     background: var(--muted);
     border-radius: var(--radius-md);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--ds-font-code);
     font-size: 0.75rem;
     line-height: 1.5;
     overflow-x: auto;

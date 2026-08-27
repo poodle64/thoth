@@ -240,7 +240,7 @@
   }
 
   .time {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--ds-font-code);
     font-size: 14px;
     color: var(--muted-foreground);
     min-width: 40px;
