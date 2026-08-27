@@ -52,9 +52,13 @@ Reason it is safe to deviate here: the tokens underneath ARE shared, so an accen
 
 `src/lib/components/ui/` keeps `context-menu`, `form` and `radio-group`. Verified against `@poodle64/ui@2026.8.15`: the package ships none of the three. `form` is deliberately excluded upstream (a Formsnap/Superforms binding layer is an app-architecture choice, not a design one); the other two have not been added by any consuming app yet. This is the "genuinely missing" carve-out, and the drift gate skips `components/ui/` for exactly this reason — re-check it when the package moves.
 
-### Root `flake.nix` is packaging, not a dev shell
+### The root inventory is recorded in `.canonical-exceptions`
 
-The fleet dropped per-app dev-shell flakes in favour of the workstation's declarative config. Thoth's `flake.nix` is not one: it is how Thoth is *distributed* (NixOS and home-manager modules, #117). It stays.
+`canonical-app-shape.md` requires the repo root to hold the canonical set and nothing else, recorded **per entry** rather than wholesale. Thoth's divergences live in `.canonical-exceptions` at the root, in that rule's own grammar (`root-inventory:<name>  YYYY-MM-DD  # reason`), and are not restated here — one home per fact.
+
+Two things worth knowing without opening it. Most extra root entries are a single structural fact rather than a list of decisions: the canonical template puts the web app under `frontend/`, and a Tauri app's web layer IS the repo root. And `flake.nix` is *packaging* — it builds the distributable and exposes the NixOS and home-manager modules (#117) — not the per-app dev shell the fleet dropped on 2026-08-19.
+
+`check-canonical-shape.py` skips this repo entirely ("no backend/ or frontend/ — not a full-stack app"), so nothing reads that file automatically today. It is written in the canonical grammar anyway, and verified against the real parser, so it is a record a human or agent can trust and a gate could consume unchanged.
 
 ## Pitfalls
 

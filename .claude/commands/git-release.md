@@ -173,6 +173,22 @@ Before pushing (step 5):
 - [ ] Commit message format correct
 - [ ] Tag format is `v<VERSION>`
 
+## When the release build fails
+
+Two failure modes that are not obvious from the workflow log alone, carried over
+from the root RELEASING.md this command replaced.
+
+**No draft release appeared.** Check, in order: the `TAURI_SIGNING_PRIVATE_KEY`
+secret is present; `cargo check` passes locally; `pnpm build` passes locally; the
+sherpa-onnx dylibs downloaded (the `download-binaries` feature fetches them, so a
+network failure on the runner looks like a link error).
+
+**`latest.json` is missing from the artefacts.** The updater manifest is only
+emitted when `bundle.createUpdaterArtifacts` is `true` in `tauri.conf.json`.
+Without it the build is green and auto-updates silently never arrive.
+
+Neither is fixed by retagging — see Rollback below. Roll forward.
+
 ## Rollback
 
 If critical issues discovered after publishing:
