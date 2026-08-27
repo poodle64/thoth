@@ -34,6 +34,8 @@ Version bumps are owned by `scripts/bump-version.sh` — it is the authority on 
 
 `rules-library/platform/canonical-app-shape.md` opens "Every household **full-stack app**". Thoth is a Tauri desktop app, so most of that rule describes something Thoth does not have — a `backend/src/<pkg>/` package, vertical `api/<domain>/` slices, Postgres + Alembic, a compose stack, an nginx vhost, an SPA served by its own backend. Those are **inapplicable**, not excepted: there is nothing here to suppress.
 
+Those two are structural core, which the shape gate refuses from a repo-local exceptions file — so Thoth cannot make itself canonical, and a reviewed desktop-app clause in the rule is the only route. Raised as `poodle64/master-project#314`.
+
 What binds Thoth is the design-system half, which the rule makes binding on *every* app with no per-app exception, and Thoth takes it in full: `@poodle64/design-tokens` as the single design language, `@poodle64/ui` for every primitive it ships, a `DESIGN.md` North Star, and both gates (`pnpm lint:drift`, `pnpm lint:design`) in pre-commit and CI on empty baselines.
 
 ### The app shell is deliberately not adopted (recorded 27/08/2026)

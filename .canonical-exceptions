@@ -13,8 +13,10 @@
 #
 # So `src-layout` and `domain-slices` are deliberately ABSENT below. They stay
 # genuinely unsatisfied, and closing them needs a reviewed desktop-app clause in
-# canonical-app-shape.md itself, not a line here. Tracked as an open question
-# for the rule, not as drift this repo can resolve.
+# canonical-app-shape.md itself, not a line here. Raised against the household
+# governance repo as poodle64/master-project#314, where Thoth and the estate's
+# other Tauri app are the two reference consumers such a clause would have.
+# It is an open question for the RULE, not drift this repo can resolve.
 #
 # What IS recorded below is the root inventory, which the rule requires per
 # entry rather than wholesale. Every line is a divergence Thoth keeps on
