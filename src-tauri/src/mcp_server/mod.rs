@@ -44,16 +44,21 @@ impl Default for ThothMcp {
 pub struct DictionaryParams {
     /// The operation: `list`, `add`, `update`, `delete`, `import`, or `export`.
     pub action: String,
-    /// For `add`/`update`: the text to find. For `update`/`delete`: identify by index.
+    /// For `add`: the text to find. For `update`/`delete`: identifies WHICH entry to
+    /// act on, by its own `from` text (case-insensitive) — the safe way in, since it
+    /// cannot silently hit the wrong entry. Refuses if it matches more than one.
     #[serde(default)]
     pub from: Option<String>,
     /// For `add`/`update`: the replacement text.
     #[serde(default)]
     pub to: Option<String>,
-    /// For `add`/`update`: whether the match is case-sensitive (default false).
+    /// For `add`: whether the match is case-sensitive (default false). For `update`:
+    /// omit to keep the entry's current setting.
     #[serde(default)]
     pub case_sensitive: Option<bool>,
-    /// For `update`/`delete`: the zero-based index of the entry (from `list`).
+    /// For `update`/`delete`: the zero-based index of the entry, as reported in each
+    /// row of `list`. Prefer `from`: an index counted out by hand silently edits or
+    /// deletes a different, working entry when it is wrong.
     #[serde(default)]
     pub index: Option<usize>,
     /// For `import`: a JSON string of dictionary entries.
@@ -188,7 +193,7 @@ impl ThothMcp {
     }
 
     #[tool(
-        description = "Manage Thoth's personal dictionary (find/replace entries applied to transcriptions). Use this to view or change spelling corrections and word replacements. Action: list | add | update | delete | import | export. add/update require from + to (+ optional caseSensitive); update/delete require index (from list); import requires json (+ optional merge). Returns: the entry list (list), a compact ack {ok, action, index, count} (add/update/delete), a count (import), or a JSON string (export)."
+        description = "Manage Thoth's personal dictionary (find/replace entries applied to transcriptions). Use this to view or change spelling corrections and word replacements. Action: list | add | update | delete | import | export. add requires from + to (+ optional caseSensitive). update/delete identify the entry EITHER by from (its own text — preferred, refuses if it is not unique) OR by index; update also requires to. import requires json (+ optional merge). Returns: the entry list, each row carrying its index (list), a compact ack {ok, action, index, count} (add/update/delete), a count (import), or a JSON string (export)."
     )]
     async fn dictionary(
         &self,
@@ -198,7 +203,22 @@ impl ThothMcp {
             "list" => {
                 let entries = crate::dictionary::get_dictionary_entries()
                     .map_err(|e| core_err(e.to_string()))?;
-                json_result(&entries)
+                // Each row carries its own index: the index-based form of
+                // update/delete is unusable if the caller has to count a
+                // three-hundred-entry response by eye to find one.
+                let rows: Vec<_> = entries
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| {
+                        serde_json::json!({
+                            "index": i,
+                            "from": e.from,
+                            "to": e.to,
+                            "caseSensitive": e.case_sensitive,
+                        })
+                    })
+                    .collect();
+                json_result(&rows)
             }
             "add" => {
                 let entry = crate::dictionary::DictionaryEntry {
@@ -218,32 +238,59 @@ impl ThothMcp {
                 // add appends, so the new entry sits at the last index.
                 mutation_ack("add", count.saturating_sub(1), count)
             }
+            // `update` and `delete` both take EITHER an explicit `index` (the
+            // original form, unchanged) or the entry's own `from` text. The
+            // by-`from` path resolves and mutates under one write lock in the
+            // dictionary core, and refuses rather than guessing when `from`
+            // matches zero or several entries.
             "update" => {
-                let index = p
-                    .index
-                    .ok_or_else(|| core_err("`index` required for update".into()))?;
-                let entry = crate::dictionary::DictionaryEntry {
-                    from: p
-                        .from
-                        .ok_or_else(|| core_err("`from` required for update".into()))?,
-                    to: p
-                        .to
-                        .ok_or_else(|| core_err("`to` required for update".into()))?,
-                    case_sensitive: p.case_sensitive.unwrap_or(false),
+                let to =
+                    p.to.ok_or_else(|| core_err("`to` required for update".into()))?;
+                let index = match p.index {
+                    Some(index) => {
+                        let entry = crate::dictionary::DictionaryEntry {
+                            from: p.from.ok_or_else(|| {
+                                core_err("`from` required when updating by `index`".into())
+                            })?,
+                            to,
+                            case_sensitive: p.case_sensitive.unwrap_or(false),
+                        };
+                        crate::dictionary::update_dictionary_entry(index, entry)
+                            .map_err(|e| core_err(e.to_string()))?;
+                        index
+                    }
+                    None => {
+                        let key = p.from.ok_or_else(|| {
+                            core_err("update needs `from` (the entry's own text) or `index`".into())
+                        })?;
+                        crate::dictionary::update_dictionary_entry_by_from(
+                            &key,
+                            to,
+                            p.case_sensitive,
+                        )
+                        .map_err(|e| core_err(e.to_string()))?
+                    }
                 };
-                crate::dictionary::update_dictionary_entry(index, entry)
-                    .map_err(|e| core_err(e.to_string()))?;
                 let count = crate::dictionary::get_dictionary_entries()
                     .map_err(|e| core_err(e.to_string()))?
                     .len();
                 mutation_ack("update", index, count)
             }
             "delete" => {
-                let index = p
-                    .index
-                    .ok_or_else(|| core_err("`index` required for delete".into()))?;
-                crate::dictionary::remove_dictionary_entry(index)
-                    .map_err(|e| core_err(e.to_string()))?;
+                let index = match p.index {
+                    Some(index) => {
+                        crate::dictionary::remove_dictionary_entry(index)
+                            .map_err(|e| core_err(e.to_string()))?;
+                        index
+                    }
+                    None => {
+                        let key = p.from.ok_or_else(|| {
+                            core_err("delete needs `from` (the entry's own text) or `index`".into())
+                        })?;
+                        crate::dictionary::remove_dictionary_entry_by_from(&key)
+                            .map_err(|e| core_err(e.to_string()))?
+                    }
+                };
                 let count = crate::dictionary::get_dictionary_entries()
                     .map_err(|e| core_err(e.to_string()))?
                     .len();
