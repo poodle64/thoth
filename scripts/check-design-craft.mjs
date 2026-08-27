@@ -42,11 +42,17 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
 
-// Anchor to the repo, not the process cwd, so pre-commit (which runs from the
-// repo root) and `pnpm lint:design` resolve the same paths. Thoth is a Tauri
-// desktop app: its SvelteKit app IS the repo root, where the canonical
-// full-stack template puts it under frontend/.
+// Anchor to the frontend package, not the process cwd. pre-commit runs its
+// hooks from the repo root, but `pnpm lint:design` runs from the frontend — the
+// script must resolve the same paths either way. The script lives at
+// <frontend>/scripts/, so the frontend root is its parent.
+//
+// INSTALL_DIR is derived the same way its sibling gate derives it, and for the
+// same reason: a full-stack app nests the frontend at `frontend/`, a Tauri
+// desktop app's SvelteKit app IS the repo root, and a hardcoded nested path
+// makes every desktop app hand-edit a factory file over one constant.
 const FRONTEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const INSTALL_DIR = path.basename(FRONTEND_ROOT) === 'frontend' ? 'frontend' : '.';
 const IMPECCABLE = path.join(FRONTEND_ROOT, 'node_modules/.bin/impeccable');
 const STATIC_TARGET = path.join(FRONTEND_ROOT, 'src');
 const BASELINE = path.join(FRONTEND_ROOT, '.design-craft-baseline.json');
@@ -57,9 +63,15 @@ const BASE_URL = process.env.THOTH_URL || 'http://localhost:1422';
 // SvelteKit's routing — easy to edit, easy to see what is and is not covered.
 const LIVE_ROUTES = ['/'];
 
-// Thoth is a desktop app with no phone target: the two widths are the smallest
-// window it is usable at (tauri.conf.json main window minWidth/minHeight) and a
-// comfortably large one.
+// THE ONLY LOCAL DIFFERENCE IN THIS FILE, and it affects the non-binding live
+// mode alone — LIVE_VIEWPORTS is read inside the `--live` branch and nowhere
+// else, so the static mode this repo actually gates on is a carbon copy.
+//
+// Thoth is a desktop app with no phone target: tauri.conf.json pins the main
+// window's minWidth to 980, so the factory's 390x844 tests a width the window
+// can never be at, and every finding it reported would be about a state no user
+// can reach. The two widths below are the smallest window Thoth is usable at
+// and a comfortably large one.
 const LIVE_VIEWPORTS = ['980x700', '1400x1000'];
 
 // ---------------------------------------------------------------------------
@@ -91,7 +103,7 @@ const ADVISORY_RULES = new Set(['em-dash-overuse', 'marketing-buzzword', 'aphori
 
 if (!existsSync(IMPECCABLE)) {
 	console.error(
-		`impeccable not installed at ${path.relative(FRONTEND_ROOT, IMPECCABLE)} — run pnpm install first.`
+		`impeccable not installed at ${path.relative(FRONTEND_ROOT, IMPECCABLE)} — run pnpm install in ${INSTALL_DIR} first.`
 	);
 	process.exit(2);
 }
@@ -242,7 +254,7 @@ if (mode === 'static') {
 	if (!execPath) {
 		console.error(
 			'No Chromium executable found for impeccable’s live scan (checked PUPPETEER_EXECUTABLE_PATH and the Playwright cache).\n' +
-				'Run: pnpm exec playwright install chromium'
+				`Run: pnpm exec playwright install chromium (from ${INSTALL_DIR})`
 		);
 		process.exit(2);
 	}

@@ -52,6 +52,12 @@ Reason it is safe to deviate here: the tokens underneath ARE shared, so an accen
 
 `src/lib/components/ui/` keeps `context-menu`, `form` and `radio-group`. Verified against `@poodle64/ui@2026.8.15`: the package ships none of the three. `form` is deliberately excluded upstream (a Formsnap/Superforms binding layer is an app-architecture choice, not a design one); the other two have not been added by any consuming app yet. This is the "genuinely missing" carve-out, and the drift gate skips `components/ui/` for exactly this reason — re-check it when the package moves.
 
+### The design gates are the factory's, not forks
+
+`scripts/check-ui-drift.mjs` is **byte-identical** to the canonical template's copy. It used to carry a hand-edited line, because the factory resolved the repo root as `<frontend>/..` — true of a full-stack app, false here, since a Tauri app's SvelteKit app IS the repo root. The factory now derives that from the directory's basename (`full-stack-app-template@6e624f0`), so this repo takes the file unchanged. Do not re-fork it: if it needs to change, change it in the factory.
+
+`scripts/check-design-craft.mjs` is that same factory file with its two copier parameters rendered (`THOTH_URL`, port 1422) plus **one** local block — `LIVE_VIEWPORTS`. That is read only inside the `--live` branch, so the static mode this repo gates on is a carbon copy; the override exists because `tauri.conf.json` pins the main window's minWidth to 980 and the factory's 390x844 phone width is a state no user can reach.
+
 ### The root inventory is recorded in `.canonical-exceptions`
 
 `canonical-app-shape.md` requires the repo root to hold the canonical set and nothing else, recorded **per entry** rather than wholesale. Thoth's divergences live in `.canonical-exceptions` at the root, in that rule's own grammar (`root-inventory:<name>  YYYY-MM-DD  # reason`), and are not restated here — one home per fact.

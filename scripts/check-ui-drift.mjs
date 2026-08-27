@@ -29,13 +29,24 @@ import { readdirSync, readFileSync, existsSync, statSync, writeFileSync } from '
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-// Anchor to the repo, not the process cwd, so pre-commit (which runs from the
-// repo root) and `pnpm lint:drift` resolve the same paths. Thoth is a Tauri
-// desktop app: its SvelteKit app IS the repo root, where the canonical
-// full-stack template puts it under frontend/. That is the only structural
-// difference between this copy and the template's.
+// Anchor to the frontend package, not the process cwd. pre-commit runs its
+// hooks from the repo root, but `pnpm lint:drift` runs from the frontend — the
+// script must resolve the same paths either way. The script lives at
+// <frontend>/scripts/, so the frontend root is its parent.
+//
+// Where that frontend sits is the one thing that differs by archetype, so it is
+// DERIVED rather than assumed. A full-stack app nests it at `frontend/`, a name
+// the canonical shape mandates, so the basename is a reliable signal. A Tauri
+// desktop app has no server to sit beside: its SvelteKit app IS the repo root,
+// and there is no enclosing directory to step up into. Hardcoding the nested
+// case made every desktop app hand-edit this line, which forks a factory file
+// over one constant — exactly what an extension point exists to prevent.
 const FRONTEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const REPO_ROOT = FRONTEND_ROOT;
+const REPO_ROOT =
+	path.basename(FRONTEND_ROOT) === 'frontend' ? path.resolve(FRONTEND_ROOT, '..') : FRONTEND_ROOT;
+// Where to tell someone to run pnpm: `frontend` when nested, `.` when the
+// frontend is the repo root.
+const INSTALL_DIR = path.relative(REPO_ROOT, FRONTEND_ROOT) || '.';
 const UI_DIST = path.join(FRONTEND_ROOT, 'node_modules/@poodle64/ui/dist/components/ui');
 const SRC = path.join(FRONTEND_ROOT, 'src');
 const ROUTES = path.join(SRC, 'routes');
@@ -44,7 +55,7 @@ const SURFACES_DIR = path.join(REPO_ROOT, 'docs/product/surfaces');
 
 if (!existsSync(UI_DIST)) {
 	console.error(
-		`@poodle64/ui not installed at ${path.relative(FRONTEND_ROOT, UI_DIST)} — run pnpm install first.`
+		`@poodle64/ui not installed at ${path.relative(FRONTEND_ROOT, UI_DIST)} — run pnpm install in ${INSTALL_DIR} first.`
 	);
 	process.exit(2);
 }
