@@ -237,4 +237,11 @@ jobs:
             accept-flake-config = true
 
       - name: Build the package
-        run: nix build .#thoth --no-link --print-build-logs
+        # --max-jobs 2 is not a performance knob, it is the crates.io mitigation
+        # flake.nix's cargoLock comment describes and CI never applied. The
+        # vendor fetch is hundreds of individual crate downloads; run unthrottled
+        # they trip crates.io rate limiting and come back 403, failing the build
+        # on a different random crate each time (symphonia-bundle-flac and
+        # -codec-aac on one run of #167, -bundle-mp3 on the retry). Throttled,
+        # nix retries each crate individually and makes steady progress.
+        run: nix build .#thoth --no-link --print-build-logs --max-jobs 2
