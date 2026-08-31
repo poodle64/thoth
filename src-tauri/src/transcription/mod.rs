@@ -403,7 +403,36 @@ fn audio_has_speech(path: &std::path::Path) -> Result<bool, String> {
 
 /// Eagerly initialise the transcription model in the background.
 /// Triggers Metal shader compilation so the first recording is instant.
+///
+/// No-op when a model is already loaded. That guard is load-bearing rather than
+/// an optimisation: this is called from the macOS wake observer, which fires on
+/// `NSWorkspaceScreensDidWakeNotification` as well as system wake, so a lid open
+/// or a monitor hotplug reached it too. Without the check each one rebuilt the
+/// whole model, and because the replacement is constructed before the old one is
+/// dropped, peak memory was twice the model: 3-6 GB for whisper large-v3-turbo,
+/// several times a day (#171). The recording paths have always guarded; this one
+/// did not.
 pub fn warmup_transcription() {
+    if is_transcription_ready() {
+        tracing::debug!("Transcription model already loaded; skipping warm-up");
+        return;
+    }
+
+    // Serialise warm-ups. The wake observer debounces by only one second, so two
+    // wake events can otherwise be in flight together and each build a model.
+    static WARMUP_LOCK: Mutex<()> = Mutex::new(());
+    let Some(_warmup_guard) = WARMUP_LOCK.try_lock() else {
+        tracing::debug!("Transcription warm-up already in progress; skipping");
+        return;
+    };
+
+    // Re-check: another warm-up may have finished between the check above and
+    // acquiring the lock.
+    if is_transcription_ready() {
+        tracing::debug!("Transcription model loaded while waiting; skipping warm-up");
+        return;
+    }
+
     let selected_id = crate::config::get_config()
         .ok()
         .and_then(|c| c.transcription.model_id.clone());
