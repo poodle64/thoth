@@ -4,7 +4,7 @@
   import HistoryItem from './HistoryItem.svelte';
   import { Skeleton } from '@poodle64/ui/skeleton';
   import Clock from '@lucide/svelte/icons/clock';
-  import EmptyState from '$components/common/EmptyState.svelte';
+  import { EmptyState } from '$components/common';
 
   interface Props {
     items: TranscriptionRecord[];

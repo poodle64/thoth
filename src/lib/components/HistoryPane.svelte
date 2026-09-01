@@ -23,12 +23,14 @@
   import { Badge } from '@poodle64/ui/badge';
   import { Checkbox } from '@poodle64/ui/checkbox';
   import * as AlertDialog from '@poodle64/ui/alert-dialog';
+  import { EmptyState } from '$components/common';
   import HistoryList from './HistoryList.svelte';
   import HistoryFilterPanel, { type FilterState } from './HistoryFilterPanel.svelte';
   import ExportDialog from './ExportDialog.svelte';
   import PerformanceDialog from './PerformanceDialog.svelte';
   import AudioPlayer from './AudioPlayer.svelte';
   import Search from '@lucide/svelte/icons/search';
+  import Mic from '@lucide/svelte/icons/mic';
   import Filter from '@lucide/svelte/icons/filter';
   import Download from '@lucide/svelte/icons/download';
   import BarChart2 from '@lucide/svelte/icons/bar-chart-2';
@@ -512,37 +514,25 @@
         >
           {#snippet emptyState()}
             {#if hasActiveFilters}
-              <div class="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-                <Search class="size-10 text-muted-foreground" />
-                <p class="text-base font-medium text-foreground">No matches</p>
-                <p class="text-sm text-muted-foreground">Try adjusting your search or filters.</p>
-                <Button variant="outline" size="sm" onclick={clearFilters} type="button">
-                  Clear filters
-                </Button>
-              </div>
+              <EmptyState
+                icon={Search}
+                title="No matches"
+                description="Try adjusting your search or filters."
+                class="h-full"
+              >
+                {#snippet action()}
+                  <Button variant="outline" size="sm" onclick={clearFilters} type="button">
+                    Clear filters
+                  </Button>
+                {/snippet}
+              </EmptyState>
             {:else}
-              <div class="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-                <svg
-                  class="size-10 text-muted-foreground"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                >
-                  <path
-                    d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                  <path
-                    d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-                <p class="text-base font-medium text-foreground">No transcriptions yet</p>
-                <p class="text-sm text-muted-foreground">Record or import audio to get started.</p>
-              </div>
+              <EmptyState
+                icon={Mic}
+                title="No transcriptions yet"
+                description="Record or import audio to get started."
+                class="h-full"
+              />
             {/if}
           {/snippet}
         </HistoryList>

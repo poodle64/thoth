@@ -19,22 +19,50 @@ repos:
     hooks:
       - id: check-pii
         name: "security - Detect PII (names, mobiles, personal emails)"
-        # Path corrected: .claude/hooks/master/precommit/pii.py never existed —
-        # the real script is check-pii.py, which takes staged filenames as argv
-        # exactly as pre-commit passes them.
-        #
-        # Hooks now come from the mimir plugin rather than a symlink (see the
-        # master setup-symlinks command), and mimir is not installed here, so
-        # this is currently INERT: the guard skips when the script is absent
-        # rather than failing every commit. It starts working again on any
-        # machine that provides the path, with no config change.
-        entry: bash -c 'test -f .claude/hooks/master/check-pii.py || exit 0; exec python3 .claude/hooks/master/check-pii.py "$@"' --
+        entry: python3 .claude/hooks/master/precommit/pii.py
         language: system
         types: [text]
 
   # ---------------------------------------------------------------------------- #
   #                              File Validation                                  #
   # ---------------------------------------------------------------------------- #
+
+  # ---------------------------------------------------------------------------- #
+  #                              Frontend / Design                                #
+  # ---------------------------------------------------------------------------- #
+
+  - repo: local
+    hooks:
+      - id: svelte-check
+        name: svelte-check
+        entry: pnpm check
+        language: system
+        types_or: [svelte, ts]
+        pass_filenames: false
+
+      - id: stylelint
+        name: stylelint (blocks raw colour literals)
+        entry: pnpm lint:css
+        language: system
+        types_or: [svelte, css]
+        pass_filenames: false
+
+      # Both gate on NEW findings only, against a checked-in baseline, so they
+      # never fail on the backlog that existed when they landed. Rebank with
+      # `pnpm lint:drift --baseline` / `pnpm lint:design --baseline`.
+      - id: check-ui-drift
+        name: design - Hand-rolled what @poodle64/ui already ships
+        entry: pnpm lint:drift
+        language: system
+        types_or: [svelte, ts]
+        pass_filenames: false
+
+      - id: check-design-craft
+        name: design - Craft defects no other gate can see
+        entry: pnpm lint:design
+        language: system
+        types_or: [svelte, ts, css]
+        pass_filenames: false
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

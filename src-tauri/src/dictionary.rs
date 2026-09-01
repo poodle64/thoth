@@ -35,7 +35,17 @@ pub struct Dictionary {
 static DICTIONARY: OnceLock<RwLock<Dictionary>> = OnceLock::new();
 
 /// Get the dictionary file path (~/.thoth/dictionary.json)
+///
+/// `THOTH_DATA_DIR` overrides the directory when set to a non-empty path, the
+/// same override the database honours — so a test can point the dictionary at a
+/// throwaway file instead of editing the user's real one.
 fn get_dictionary_path() -> PathBuf {
+    if let Ok(dir) = std::env::var("THOTH_DATA_DIR") {
+        if !dir.is_empty() {
+            return PathBuf::from(dir).join("dictionary.json");
+        }
+    }
+
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".thoth")
@@ -122,6 +132,98 @@ pub fn add_dictionary_entry(entry: DictionaryEntry) -> Result<(), Error> {
 /// Update an existing dictionary entry
 #[tauri::command]
 pub fn update_dictionary_entry(index: usize, entry: DictionaryEntry) -> Result<(), Error> {
+    let mut dictionary = get_dictionary().write();
+    update_entry_locked(&mut dictionary, index, entry)
+}
+
+/// Remove a dictionary entry by index
+#[tauri::command]
+pub fn remove_dictionary_entry(index: usize) -> Result<(), Error> {
+    let mut dictionary = get_dictionary().write();
+    remove_entry_locked(&mut dictionary, index)
+}
+
+/// Update the single entry whose `from` text is `from_key`, returning the index
+/// it landed on.
+///
+/// The `from` text is the dictionary's natural key — [`add_dictionary_entry`]
+/// already refuses a second entry with the same one — so this addresses an entry
+/// by its own content rather than by a position the caller had to count out.
+/// The stored `from` is kept verbatim (matching is case-insensitive, so the
+/// caller's casing must not silently rewrite the entry); to change the `from`
+/// text itself, remove the entry and add the new one.
+///
+/// `case_sensitive` of `None` keeps the entry's existing flag rather than
+/// resetting it, so a caller that only means to change `to` cannot flip it by
+/// omission.
+pub fn update_dictionary_entry_by_from(
+    from_key: &str,
+    to: String,
+    case_sensitive: Option<bool>,
+) -> Result<usize, Error> {
+    let mut dictionary = get_dictionary().write();
+    let index = resolve_unique_from(&dictionary.entries, from_key)?;
+    let entry = DictionaryEntry {
+        from: dictionary.entries[index].from.clone(),
+        to,
+        case_sensitive: case_sensitive.unwrap_or(dictionary.entries[index].case_sensitive),
+    };
+    update_entry_locked(&mut dictionary, index, entry)?;
+    Ok(index)
+}
+
+/// Remove the single entry whose `from` text is `from_key`, returning the index
+/// it was removed from.
+///
+/// The safe counterpart to [`remove_dictionary_entry`]: an index the caller
+/// miscounted deletes a different, working entry silently, whereas a `from` that
+/// does not resolve to exactly one entry is refused. Resolution happens under the
+/// same write lock as the removal, so no concurrent edit can shift the index in
+/// between.
+pub fn remove_dictionary_entry_by_from(from_key: &str) -> Result<usize, Error> {
+    let mut dictionary = get_dictionary().write();
+    let index = resolve_unique_from(&dictionary.entries, from_key)?;
+    remove_entry_locked(&mut dictionary, index)?;
+    Ok(index)
+}
+
+/// Resolve the one entry whose `from` matches `key`, or refuse.
+///
+/// Matching is case-insensitive on the whole value, identical to the duplicate
+/// check in [`add_dictionary_entry`] — one rule for "is this the same entry?".
+/// Zero matches and more than one match are both errors: a caller asking for an
+/// entry by name gets the entry it named or nothing, never a guess.
+fn resolve_unique_from(entries: &[DictionaryEntry], key: &str) -> Result<usize, Error> {
+    let needle = key.to_lowercase();
+    let matches: Vec<usize> = entries
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.from.to_lowercase() == needle)
+        .map(|(i, _)| i)
+        .collect();
+
+    match matches.as_slice() {
+        [only] => Ok(*only),
+        [] => Err(format!("No dictionary entry has a 'from' of '{}'", key).into()),
+        many => Err(format!(
+            "'{}' matches {} entries (indices {}); refusing to guess — pass an explicit 'index' to pick one",
+            key,
+            many.len(),
+            many.iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .into()),
+    }
+}
+
+/// Update one entry, with the dictionary already locked for writing.
+fn update_entry_locked(
+    dictionary: &mut Dictionary,
+    index: usize,
+    entry: DictionaryEntry,
+) -> Result<(), Error> {
     // Validate entry
     if entry.from.trim().is_empty() {
         return Err("The 'from' field cannot be empty".to_string().into());
@@ -129,8 +231,6 @@ pub fn update_dictionary_entry(index: usize, entry: DictionaryEntry) -> Result<(
     if entry.to.trim().is_empty() {
         return Err("The 'to' field cannot be empty".to_string().into());
     }
-
-    let mut dictionary = get_dictionary().write();
 
     if index >= dictionary.entries.len() {
         return Err(format!("Invalid entry index: {}", index).into());
@@ -148,23 +248,20 @@ pub fn update_dictionary_entry(index: usize, entry: DictionaryEntry) -> Result<(
     }
 
     dictionary.entries[index] = entry;
-    save_dictionary(&dictionary)?;
+    save_dictionary(dictionary)?;
 
     tracing::info!("Updated dictionary entry at index {}", index);
     Ok(())
 }
 
-/// Remove a dictionary entry by index
-#[tauri::command]
-pub fn remove_dictionary_entry(index: usize) -> Result<(), Error> {
-    let mut dictionary = get_dictionary().write();
-
+/// Remove one entry, with the dictionary already locked for writing.
+fn remove_entry_locked(dictionary: &mut Dictionary, index: usize) -> Result<(), Error> {
     if index >= dictionary.entries.len() {
         return Err(format!("Invalid entry index: {}", index).into());
     }
 
     let removed = dictionary.entries.remove(index);
-    save_dictionary(&dictionary)?;
+    save_dictionary(dictionary)?;
 
     tracing::info!(
         "Removed dictionary entry '{}', remaining: {}",
@@ -436,6 +533,79 @@ mod tests {
     }
 
     // =========================================================================
+    // Addressing an entry by its `from` text
+    // =========================================================================
+
+    fn entry(from: &str, to: &str) -> DictionaryEntry {
+        DictionaryEntry {
+            from: from.to_string(),
+            to: to.to_string(),
+            case_sensitive: false,
+        }
+    }
+
+    #[test]
+    fn test_resolve_from_finds_the_named_entry() {
+        let entries = vec![
+            entry("teh", "the"),
+            entry("immich", "Immich"),
+            entry("ell", "LLM"),
+        ];
+        assert_eq!(resolve_unique_from(&entries, "immich").unwrap(), 1);
+        // The first and last entries are addressable too — nothing is off-by-one.
+        assert_eq!(resolve_unique_from(&entries, "teh").unwrap(), 0);
+        assert_eq!(resolve_unique_from(&entries, "ell").unwrap(), 2);
+    }
+
+    #[test]
+    fn test_resolve_from_is_case_insensitive() {
+        // Matching mirrors add_dictionary_entry's duplicate check, so an entry
+        // that could not be added twice can always be addressed by name.
+        let entries = vec![entry("LiteLLM", "LiteLLM")];
+        assert_eq!(resolve_unique_from(&entries, "litellm").unwrap(), 0);
+    }
+
+    #[test]
+    fn test_resolve_from_matches_whole_value_not_substring() {
+        // "hook" must not resolve to "webhook": a substring match would delete
+        // exactly the kind of wrong entry this addressing exists to prevent.
+        let entries = vec![entry("webhook", "web hook")];
+        assert!(resolve_unique_from(&entries, "hook").is_err());
+    }
+
+    #[test]
+    fn test_resolve_from_refuses_when_absent() {
+        let entries = vec![entry("teh", "the")];
+        let err = resolve_unique_from(&entries, "nope")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("No dictionary entry"),
+            "unhelpful error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_from_refuses_when_ambiguous() {
+        // Duplicates can reach the file via a hand edit or a replace-import, so
+        // ambiguity is real. The resolver must refuse, not pick the first.
+        let entries = vec![
+            entry("teh", "the"),
+            entry("ell", "LLM"),
+            entry("TEH", "the"),
+        ];
+        let err = resolve_unique_from(&entries, "teh")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("refusing to guess"), "unhelpful error: {err}");
+        // The error names both candidates so the caller can pick one by index.
+        assert!(
+            err.contains('0') && err.contains('2'),
+            "indices missing: {err}"
+        );
+    }
+
+    // =========================================================================
     // Dictionary entry validation tests
     // =========================================================================
 
@@ -568,7 +738,11 @@ mod tests {
     // Dictionary path tests
     // =========================================================================
 
+    // `#[serial]` because the path now consults `THOTH_DATA_DIR`, which the
+    // trash tests in this same binary set and clear; without it this test can
+    // observe their throwaway directory instead of the `~/.thoth` default.
     #[test]
+    #[serial_test::serial]
     fn test_dictionary_path_format() {
         let path = get_dictionary_path();
         let path_str = path.to_string_lossy();

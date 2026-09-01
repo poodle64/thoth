@@ -30,6 +30,44 @@ Some values genuinely cannot be derived. `flake.nix`'s `pnpmDeps.hash` is one: i
 
 Version bumps are owned by `scripts/bump-version.sh` — it is the authority on which files carry a version, and `.claude/commands/git-release.md` defers to it rather than restating the list. Adding a version to a new file means teaching the script about it in the same commit, not documenting it somewhere else.
 
+## Governance Exceptions (Tauri Desktop App)
+
+`rules-library/platform/canonical-app-shape.md` opens "Every household **full-stack app**". Thoth is a Tauri desktop app, so most of that rule describes something Thoth does not have — a `backend/src/<pkg>/` package, vertical `api/<domain>/` slices, Postgres + Alembic, a compose stack, an nginx vhost, an SPA served by its own backend. Those are **inapplicable**, not excepted: there is nothing here to suppress.
+
+Those two are structural core, which the shape gate refuses from a repo-local exceptions file — so Thoth cannot make itself canonical, and a reviewed desktop-app clause in the rule is the only route. Raised as `poodle64/master-project#314`.
+
+What binds Thoth is the design-system half, which the rule makes binding on *every* app with no per-app exception, and Thoth takes it in full: `@poodle64/design-tokens` as the single design language, `@poodle64/ui` for every primitive it ships, a `DESIGN.md` North Star, and both gates (`pnpm lint:drift`, `pnpm lint:design`) in pre-commit and CI on empty baselines.
+
+### The app shell is deliberately not adopted (recorded 27/08/2026)
+
+`@poodle64/ui` ships `AppShell`, and Thoth's settings window does not use it. This is an argued deviation, not drift.
+
+`AppShell` is one indivisible composition by explicit design — a side rail **plus** a top navbar, with no variant prop, because apps do not choose shell shapes. The rail half would suit Thoth well: ten panes, a collapse toggle, a command palette. The navbar half is the problem.
+
+Thoth's settings window is a **frameless** window. Its 54px title bar is not decoration — it is the window's chrome: it carries `app-region: drag` (the only thing that lets the user move the window), the live recording/processing status, and, on Linux with decorations disabled, the close/minimise controls. `AppShell`'s `<header>` has no drag-region concept and the component exposes only `mainClass`, so hosting one means a `:global()` hack against `.ds-shell-bar` plus an `app-region: no-drag` override on every interactive child the package owns and may change. That is exactly the "compatibility shim that makes a divergent structure LOOK like the factory's" `canonical-app-shape.md` forbids. Stacking the two instead gives a 54px drag bar above a 56px navbar — 110px of chrome in a window whose minimum height is 700px.
+
+The deviation covers the **shell only**. Anything the package ships that Thoth genuinely needs is imported, never copied — `EmptyState`, `ErrorState` and `LoadingState` were local copies until 27/08/2026 and were converged that day. `pnpm lint:drift` is what stops a new copy appearing, and its baseline is empty on purpose: there is no backlog to grandfather, so any finding it reports is new.
+
+Reason it is safe to deviate here: the tokens underneath ARE shared, so an accent, contrast or theme change reaches Thoth like every other app. What differs is composition, which is the layer the umbrella rule leaves to the app.
+
+### Local primitives that are not drift
+
+`src/lib/components/ui/` keeps `context-menu`, `form` and `radio-group`. Verified against `@poodle64/ui@2026.8.15`: the package ships none of the three. `form` is deliberately excluded upstream (a Formsnap/Superforms binding layer is an app-architecture choice, not a design one); the other two have not been added by any consuming app yet. This is the "genuinely missing" carve-out, and the drift gate skips `components/ui/` for exactly this reason — re-check it when the package moves.
+
+### The design gates are the factory's, not forks
+
+`scripts/check-ui-drift.mjs` is **byte-identical** to the canonical template's copy. It used to carry a hand-edited line, because the factory resolved the repo root as `<frontend>/..` — true of a full-stack app, false here, since a Tauri app's SvelteKit app IS the repo root. The factory now derives that from the directory's basename (`full-stack-app-template@6e624f0`), so this repo takes the file unchanged. Do not re-fork it: if it needs to change, change it in the factory.
+
+`scripts/check-design-craft.mjs` is that same factory file with its two copier parameters rendered (`THOTH_URL`, port 1422) plus **one** local block — `LIVE_VIEWPORTS`. That is read only inside the `--live` branch, so the static mode this repo gates on is a carbon copy; the override exists because `tauri.conf.json` pins the main window's minWidth to 980 and the factory's 390x844 phone width is a state no user can reach.
+
+### The root inventory is recorded in `.canonical-exceptions`
+
+`canonical-app-shape.md` requires the repo root to hold the canonical set and nothing else, recorded **per entry** rather than wholesale. Thoth's divergences live in `.canonical-exceptions` at the root, in that rule's own grammar (`root-inventory:<name>  YYYY-MM-DD  # reason`), and are not restated here — one home per fact.
+
+Two things worth knowing without opening it. Most extra root entries are a single structural fact rather than a list of decisions: the canonical template puts the web app under `frontend/`, and a Tauri app's web layer IS the repo root. And `flake.nix` is *packaging* — it builds the distributable and exposes the NixOS and home-manager modules (#117) — not the per-app dev shell the fleet dropped on 2026-08-19.
+
+`check-canonical-shape.py` skips this repo entirely ("no backend/ or frontend/ — not a full-stack app"), so nothing reads that file automatically today. It is written in the canonical grammar anyway, and verified against the real parser, so it is a record a human or agent can trust and a gate could consume unchanged.
+
 ## Pitfalls
 
 - The Apple Neural Engine backend (FluidAudio, macOS/Apple Silicon only) shells out to `swift` at build time (`build.rs`) and is safe to compile everywhere only because the fork itself gates on `target_os = "macos", target_arch = "aarch64"` (`Cargo.toml`) — don't drop that gate, and don't assume a new native backend crate is cross-platform-safe without checking the same.

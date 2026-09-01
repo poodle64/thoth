@@ -1,0 +1,75 @@
+# Canonical-shape exceptions — Thoth
+#
+# Grammar (rules-library/platform/canonical-app-shape.md, enforced by
+# check-canonical-shape.py):  <invariant-key>  <YYYY-MM-DD>  # reason
+#
+# WHAT THIS FILE DOES NOT COVER
+#
+# canonical-app-shape.md opens "Every household full-stack app". Thoth is a
+# Tauri desktop app: it has no backend package and no vertical api/<domain>/
+# slices, and it never will, because there is no server. Those two invariants
+# are STRUCTURAL CORE and the rule forbids excepting them from a repo-local
+# file — correctly, since doing so would mint a new archetype by the back door.
+#
+# So `src-layout` and `domain-slices` are deliberately ABSENT below. They stay
+# genuinely unsatisfied, and closing them needs a reviewed desktop-app clause in
+# canonical-app-shape.md itself, not a line here. Raised against the household
+# governance repo as poodle64/master-project#314, where Thoth and the estate's
+# other Tauri app are the two reference consumers such a clause would have.
+# It is an open question for the RULE, not drift this repo can resolve.
+#
+# What IS recorded below is the root inventory, which the rule requires per
+# entry rather than wholesale. Every line is a divergence Thoth keeps on
+# purpose; anything that could simply go has gone instead (RELEASING.md and
+# .env.example were deleted on 2026-08-27 rather than excepted).
+
+# ---------------------------------------------------------------------------
+# The SvelteKit app is the repo root.
+#
+# ONE structural fact, not sixteen decisions: the canonical template puts the
+# frontend under frontend/, and a Tauri app's web layer IS the repo root —
+# vite, svelte-kit and tauri all resolve it from there. Each entry below is the
+# template's frontend/<name> sitting at <name> instead. Recorded per entry
+# because the rule requires it; they stand or fall together.
+# ---------------------------------------------------------------------------
+root-inventory:package.json           2026-08-27  # template frontend/package.json; the Tauri app's web layer is the repo root
+root-inventory:pnpm-lock.yaml         2026-08-27  # template frontend/pnpm-lock.yaml; same flattening
+root-inventory:pnpm-workspace.yaml    2026-08-27  # template frontend/pnpm-workspace.yaml; same flattening
+root-inventory:tsconfig.json          2026-08-27  # template frontend/tsconfig.json; same flattening
+root-inventory:svelte.config.js       2026-08-27  # template frontend/svelte.config.js; same flattening
+root-inventory:vite.config.ts         2026-08-27  # template frontend/vite.config.ts; same flattening
+root-inventory:vitest.config.ts       2026-08-27  # template frontend/vitest.config.ts; same flattening
+root-inventory:playwright.config.ts   2026-08-27  # template frontend/playwright.config.ts; same flattening
+root-inventory:stylelint.config.js    2026-08-27  # template frontend/stylelint.config.js; same flattening
+root-inventory:components.json        2026-08-27  # template frontend/components.json; same flattening
+root-inventory:src                    2026-08-27  # template frontend/src; same flattening
+root-inventory:static                 2026-08-27  # template frontend/static; same flattening
+root-inventory:tests                  2026-08-27  # template frontend/tests; same flattening
+root-inventory:scripts                2026-08-27  # template frontend/scripts, plus this app's Rust and packaging scripts, which have no template home
+root-inventory:.ui-drift-baseline.json    2026-08-27  # template frontend/.ui-drift-baseline.json; same flattening
+root-inventory:.design-craft-baseline.json 2026-08-27  # template frontend/.design-craft-baseline.json; same flattening
+
+# ---------------------------------------------------------------------------
+# Genuinely this app's domain — a distributable desktop binary.
+# ---------------------------------------------------------------------------
+root-inventory:src-tauri   2026-08-27  # the Rust application itself; a desktop app's equivalent of the template's backend, and nothing the template stamps corresponds to it
+root-inventory:flake.nix   2026-08-27  # packaging, not the per-app dev shell the fleet dropped 2026-08-19: this builds the distributable and exposes the NixOS and home-manager modules (#117)
+root-inventory:flake.lock  2026-08-27  # the lock for the packaging flake above; meaningless apart from it
+root-inventory:nix         2026-08-27  # the NixOS and home-manager module sources the flake exposes (#117); an install mechanism a server-side app has no equivalent of
+root-inventory:models      2026-08-27  # models/manifest.json, the transcription model catalogue this app downloads from; domain data, not configuration
+root-inventory:LICENCE     2026-08-27  # Thoth is public, unlike the fleet the template was written for; a public repo needs its licence at the root where GitHub and packagers look
+root-inventory:NOTICES.md  2026-08-27  # third-party licence notices the distributed binary must carry; an obligation of shipping compiled dependencies, which no server-side app has
+
+# ---------------------------------------------------------------------------
+# Canonical entries deliberately ABSENT.
+# The rule binds in both directions, so each absence is argued too.
+# ---------------------------------------------------------------------------
+root-inventory:backend             2026-08-27  # no server exists; see the header — the matching src-layout invariant is NOT excepted here and remains genuinely open
+root-inventory:frontend            2026-08-27  # flattened to the repo root; see the flattening block above
+root-inventory:Dockerfile          2026-08-27  # ships as a signed desktop binary through GitHub Releases and Nix, never as an image
+root-inventory:.dockerignore       2026-08-27  # nothing builds an image here; see Dockerfile above
+root-inventory:compose.yaml        2026-08-27  # runs on a user's own machine, not as a stack on a deployment host
+root-inventory:config              2026-08-27  # config/actors.yaml gates a deployed /mcp surface; this app's MCP server is embedded in the Rust binary and reachable only on loopback
+root-inventory:.copier-answers.yml 2026-08-27  # never stamped from the template — it predates it and no desktop archetype exists to stamp from
+root-inventory:.template-parity.json 2026-08-27  # the parity manifest measures a stamped app against the template it came from; nothing stamped this one
+root-inventory:.mcp.json           2026-08-27  # present on disk but gitignored: it is generated from majordomo's registry and names internal servers and ports, which this PUBLIC repo must not publish
