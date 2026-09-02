@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 use tower_http::validate_request::ValidateRequestHeaderLayer;
@@ -146,10 +147,74 @@ struct TranscribeJob {
     status: String,
     transcript: Option<String>,
     error: Option<String>,
+    /// When the job was submitted. Drives both expiry and cap eviction.
+    #[serde(skip)]
+    created: Instant,
 }
+
+/// Status of a job whose transcript has aged out of the registry.
+///
+/// Distinct from a 404 on purpose: a caller polling a long-finished job learns
+/// the real reason rather than being told the id never existed (#172, same
+/// principle as the path error in #118).
+const JOB_STATUS_EXPIRED: &str = "expired";
+
+/// How long a job's transcript stays readable after submission.
+///
+/// Jobs exist to be polled by `transcribe_status` shortly after submission, so an
+/// hour is far past any real polling window while still bounding how long a
+/// transcript sits in memory.
+const JOB_TTL: Duration = Duration::from_secs(60 * 60);
+
+/// Hard cap on registry entries, after which the oldest finished jobs are dropped
+/// outright.
+///
+/// An expired entry is a ~100-byte tombstone, so this is a bound on the count
+/// rather than a meaningful memory budget: it exists so a process running for
+/// months cannot accumulate ids without limit. In-flight jobs are never evicted
+/// — their completion handler writes back by id, and dropping the entry would
+/// discard the transcript silently — so the registry can briefly exceed the cap
+/// if that many jobs are submitted at once.
+const MAX_JOBS: usize = 512;
 
 /// In-memory job store for async file transcription.
 static JOBS: Mutex<Option<HashMap<String, TranscribeJob>>> = Mutex::const_new(None);
+
+/// Expire aged-out transcripts and enforce [`MAX_JOBS`].
+///
+/// Runs on submission rather than on a timer: a background sweep would be a
+/// thread that exists only to tidy a map nobody is reading, and the registry only
+/// grows when a job is submitted.
+fn prune_jobs(jobs: &mut HashMap<String, TranscribeJob>, now: Instant) {
+    for job in jobs.values_mut() {
+        if job.status != JOB_STATUS_EXPIRED
+            && now.saturating_duration_since(job.created) >= JOB_TTL
+        {
+            job.status = JOB_STATUS_EXPIRED.to_string();
+            job.transcript = None;
+            job.error = None;
+        }
+    }
+
+    let over = jobs.len().saturating_sub(MAX_JOBS);
+    if over == 0 {
+        return;
+    }
+
+    // Oldest first, and only jobs that have finished: an in-flight job's
+    // completion handler looks itself up by id, so evicting it would drop the
+    // transcript with no error anywhere.
+    let mut evictable: Vec<(Instant, String)> = jobs
+        .iter()
+        .filter(|(_, job)| matches!(job.status.as_str(), "completed" | "failed" | JOB_STATUS_EXPIRED))
+        .map(|(id, job)| (job.created, id.clone()))
+        .collect();
+    evictable.sort_unstable_by_key(|(created, _)| *created);
+
+    for (_, id) in evictable.into_iter().take(over) {
+        jobs.remove(&id);
+    }
+}
 
 async fn get_jobs() -> tokio::sync::MutexGuard<'static, Option<HashMap<String, TranscribeJob>>> {
     let mut guard = JOBS.lock().await;
@@ -384,12 +449,14 @@ pub(crate) async fn submit_transcribe_job(path: String) -> Result<String, String
     {
         let mut guard = get_jobs().await;
         let jobs = guard.as_mut().unwrap();
+        prune_jobs(jobs, Instant::now());
         jobs.insert(
             job_id.clone(),
             TranscribeJob {
                 status: "queued".to_string(),
                 transcript: None,
                 error: None,
+                created: Instant::now(),
             },
         );
     }
@@ -446,13 +513,25 @@ pub(crate) async fn submit_transcribe_job(path: String) -> Result<String, String
 }
 
 /// Look up a transcription job by id, returning its JSON representation. Shared with MCP.
+///
+/// A job past [`JOB_TTL`] reports `status: "expired"` rather than vanishing, so
+/// the caller can tell "you polled too late" from "that id was never issued".
+/// Expiry is computed here as well as in [`prune_jobs`], because the sweep only
+/// runs on submission and a quiet process would otherwise keep serving a stale
+/// transcript indefinitely.
 pub(crate) async fn lookup_transcribe_job(id: &str) -> Option<serde_json::Value> {
-    let guard = get_jobs().await;
-    guard
-        .as_ref()
-        .unwrap()
-        .get(id)
-        .and_then(|job| serde_json::to_value(job).ok())
+    let mut guard = get_jobs().await;
+    let job = guard.as_mut().unwrap().get_mut(id)?;
+
+    if job.status != JOB_STATUS_EXPIRED
+        && Instant::now().saturating_duration_since(job.created) >= JOB_TTL
+    {
+        job.status = JOB_STATUS_EXPIRED.to_string();
+        job.transcript = None;
+        job.error = None;
+    }
+
+    serde_json::to_value(&*job).ok()
 }
 
 async fn handle_post_transcribe(
@@ -806,6 +885,124 @@ pub async fn set_api_port(app: tauri::AppHandle, port: u16) -> Result<(), Error>
 
 #[cfg(test)]
 mod tests {
+
+    /// Build a job of the given age and status, for the registry tests.
+    fn aged_job(status: &str, age: Duration, transcript: Option<&str>) -> TranscribeJob {
+        TranscribeJob {
+            status: status.to_string(),
+            transcript: transcript.map(str::to_string),
+            error: None,
+            created: Instant::now()
+                .checked_sub(age)
+                .expect("test clock underflow"),
+        }
+    }
+
+    /// A transcript must not sit in memory forever. Thoth is a menu-bar app that
+    /// stays resident for days, and before #172 the registry had no eviction of
+    /// any kind — no TTL, no cap, no removal on read.
+    #[test]
+    fn prune_expires_transcripts_past_the_ttl() {
+        let mut jobs = HashMap::new();
+        jobs.insert(
+            "old".to_string(),
+            aged_job("completed", JOB_TTL + Duration::from_secs(1), Some("hello")),
+        );
+        jobs.insert(
+            "fresh".to_string(),
+            aged_job("completed", Duration::from_secs(1), Some("hello")),
+        );
+
+        prune_jobs(&mut jobs, Instant::now());
+
+        let old = &jobs["old"];
+        assert_eq!(old.status, JOB_STATUS_EXPIRED);
+        assert!(old.transcript.is_none(), "expired job kept its transcript");
+
+        let fresh = &jobs["fresh"];
+        assert_eq!(fresh.status, "completed", "a fresh job was expired");
+        assert_eq!(fresh.transcript.as_deref(), Some("hello"));
+    }
+
+    /// The cap is what makes the registry genuinely bounded: expiry alone leaves a
+    /// tombstone per job, which still grows without limit over months of uptime.
+    #[test]
+    fn prune_caps_the_registry_oldest_first() {
+        let mut jobs = HashMap::new();
+        for i in 0..(MAX_JOBS + 50) {
+            // Older index = older job, so the first 50 are the eviction victims.
+            let age = Duration::from_secs((MAX_JOBS + 50 - i) as u64);
+            jobs.insert(format!("job-{i}"), aged_job("completed", age, Some("x")));
+        }
+
+        prune_jobs(&mut jobs, Instant::now());
+
+        assert_eq!(jobs.len(), MAX_JOBS, "registry was not capped");
+        assert!(!jobs.contains_key("job-0"), "oldest job survived the cap");
+        assert!(
+            jobs.contains_key(&format!("job-{}", MAX_JOBS + 49)),
+            "newest job was evicted"
+        );
+    }
+
+    /// An in-flight job's completion handler writes back by id. Evicting it would
+    /// throw the transcript away with no error raised anywhere, so the cap must
+    /// step over anything not yet finished.
+    #[test]
+    fn prune_never_evicts_an_in_flight_job() {
+        let mut jobs = HashMap::new();
+        jobs.insert(
+            "running".to_string(),
+            aged_job("processing", Duration::from_secs(MAX_JOBS as u64 + 100), None),
+        );
+        jobs.insert(
+            "waiting".to_string(),
+            aged_job("queued", Duration::from_secs(MAX_JOBS as u64 + 99), None),
+        );
+        for i in 0..(MAX_JOBS + 50) {
+            let age = Duration::from_secs((MAX_JOBS + 50 - i) as u64);
+            jobs.insert(format!("job-{i}"), aged_job("completed", age, Some("x")));
+        }
+
+        prune_jobs(&mut jobs, Instant::now());
+
+        assert!(jobs.contains_key("running"), "a processing job was evicted");
+        assert!(jobs.contains_key("waiting"), "a queued job was evicted");
+    }
+
+    /// The whole point of expiring rather than deleting: a caller polling a
+    /// long-finished job must learn it polled too late, not that its id never
+    /// existed. Both the HTTP handler and the MCP `transcribe_status` tool read
+    /// this one function, so the distinction reaches both surfaces.
+    #[tokio::test]
+    async fn lookup_reports_expiry_distinctly_from_an_unknown_id() {
+        let id = format!("expiry-test-{}", Uuid::new_v4());
+        {
+            let mut guard = get_jobs().await;
+            guard.as_mut().unwrap().insert(
+                id.clone(),
+                aged_job("completed", JOB_TTL + Duration::from_secs(1), Some("hi")),
+            );
+        }
+
+        let expired = lookup_transcribe_job(&id)
+            .await
+            .expect("an expired job must still resolve, or it is just a 404");
+        assert_eq!(expired["status"], JOB_STATUS_EXPIRED);
+        assert!(
+            expired["transcript"].is_null(),
+            "expired job still returned a transcript: {expired}"
+        );
+
+        assert!(
+            lookup_transcribe_job(&Uuid::new_v4().to_string())
+                .await
+                .is_none(),
+            "an id that was never issued must not resolve"
+        );
+
+        get_jobs().await.as_mut().unwrap().remove(&id);
+    }
     use super::*;
 
     #[test]
