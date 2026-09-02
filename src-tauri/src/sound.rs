@@ -17,8 +17,11 @@
 //!     tone went silent or "cut in half" on the first record after the warm
 //!     audio stream had torn down).
 //!
-//! A fresh player is created per cue and leaked for its short lifetime; the OS
-//! reclaims it when playback ends.
+//! A fresh player is created per cue on its own short-lived thread, which holds
+//! it alive for the cue's duration and then drops it. Dropping is the only thing
+//! that releases an `AVAudioPlayer`: nothing in AVFoundation releases it when
+//! playback ends, so a player that is not dropped is retained for the life of the
+//! process (see #170 — this leaked a decoded PCM buffer twice per dictation).
 
 use crate::config;
 use crate::error::Error;
@@ -273,50 +276,98 @@ fn play_linux_sound(event: SoundEvent, volume: f32) {
     });
 }
 
+/// Longest a cue thread will hold a player alive, in seconds.
+///
+/// The cues are sub-second system assets, so a longer reported duration is a
+/// fault rather than a long cue, and honouring it would pin a thread and a
+/// decoded audio buffer for that long.
+#[cfg(target_os = "macos")]
+const CUE_MAX_HOLD_SECS: f64 = 5.0;
+
+/// Hold time used when `AVAudioPlayer` reports a duration that cannot be trusted
+/// (NaN, negative, infinite). Long enough to cover any of the four cues.
+#[cfg(target_os = "macos")]
+const CUE_FALLBACK_SECS: f64 = 0.5;
+
+/// Extra time held after the reported duration, so the output device drains its
+/// last buffer before the player is released. Matches the Linux cue's tail.
+#[cfg(target_os = "macos")]
+const CUE_RELEASE_TAIL: std::time::Duration = std::time::Duration::from_millis(60);
+
+/// Turn an `AVAudioPlayer` duration into the time its thread should hold it.
+///
+/// `duration` crosses FFI as an `NSTimeInterval`: a NaN or negative value would
+/// panic `Duration::from_secs_f64`, and an absurd one would pin the thread. Both
+/// fall back to a fixed hold rather than trusting the number.
+#[cfg(target_os = "macos")]
+fn cue_hold_time(duration_secs: f64) -> std::time::Duration {
+    let secs = if duration_secs.is_finite() && duration_secs > 0.0 {
+        duration_secs.min(CUE_MAX_HOLD_SECS)
+    } else {
+        CUE_FALLBACK_SECS
+    };
+    std::time::Duration::from_secs_f64(secs) + CUE_RELEASE_TAIL
+}
+
 /// Play a short UI sound via `AVAudioPlayer`.
 ///
 /// `AVAudioPlayer` plays as an ordinary mixable CoreAudio client: it does not
 /// duck or pause other apps' audio (so the cue no longer interferes with music),
 /// and it is an independent output stream so opening the microphone to record
-/// does not clip it. A fresh player is created per cue, prepared, played, and
-/// leaked for its short lifetime; the OS reclaims it once playback ends.
+/// does not clip it.
+///
+/// Runs on a detached thread so the player is created, played and released on one
+/// thread. `Retained<AVAudioPlayer>` is not `Send`, so it cannot be parked in a
+/// shared slot for a later release; keeping its whole life on one thread is what
+/// makes the drop — and therefore the `objc_release` — possible at all. Building
+/// and preparing the player also blocks, and the start cue fires on the hotkey
+/// path where any delay is audible as lag.
 #[cfg(target_os = "macos")]
 fn play_macos_sound(path: &'static str, volume: f32) {
-    use objc2::AnyThread;
-    use objc2_avf_audio::AVAudioPlayer;
-    use objc2_foundation::{NSString, NSURL};
+    std::thread::spawn(move || {
+        // `NSString::from_str` and `NSURL::fileURLWithPath` return autoreleased
+        // objects, and a thread with no pool in place just leaks them.
+        objc2::rc::autoreleasepool(|_pool| {
+            use objc2::AnyThread;
+            use objc2_avf_audio::AVAudioPlayer;
+            use objc2_foundation::{NSString, NSURL};
 
-    let ns_path = NSString::from_str(path);
-    let url = NSURL::fileURLWithPath(&ns_path);
+            let ns_path = NSString::from_str(path);
+            let url = NSURL::fileURLWithPath(&ns_path);
 
-    // SAFETY: `url` is a valid file URL; init returns None (Err) if the file
-    // can't be opened as audio, which we handle.
-    let player =
-        match unsafe { AVAudioPlayer::initWithContentsOfURL_error(AVAudioPlayer::alloc(), &url) } {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!("Failed to load sound {} into AVAudioPlayer: {:?}", path, e);
-                return;
-            }
-        };
+            // SAFETY: `url` is a valid file URL; init returns None (Err) if the
+            // file can't be opened as audio, which we handle.
+            let player = match unsafe {
+                AVAudioPlayer::initWithContentsOfURL_error(AVAudioPlayer::alloc(), &url)
+            } {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!("Failed to load sound {} into AVAudioPlayer: {:?}", path, e);
+                    return;
+                }
+            };
 
-    // SAFETY: standard AVAudioPlayer calls; safe to call from any thread.
-    unsafe {
-        // AVAudioPlayer's volume is per-player and relative to the system
-        // volume, so this scales the cue without touching the user's output.
-        player.setVolume(volume);
-        player.prepareToPlay();
-        if !player.play() {
-            tracing::warn!("AVAudioPlayer failed to start playing {}", path);
-            return;
-        }
-    }
+            // SAFETY: standard AVAudioPlayer calls; safe to call from any thread.
+            let hold = unsafe {
+                // AVAudioPlayer's volume is per-player and relative to the system
+                // volume, so this scales the cue without touching the user's output.
+                player.setVolume(volume);
+                player.prepareToPlay();
+                if !player.play() {
+                    tracing::warn!("AVAudioPlayer failed to start playing {}", path);
+                    return;
+                }
+                cue_hold_time(player.duration())
+            };
 
-    // Keep the player alive until playback finishes. AVAudioPlayer stops if it
-    // is deallocated mid-play, so we leak this short-lived instance (a few KB,
-    // reclaimed by the OS when the ~0.5s cue ends), matching the prior cue model.
-    std::mem::forget(player);
-    tracing::debug!("Playing sound via AVAudioPlayer: {}", path);
+            tracing::debug!("Playing sound via AVAudioPlayer: {} (hold {:?})", path, hold);
+
+            // Hold the player alive for the cue: AVAudioPlayer stops if it is
+            // deallocated mid-play. Dropping it at the end of this scope is what
+            // releases it.
+            std::thread::sleep(hold);
+        });
+    });
 }
 
 /// Play a sound for recording start
@@ -528,6 +579,35 @@ mod tests {
         assert_eq!(clamp_volume(f32::NEG_INFINITY), 0.0);
     }
 
+    /// A cue thread holds its player for the reported duration, so the hold must
+    /// track it — a hold shorter than the cue cuts the sound off (#170's fix must
+    /// not reintroduce the bug the leak was papering over).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cue_hold_covers_the_reported_duration() {
+        let hold = cue_hold_time(0.35);
+        assert!(
+            hold >= std::time::Duration::from_secs_f64(0.35),
+            "hold {hold:?} would cut a 350ms cue short"
+        );
+        assert_eq!(hold, std::time::Duration::from_secs_f64(0.35) + CUE_RELEASE_TAIL);
+    }
+
+    /// `duration()` crosses FFI, so an untrustworthy value must not panic
+    /// `Duration::from_secs_f64` or pin the thread for minutes.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cue_hold_rejects_untrustworthy_durations() {
+        let fallback = std::time::Duration::from_secs_f64(CUE_FALLBACK_SECS) + CUE_RELEASE_TAIL;
+
+        for bad in [f64::NAN, -1.0, 0.0, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(cue_hold_time(bad), fallback, "duration {bad} not handled");
+        }
+
+        let ceiling = std::time::Duration::from_secs_f64(CUE_MAX_HOLD_SECS) + CUE_RELEASE_TAIL;
+        assert_eq!(cue_hold_time(3_600.0), ceiling, "absurd duration not capped");
+    }
+
     /// The default must be full volume, so existing installs sound unchanged.
     #[test]
     fn default_volume_is_full() {
@@ -542,6 +622,70 @@ mod tests {
         assert!(render_cue(&[(440.0, 0)], 48_000.0, 1.0).is_empty());
         // A one-frame segment is inaudible but must not panic on the ramp maths.
         let _ = render_cue(&[(440.0, 1)], 1_000.0, 1.0);
+    }
+
+    /// Count live `AVAudioPlayer` instances in this process via `heap(1)`.
+    ///
+    /// `leaks(1)` is the wrong instrument and reports zero either way: a
+    /// `mem::forget`-ed player is still reachable from AVFoundation's own
+    /// structures, so it is retained, not leaked. That is precisely why #170 grew
+    /// to tens of GB of swap without ever showing up as a leak. `heap` counts live
+    /// objects regardless of reachability, which is the number that matters.
+    #[cfg(target_os = "macos")]
+    fn live_av_audio_players() -> usize {
+        let out = std::process::Command::new("heap")
+            .arg(std::process::id().to_string())
+            .output()
+            .expect("heap(1) not runnable");
+        let report = String::from_utf8_lossy(&out.stdout);
+
+        // `heap`'s object table is: COUNT  BYTES  AVG  CLASS_NAME  TYPE  BINARY.
+        report
+            .lines()
+            .filter_map(|line| {
+                let fields: Vec<&str> = line.split_whitespace().collect();
+                let [count, _bytes, _avg, class, ..] = fields.as_slice() else {
+                    return None;
+                };
+                if *class != "AVAudioPlayer" {
+                    return None;
+                }
+                count.replace(',', "").parse::<usize>().ok()
+            })
+            .sum()
+    }
+
+    /// Drives the real macOS cue path and counts the players still alive
+    /// afterwards — the acceptance criterion for #170, which a unit test on
+    /// [`cue_hold_time`] cannot reach.
+    ///
+    /// Ignored by default: it plays 40 cues, takes ~30s, and `heap` needs a
+    /// locally built (unsigned) binary to inspect.
+    ///
+    /// Run with: `cargo test --lib sound -- --ignored --nocapture`
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "plays 40 cues and shells out to heap(1)"]
+    fn macos_cue_players_are_released() {
+        const CUES: usize = 40;
+
+        let before = live_av_audio_players();
+
+        for _ in 0..CUES {
+            play_macos_sound(SoundEvent::RecordingStart.sound_path(), 0.0);
+            std::thread::sleep(std::time::Duration::from_millis(120));
+        }
+        // Outlast the longest hold so every cue thread has dropped its player.
+        std::thread::sleep(cue_hold_time(CUE_MAX_HOLD_SECS) + std::time::Duration::from_secs(1));
+
+        let after = live_av_audio_players();
+        println!("live AVAudioPlayer instances: {before} before, {after} after {CUES} cues");
+        assert_eq!(
+            after, before,
+            "{CUES} cues left {} AVAudioPlayer instance(s) alive — the players are \
+             being retained, not released (#170)",
+            after.saturating_sub(before)
+        );
     }
 
     /// Audible end-to-end check against the real default output device.
