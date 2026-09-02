@@ -171,6 +171,14 @@ impl WhisperTranscriptionService {
     ///
     /// Samples should be 16kHz f32 mono audio.
     pub fn transcribe_samples(&self, samples: &[f32]) -> Result<String> {
+        self.transcribe_samples_biased(samples, super::bias::vocabulary_bias().as_deref())
+    }
+
+    /// Transcribe with an explicit decode bias, rather than the user's own.
+    ///
+    /// The bias is a parameter and not a global read so that the effect of one
+    /// can be measured against the same audio without it (#106).
+    pub fn transcribe_samples_biased(&self, samples: &[f32], bias: Option<&str>) -> Result<String> {
         let start = std::time::Instant::now();
 
         // Create a state for this transcription
@@ -181,6 +189,19 @@ impl WhisperTranscriptionService {
 
         // Configure transcription parameters
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+
+        // Bias decoding toward the user's own vocabulary (#106). Post-hoc
+        // dictionary and canonical correction still runs afterwards: it repairs
+        // what the model got close to, this helps it choose correctly first.
+        //
+        // whisper-rs turns the prompt into a raw pointer and `FullParams` has no
+        // `Drop`, so each call leaks its own copy — a few hundred bytes per
+        // dictation, capped by `bias::MAX_PROMPT_CHARS`, and only when the user
+        // has terms configured.
+        if let Some(prompt) = bias {
+            tracing::debug!("Biasing decoding with {} chars of vocabulary", prompt.len());
+            params.set_initial_prompt(prompt);
+        }
 
         // English-only is a deliberate current scope limit, not an oversight
         // (#102). Whisper's language auto-detection costs an extra inference

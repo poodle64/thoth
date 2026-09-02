@@ -34,6 +34,7 @@ const MOCK_CONFIG = {
     australian_spelling: true,
     spoken_numbers_to_digits: false,
     voice_formatting_commands: true,
+    vocabulary_bias: true,
     model_idle_unload_secs: null,
   },
   shortcuts: {

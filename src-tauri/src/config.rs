@@ -335,6 +335,12 @@ pub struct TranscriptionConfig {
     /// macOS Dictation, Dragon and Talon.
     #[serde(default = "default_true")]
     pub voice_formatting_commands: bool,
+    /// Feed the user's dictionary and canonical terms to the decoder as an
+    /// initial prompt, so an uncommon name is recognised rather than corrected
+    /// afterwards. Whisper-only; the escape hatch for a prompt that starts
+    /// pulling its own words into unrelated audio.
+    #[serde(default = "default_true")]
+    pub vocabulary_bias: bool,
     /// Unload the transcription model after this many seconds with no use.
     ///
     /// `None` means never, which is the default: unloading trades the next
@@ -369,6 +375,7 @@ impl Default for TranscriptionConfig {
             cleanup_punctuation: true,
             sentence_case: false,
             voice_formatting_commands: true,
+            vocabulary_bias: true,
             model_idle_unload_secs: None,
         }
     }
@@ -1444,6 +1451,7 @@ mod tests {
                 cleanup_punctuation: true,
                 sentence_case: false,
                 voice_formatting_commands: true,
+                vocabulary_bias: false,
                 model_idle_unload_secs: Some(900),
             },
             shortcuts: ShortcutConfig {

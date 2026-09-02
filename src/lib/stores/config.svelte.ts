@@ -45,6 +45,8 @@ export interface TranscriptionConfig {
   sentenceCase: boolean;
   /** Whether to convert spoken formatting commands ("new paragraph" / "new line") into line breaks */
   voiceFormattingCommands: boolean;
+  /** Whether to feed dictionary and canonical terms to the decoder as an initial prompt */
+  vocabularyBias: boolean;
   /** Unload the transcription model after this many idle seconds; null means never */
   modelIdleUnloadSecs: number | null;
 }
@@ -206,6 +208,7 @@ interface ConfigRaw {
     cleanup_punctuation: boolean;
     sentence_case: boolean;
     voice_formatting_commands: boolean;
+    vocabulary_bias: boolean;
     model_idle_unload_secs: number | null;
   };
   shortcuts: {
@@ -278,6 +281,7 @@ function parseConfig(raw: ConfigRaw): Config {
       cleanupPunctuation: raw.transcription.cleanup_punctuation ?? true,
       sentenceCase: raw.transcription.sentence_case ?? false,
       voiceFormattingCommands: raw.transcription.voice_formatting_commands ?? true,
+      vocabularyBias: raw.transcription.vocabulary_bias ?? true,
       modelIdleUnloadSecs: raw.transcription.model_idle_unload_secs ?? null,
     },
     shortcuts: {
@@ -351,6 +355,7 @@ function serialiseConfig(config: Config): ConfigRaw {
       cleanup_punctuation: config.transcription.cleanupPunctuation,
       sentence_case: config.transcription.sentenceCase,
       voice_formatting_commands: config.transcription.voiceFormattingCommands,
+      vocabulary_bias: config.transcription.vocabularyBias,
       model_idle_unload_secs: config.transcription.modelIdleUnloadSecs,
     },
     shortcuts: {
@@ -424,6 +429,7 @@ function getDefaultConfig(): Config {
       cleanupPunctuation: true,
       sentenceCase: false,
       voiceFormattingCommands: true,
+      vocabularyBias: true,
       modelIdleUnloadSecs: null,
     },
     // Shortcut defaults are NOT restated here. They live in ShortcutConfig::default()

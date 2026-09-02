@@ -790,6 +790,24 @@
                 Add words to help recognition and set up automatic replacements
               </p>
             </div>
+            <div
+              class="mb-3 flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3"
+            >
+              <div class="flex flex-1 flex-col gap-1">
+                <span class="text-sm font-medium text-foreground">Use these words while listening</span>
+                <span class="text-xs text-muted-foreground"
+                  >Give your words to the speech model as it decodes, so an unusual name is heard
+                  correctly rather than corrected afterwards. Whisper models only.</span
+                >
+              </div>
+              <Switch
+                checked={configStore.transcription.vocabularyBias}
+                onCheckedChange={async (checked) => {
+                  configStore.updateTranscription('vocabularyBias', checked);
+                  await configStore.save();
+                }}
+              />
+            </div>
             <DictionaryEditor />
           </section>
         </div>
