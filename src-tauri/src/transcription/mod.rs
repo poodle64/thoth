@@ -416,12 +416,41 @@ fn audio_has_speech(path: &std::path::Path) -> Result<bool, String> {
     Ok(peak_window_rms >= MIN_SPEECH_RMS)
 }
 
+/// Serialises warmup, so two callers cannot each construct a model at once.
+///
+/// Warmup builds the new service *before* taking the service lock and dropping
+/// the old one, so peak memory is already 2x the model. Two unserialised warmups
+/// make it 3x — and the models are 500 MB (FluidAudio) to 3.1 GB (large-v3-turbo
+/// plus Metal buffers). The wake handler debounces one second, so two wake events
+/// slightly further apart than that used to reach here concurrently.
+static WARMUP_LOCK: Mutex<()> = Mutex::new(());
+
 /// Eagerly initialise the transcription model in the background.
 /// Triggers Metal shader compilation so the first recording is instant.
+///
+/// A no-op when a model is already loaded. Warmup means "make sure a model is
+/// loaded", never "load one again": every caller either guards on
+/// [`is_transcription_ready`] already (the three pipeline entry points) or runs
+/// when nothing can be loaded yet (startup). The one that did not was the macOS
+/// wake observer, which subscribes to `NSWorkspaceScreensDidWakeNotification` as
+/// well as `NSWorkspaceDidWakeNotification` — so a lid open, a display waking or
+/// a monitor hotplug each rebuilt the whole model. Measured on this machine's own
+/// logs before the guard: 6 wake events on 2026-09-01, 6 full model loads (#171).
 ///
 /// Records the outcome in [`WARMUP_FAILED`] so the record guard and pipeline can
 /// react immediately when no usable model could be loaded.
 pub fn warmup_transcription() {
+    // Held for the whole attempt: a caller that blocks here finds the model
+    // already loaded when it gets in, and returns without loading a second one.
+    let _serialised = WARMUP_LOCK.lock();
+
+    if is_transcription_ready() {
+        tracing::debug!("Warmup skipped: a transcription model is already loaded");
+        WARMUP_FAILED.store(false, Ordering::SeqCst);
+        return;
+    }
+
+
     // Clear the flag so an in-progress retry is treated optimistically; if this
     // attempt also fails to produce a service, it is set again below.
     WARMUP_FAILED.store(false, Ordering::SeqCst);

@@ -598,9 +598,11 @@ fn handle_wake(source: &str) {
         // A held cpal stream handle goes stale across sleep; drop it so
         // the next recording opens a fresh device handle.
         crate::audio::cool_down_recording();
-        // Then re-warm the transcription model: the CoreML/ONNX compile
-        // cache may have been evicted across sleep, so the first
-        // recording after wake would otherwise be penalised.
+        // Then make sure a transcription model is loaded, so the first
+        // recording after wake is not penalised by a cold load. This is a
+        // no-op when one already is: the observer fires for display wake and
+        // monitor hotplug too, and unconditionally rebuilding a 0.5-3.1 GB
+        // model on each of those was #171.
         std::thread::sleep(std::time::Duration::from_secs(3));
         crate::transcription::warmup_transcription();
     });
