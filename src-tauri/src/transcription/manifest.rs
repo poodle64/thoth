@@ -517,7 +517,7 @@ pub fn to_model_info(remote: &RemoteModelInfo, selected_id: Option<&str>) -> Mod
         path,
         disk_size,
         recommended: remote.recommended,
-        languages: remote.languages.clone(),
+        languages: probed_languages(remote, downloaded).unwrap_or_else(|| remote.languages.clone()),
         update_available: is_update_available(
             downloaded,
             read_installed_version(&get_model_directory(&remote.id)).as_deref(),
@@ -527,6 +527,44 @@ pub fn to_model_info(remote: &RemoteModelInfo, selected_id: Option<&str>) -> Mod
         accelerator: accelerator_label(&remote.model_type),
         model_type: remote.model_type.clone(),
         backend_available,
+    }
+}
+
+/// What an installed Whisper model's own header says its languages are (#107).
+///
+/// `None` when there is nothing better to say than the manifest: a model that
+/// is not downloaded yet, one that is not Whisper, or a file that cannot be
+/// read. The manifest's hand-typed value is the fallback, not the authority.
+///
+/// A disagreement is logged at warn rather than quietly corrected, because it
+/// means the manifest is wrong about a model people are downloading — the
+/// exact drift that is otherwise invisible, since a wrong entry still
+/// downloads and still loads.
+fn probed_languages(remote: &RemoteModelInfo, downloaded: bool) -> Option<Vec<String>> {
+    if !downloaded || remote.model_type != "whisper_ggml" {
+        return None;
+    }
+
+    let path = crate::transcription::whisper::get_whisper_model_path(&remote.id);
+    match crate::transcription::ggml_header::probe(&path) {
+        Ok(header) => {
+            let languages = header.languages();
+            if languages != remote.languages {
+                tracing::warn!(
+                    "Manifest disagrees with the model file for {}: manifest says {:?}, the file says {:?} (n_vocab {}, {} layers). Using the file.",
+                    remote.id,
+                    remote.languages,
+                    languages,
+                    header.n_vocab,
+                    header.n_audio_layer,
+                );
+            }
+            Some(languages)
+        }
+        Err(e) => {
+            tracing::warn!("Could not read {}'s header ({}); using the manifest's languages", remote.id, e);
+            None
+        }
     }
 }
 
@@ -596,6 +634,53 @@ pub fn get_manifest_update_time() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// A Whisper manifest entry, for the probe tests below.
+    fn whisper_entry(languages: Vec<String>) -> RemoteModelInfo {
+        RemoteModelInfo {
+            id: "ggml-small.en".to_string(),
+            name: "Whisper Small (English)".to_string(),
+            description: String::new(),
+            version: "1.0.0".to_string(),
+            download_url: "https://example.com/m.bin".to_string(),
+            download_size: 1024,
+            extracted_size: 2048,
+            sha256: None,
+            required_files: vec![],
+            archive_directory: None,
+            languages,
+            model_type: "whisper_ggml".to_string(),
+            recommended: false,
+            min_app_version: None,
+        }
+    }
+
+    /// A model that is not downloaded has no file to probe, so the manifest
+    /// stands. Anything else would blank the language column for every model
+    /// the user has not installed.
+    #[test]
+    fn an_undownloaded_model_keeps_the_manifest_languages() {
+        let remote = whisper_entry(vec!["en".to_string()]);
+        assert_eq!(probed_languages(&remote, false), None);
+    }
+
+    /// Only Whisper models carry this header. Probing a Parakeet or CoreML
+    /// entry would read the wrong bytes out of the wrong file.
+    #[test]
+    fn a_non_whisper_model_is_not_probed() {
+        let mut remote = whisper_entry(vec!["en".to_string()]);
+        remote.model_type = "nemo_transducer".to_string();
+        assert_eq!(probed_languages(&remote, true), None);
+    }
+
+    /// A downloaded Whisper model whose file is missing (deleted underneath
+    /// the app) must fall back rather than fail the whole model list.
+    #[test]
+    fn an_unreadable_file_falls_back_to_the_manifest() {
+        let mut remote = whisper_entry(vec!["en".to_string()]);
+        remote.id = "definitely-not-a-real-model-id-for-tests".to_string();
+        assert_eq!(probed_languages(&remote, true), None);
+    }
     use super::*;
 
     #[test]

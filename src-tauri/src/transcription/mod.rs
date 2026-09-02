@@ -10,6 +10,7 @@ pub mod filter;
 #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
 pub mod fluidaudio;
 pub mod gate;
+pub mod ggml_header;
 pub mod manifest;
 #[cfg(feature = "parakeet")]
 pub mod parakeet;
