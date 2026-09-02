@@ -426,6 +426,9 @@ pub enum RecordingMode {
     Toggle,
     /// Hands-free: press once to start, and silence ends it (#88).
     HandsFree,
+    /// Hold to record: recording runs for exactly as long as the key is held
+    /// (#111). The classic push-to-talk.
+    HoldToRecord,
 }
 
 /// Bounds on `hands_free_silence_secs`.
@@ -1515,6 +1518,10 @@ mod tests {
             serde_json::to_string(&RecordingMode::HandsFree).unwrap(),
             "\"hands_free\""
         );
+        assert_eq!(
+            serde_json::to_string(&RecordingMode::HoldToRecord).unwrap(),
+            "\"hold_to_record\""
+        );
     }
 
     #[test]
@@ -1526,6 +1533,10 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<RecordingMode>("\"hands_free\"").unwrap(),
             RecordingMode::HandsFree
+        );
+        assert_eq!(
+            serde_json::from_str::<RecordingMode>("\"hold_to_record\"").unwrap(),
+            RecordingMode::HoldToRecord
         );
     }
 

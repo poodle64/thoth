@@ -40,7 +40,7 @@ use ashpd::desktop::global_shortcuts::{BindShortcutsOptions, GlobalShortcuts, Ne
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use super::manager::shortcut_ids;
+use super::manager::{Edge, shortcut_ids};
 
 /// Ensures the portal session is opened exactly once per process. `setup()` is
 /// reachable both at startup and from the `reregister_shortcuts` command (when
@@ -154,8 +154,8 @@ async fn run_portal(app: AppHandle) {
         },
     );
 
-    // Create the activation stream here, after the proxy has been moved into
-    // this scope, so its borrow of `shortcuts` is local to this task.
+    // Create the streams here, after the proxy has been moved into this scope,
+    // so their borrow of `shortcuts` is local to this task.
     let mut activated = match shortcuts.receive_activated().await {
         Ok(stream) => stream,
         Err(e) => {
@@ -163,12 +163,35 @@ async fn run_portal(app: AppHandle) {
             return;
         }
     };
+    // The portal reports key-up separately, which is what hold-to-record needs
+    // (#111). It runs as its own task rather than being merged into the loop
+    // below: the streams are independent, `receive_deactivated` captures
+    // nothing from the proxy, and a second `while let` is the same shape as the
+    // activation loop that already works here. A compositor that emits no
+    // Deactivated signal costs only hold-to-record, not the whole loop.
+    match shortcuts.receive_deactivated().await {
+        Ok(mut deactivated) => {
+            let release_app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                use futures_util::StreamExt;
+                while let Some(deactivation) = deactivated.next().await {
+                    let id = deactivation.shortcut_id().to_string();
+                    tracing::debug!("Wayland portal deactivated shortcut: {id}");
+                    super::manager::dispatch_shortcut_action(&release_app, &id, Edge::Release);
+                }
+                tracing::debug!("Wayland shortcut deactivation stream ended");
+            });
+        }
+        Err(e) => tracing::warn!(
+            "No Wayland shortcut deactivation signal ({e}); hold-to-record will not stop on key-up here"
+        ),
+    }
 
     tracing::info!("Wayland global-shortcut activation loop started");
     while let Some(activation) = activated.next().await {
         let id = activation.shortcut_id().to_string();
         tracing::info!("Wayland portal activated shortcut: {id}");
-        super::manager::dispatch_shortcut_action(&app, &id);
+        super::manager::dispatch_shortcut_action(&app, &id, Edge::Press);
     }
     tracing::warn!("Wayland global-shortcut activation stream ended");
 

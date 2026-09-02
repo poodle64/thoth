@@ -154,7 +154,11 @@ fn start_fifo_listener<R: Runtime>(app: AppHandle<R>) {
                 if id.is_empty() {
                     continue;
                 }
-                crate::shortcuts::manager::dispatch_shortcut_action(&app, id);
+                crate::shortcuts::manager::dispatch_shortcut_action(
+                    &app,
+                    id,
+                    crate::shortcuts::manager::Edge::Press,
+                );
             }
             // Writer closed (EOF) — loop back, reopen, wait for the next write.
         }

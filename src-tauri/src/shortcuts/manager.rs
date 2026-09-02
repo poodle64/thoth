@@ -3,6 +3,7 @@
 //! Handles registration and management of global keyboard shortcuts
 //! for controlling recording and other application features.
 
+use crate::config::RecordingMode;
 use crate::recording_indicator;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -71,7 +72,60 @@ fn get_manager() -> &'static RwLock<ShortcutManagerState> {
 /// activation loop calls it from its D-Bus signal stream. Both paths share this
 /// debounce, lock-screen suppression, and dispatch so behaviour cannot drift
 /// between platforms.
-pub(crate) fn dispatch_shortcut_action<R: Runtime>(app: &AppHandle<R>, shortcut_id: &str) {
+/// Which edge of a key press this is.
+///
+/// Only hold-to-record cares (#111): every other mode acts on the press and
+/// ignores the release. Carried into the shared dispatcher rather than decided
+/// in each transport's callback, so the Tauri and portal paths cannot drift
+/// apart on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Edge {
+    Press,
+    Release,
+}
+
+/// Whether a release should start a recording action at all.
+///
+/// Releases are dispatched unconditionally by the transports and filtered
+/// here. Two conditions, and both matter: the mode has to be hold-to-record,
+/// and it has to be a recording shortcut — releasing the copy-last or
+/// toggle-enhancement key must not do it a second time.
+pub(crate) fn release_acts(mode: RecordingMode, shortcut_id: &str) -> bool {
+    mode == RecordingMode::HoldToRecord && is_recording_shortcut(shortcut_id)
+}
+
+/// The debounce map key for one shortcut's one edge.
+///
+/// Press keeps the bare id so existing behaviour is byte-identical; release
+/// gets a suffix that cannot occur in a shortcut id (a unit separator).
+fn debounce_key_for(shortcut_id: &str, edge: Edge) -> String {
+    match edge {
+        Edge::Press => shortcut_id.to_string(),
+        Edge::Release => format!("{shortcut_id}\u{1f}release"),
+    }
+}
+
+/// Whether this shortcut starts or stops a recording.
+fn is_recording_shortcut(shortcut_id: &str) -> bool {
+    shortcut_id == shortcut_ids::TOGGLE_RECORDING
+        || shortcut_id == shortcut_ids::TOGGLE_RECORDING_ALT
+}
+
+pub(crate) fn dispatch_shortcut_action<R: Runtime>(
+    app: &AppHandle<R>,
+    shortcut_id: &str,
+    edge: Edge,
+) {
+    if edge == Edge::Release {
+        let mode = crate::config::get_config()
+            .map(|c| c.shortcuts.recording_mode)
+            .unwrap_or_default();
+        if !release_acts(mode, shortcut_id) {
+            tracing::debug!("Shortcut released: {} (no action in {:?})", shortcut_id, mode);
+            return;
+        }
+    }
+
     // Discard events during capture mode. Queued OS events may fire even after
     // unregistration; this guard prevents phantom triggers.
     if crate::keyboard_service::is_capture_active() {
@@ -93,11 +147,16 @@ pub(crate) fn dispatch_shortcut_action<R: Runtime>(app: &AppHandle<R>, shortcut_
         return;
     }
 
-    // Debounce rapid press events (key bounce protection). Only allow one press
-    // per PRESS_DEBOUNCE_MS window per shortcut.
+    // Debounce rapid events (key bounce protection). Only allow one per
+    // PRESS_DEBOUNCE_MS window per shortcut PER EDGE: a hold-to-record release
+    // arrives within milliseconds of its own press on a quick tap, and
+    // debouncing the two against each other would swallow the stop and leave
+    // the recording running.
+    let debounce_key = debounce_key_for(shortcut_id, edge);
+    let debounce_key = debounce_key.as_str();
     {
         let mut manager = get_manager().write();
-        if let Some(last) = manager.last_press_times.get(shortcut_id) {
+        if let Some(last) = manager.last_press_times.get(debounce_key) {
             let elapsed = last.elapsed().as_millis();
             if elapsed < PRESS_DEBOUNCE_MS as u128 {
                 tracing::info!(
@@ -111,16 +170,16 @@ pub(crate) fn dispatch_shortcut_action<R: Runtime>(app: &AppHandle<R>, shortcut_
         }
         manager
             .last_press_times
-            .insert(shortcut_id.to_string(), Instant::now());
+            .insert(debounce_key.to_string(), Instant::now());
     }
 
-    tracing::info!("Shortcut pressed: {}", shortcut_id);
+    tracing::info!("Shortcut {:?}: {}", edge, shortcut_id);
 
     // For recording shortcuts, show indicator and play the start cue IMMEDIATELY
     // in Rust before emitting to the frontend. This eliminates JS round-trip delay.
-    let is_toggle_recording = shortcut_id == shortcut_ids::TOGGLE_RECORDING
-        || shortcut_id == shortcut_ids::TOGGLE_RECORDING_ALT;
-    if is_toggle_recording {
+    // Press only. On a hold-to-record release the recording is ENDING, and
+    // `pipeline_stop_and_process` plays the stop cue and hides the indicator.
+    if edge == Edge::Press && is_recording_shortcut(shortcut_id) {
         recording_indicator::maybe_play_start_indicator(app);
     }
 
@@ -225,10 +284,14 @@ pub fn register<R: Runtime>(
             accelerator.as_str(),
             move |_app, _shortcut, event| match event.state {
                 ShortcutState::Pressed => {
-                    dispatch_shortcut_action(&app_handle, &shortcut_id);
+                    dispatch_shortcut_action(&app_handle, &shortcut_id, Edge::Press);
                 }
                 ShortcutState::Released => {
-                    tracing::debug!("Shortcut released: {}", shortcut_id);
+                    // Only hold-to-record acts on a release (#111); every other
+                    // mode leaves the key-up alone, and the dispatcher decides
+                    // that rather than this callback, so the Wayland portal path
+                    // reaches the same conclusion.
+                    dispatch_shortcut_action(&app_handle, &shortcut_id, Edge::Release);
                 }
             },
         )
@@ -380,5 +443,53 @@ mod tests {
         assert_eq!(deserialised.accelerator, info.accelerator);
         assert_eq!(deserialised.description, info.description);
         assert_eq!(deserialised.is_enabled, info.is_enabled);
+    }
+
+    /// Hold-to-record is the ONLY mode that acts on a key release. Toggle
+    /// acting on one would stop the recording the same press just started.
+    #[test]
+    fn only_hold_to_record_acts_on_a_release() {
+        for id in [
+            shortcut_ids::TOGGLE_RECORDING,
+            shortcut_ids::TOGGLE_RECORDING_ALT,
+        ] {
+            assert!(release_acts(RecordingMode::HoldToRecord, id), "{id}");
+            assert!(!release_acts(RecordingMode::Toggle, id), "{id}");
+            assert!(!release_acts(RecordingMode::HandsFree, id), "{id}");
+        }
+    }
+
+    /// Releasing a non-recording shortcut must do nothing in any mode —
+    /// otherwise letting go of the copy-last key copies a second time.
+    #[test]
+    fn releasing_a_non_recording_shortcut_never_acts() {
+        for id in [
+            shortcut_ids::COPY_LAST_TRANSCRIPTION,
+            shortcut_ids::TOGGLE_ENHANCEMENT,
+        ] {
+            assert!(!release_acts(RecordingMode::HoldToRecord, id), "{id}");
+            assert!(!release_acts(RecordingMode::Toggle, id), "{id}");
+        }
+    }
+
+    /// Press and release must debounce independently. They share one map, and
+    /// a quick tap puts the release inside the press's debounce window — if
+    /// they shared a key the stop would be swallowed and the recording would
+    /// run on with the key already let go.
+    #[test]
+    fn a_release_is_not_debounced_against_its_own_press() {
+        let press = debounce_key_for(shortcut_ids::TOGGLE_RECORDING, Edge::Press);
+        let release = debounce_key_for(shortcut_ids::TOGGLE_RECORDING, Edge::Release);
+        assert_ne!(press, release);
+        assert_eq!(press, shortcut_ids::TOGGLE_RECORDING);
+    }
+
+    /// Two shortcuts must not share a debounce key through the release
+    /// suffix, or holding one would debounce the other.
+    #[test]
+    fn debounce_keys_stay_distinct_between_shortcuts() {
+        let a = debounce_key_for(shortcut_ids::TOGGLE_RECORDING, Edge::Release);
+        let b = debounce_key_for(shortcut_ids::TOGGLE_RECORDING_ALT, Edge::Release);
+        assert_ne!(a, b);
     }
 }

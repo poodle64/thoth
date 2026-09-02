@@ -54,7 +54,7 @@ export interface TranscriptionConfig {
 }
 
 /** Recording mode options */
-export type RecordingMode = 'toggle' | 'hands_free';
+export type RecordingMode = 'toggle' | 'hands_free' | 'hold_to_record';
 
 /**
  * Which Linux tool synthesises keystrokes. Linux only; ignored on macOS.

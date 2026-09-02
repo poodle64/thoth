@@ -232,6 +232,11 @@
   const RECORDING_MODES: { value: RecordingMode; label: string; hint: string }[] = [
     { value: 'toggle', label: 'Toggle', hint: 'Press once to start, again to stop' },
     { value: 'hands_free', label: 'Hands-free', hint: 'Press once to start; a pause ends it' },
+    {
+      value: 'hold_to_record',
+      label: 'Hold to record',
+      hint: 'Records for exactly as long as you hold the key',
+    },
   ];
 
   /**
