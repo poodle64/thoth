@@ -1094,6 +1094,20 @@ async fn process_audio(
     })
 }
 
+/// What to keep in `raw_text`: the ASR's own words, whenever anything downstream
+/// changed them.
+///
+/// This used to be stored only when AI enhancement ran, which left the output
+/// filters, the personal dictionary and the canonical snapper with no record of
+/// what they were handed. A correction that fires wrongly is then
+/// indistinguishable from a mis-hearing — the canonical snapper spent months
+/// deleting the word after a term (`4c58459`) and nothing in the history could
+/// have shown it. Storing it only when it differs keeps the column meaning
+/// "something rewrote this", so an untouched dictation costs nothing.
+fn stored_raw_text(text: &str, raw_text: &str) -> Option<String> {
+    (text != raw_text).then(|| raw_text.to_string())
+}
+
 /// Save transcription to history database
 #[allow(clippy::too_many_arguments)]
 fn save_to_history(
@@ -1116,11 +1130,7 @@ fn save_to_history(
 
     let transcription = database::transcription::Transcription::with_details(
         text.to_string(),
-        if is_enhanced {
-            Some(raw_text.to_string())
-        } else {
-            None
-        },
+        stored_raw_text(text, raw_text),
         duration_seconds,
         Some(audio_path.to_string()),
         is_enhanced,
@@ -1368,11 +1378,7 @@ pub async fn pipeline_retranscribe(
     // Read-modify-write: update only the fields that changed
     let mut updated = existing;
     updated.text = output.text.clone();
-    updated.raw_text = if output.is_enhanced {
-        Some(output.raw_text.clone())
-    } else {
-        None
-    };
+    updated.raw_text = stored_raw_text(&output.text, &output.raw_text);
     updated.is_enhanced = output.is_enhanced;
     updated.enhancement_prompt = if output.is_enhanced {
         Some(config.enhancement_prompt.clone())
@@ -1662,6 +1668,20 @@ mod tests {
         assert!(json.contains("\"success\":true"));
         assert!(json.contains("\"text\":\"Hello world\""));
         assert!(json.contains("\"transcriptionModelName\""));
+    }
+
+    /// The ASR's own words are kept whenever anything downstream rewrote them,
+    /// enhancement or not — that record is the only way to tell a mis-hearing
+    /// from a correction that fired wrongly.
+    #[test]
+    fn the_asr_original_is_kept_whenever_post_processing_changed_it() {
+        // A dictionary or canonical replacement, with no enhancement in sight.
+        assert_eq!(
+            stored_raw_text("lower the portcullis", "lower the port cullis"),
+            Some("lower the port cullis".to_string())
+        );
+        // Nothing rewrote it, so there is no second version to keep.
+        assert_eq!(stored_raw_text("already clean", "already clean"), None);
     }
 
     /// Hands-free must never end a recording before the user has spoken.
