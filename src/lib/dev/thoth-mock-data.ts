@@ -42,6 +42,7 @@ const MOCK_CONFIG = {
     toggle_recording_alt: 'CommandOrControl+Shift+Space',
     copy_last: 'F14',
     recording_mode: 'toggle' as const,
+    hands_free_silence_secs: 2.0,
   },
   enhancement: {
     enabled: false,

@@ -52,7 +52,7 @@ export interface TranscriptionConfig {
 }
 
 /** Recording mode options */
-export type RecordingMode = 'toggle';
+export type RecordingMode = 'toggle' | 'hands_free';
 
 /**
  * Key combination sent after a successful insertion.
@@ -71,8 +71,10 @@ export interface ShortcutConfig {
   copyLast: string | null;
   /** Toggle AI enhancement on/off shortcut (null = unbound) */
   toggleEnhancement: string | null;
-  /** Recording mode: toggle or push-to-talk */
+  /** How a recording ends: on a second press, or by itself on silence */
   recordingMode: RecordingMode;
+  /** Seconds of silence that end a hands-free recording */
+  handsFreeSilenceSecs: number;
 }
 
 /** Integrations configuration */
@@ -217,6 +219,7 @@ interface ConfigRaw {
     copy_last: string | null;
     toggle_enhancement: string | null;
     recording_mode: RecordingMode;
+    hands_free_silence_secs: number;
   };
   enhancement: {
     enabled: boolean;
@@ -290,6 +293,7 @@ function parseConfig(raw: ConfigRaw): Config {
       copyLast: raw.shortcuts.copy_last,
       toggleEnhancement: raw.shortcuts.toggle_enhancement,
       recordingMode: raw.shortcuts.recording_mode,
+      handsFreeSilenceSecs: raw.shortcuts.hands_free_silence_secs,
     },
     enhancement: {
       enabled: raw.enhancement.enabled,
@@ -364,6 +368,7 @@ function serialiseConfig(config: Config): ConfigRaw {
       copy_last: config.shortcuts.copyLast,
       toggle_enhancement: config.shortcuts.toggleEnhancement,
       recording_mode: config.shortcuts.recordingMode,
+      hands_free_silence_secs: config.shortcuts.handsFreeSilenceSecs,
     },
     enhancement: {
       enabled: config.enhancement.enabled,
@@ -447,6 +452,7 @@ function getDefaultConfig(): Config {
       copyLast: null,
       toggleEnhancement: null,
       recordingMode: 'toggle',
+      handsFreeSilenceSecs: 0,
     },
     enhancement: {
       enabled: false,

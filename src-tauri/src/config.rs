@@ -381,13 +381,26 @@ impl Default for TranscriptionConfig {
     }
 }
 
-/// Recording mode options
+/// How a recording ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingMode {
     /// Toggle mode: press to start, press again to stop
     #[default]
     Toggle,
+    /// Hands-free: press once to start, and silence ends it (#88).
+    HandsFree,
+}
+
+/// Bounds on `hands_free_silence_secs`.
+///
+/// The floor sits above a natural pause for breath — that is what stops
+/// hands-free cutting someone off mid-thought — and the ceiling keeps a user
+/// who walked away from recording indefinitely.
+pub const HANDS_FREE_SILENCE_RANGE: std::ops::RangeInclusive<f32> = 0.8..=10.0;
+
+fn default_hands_free_silence_secs() -> f32 {
+    2.0
 }
 
 /// Keyboard shortcut configuration
@@ -402,8 +415,26 @@ pub struct ShortcutConfig {
     pub copy_last: Option<String>,
     /// Toggle AI enhancement on/off shortcut (unbound by default)
     pub toggle_enhancement: Option<String>,
-    /// Recording mode: toggle or push-to-talk
+    /// How a recording ends: on a second press, or by itself on silence.
     pub recording_mode: RecordingMode,
+    /// Seconds of silence that end a hands-free recording.
+    ///
+    /// Ignored in `Toggle` mode. Read through
+    /// [`ShortcutConfig::hands_free_silence`], which clamps it, so a
+    /// hand-edited config cannot stop the user mid-sentence or never stop.
+    #[serde(default = "default_hands_free_silence_secs")]
+    pub hands_free_silence_secs: f32,
+}
+
+impl ShortcutConfig {
+    /// The hands-free silence timeout, clamped to [`HANDS_FREE_SILENCE_RANGE`].
+    pub fn hands_free_silence(&self) -> std::time::Duration {
+        let secs = self.hands_free_silence_secs.clamp(
+            *HANDS_FREE_SILENCE_RANGE.start(),
+            *HANDS_FREE_SILENCE_RANGE.end(),
+        );
+        std::time::Duration::from_secs_f32(secs)
+    }
 }
 
 impl Default for ShortcutConfig {
@@ -424,6 +455,7 @@ impl Default for ShortcutConfig {
             copy_last: Some("F14".to_string()),
             toggle_enhancement: None,
             recording_mode: RecordingMode::default(),
+            hands_free_silence_secs: default_hands_free_silence_secs(),
         }
     }
 }
@@ -1405,6 +1437,10 @@ mod tests {
             serde_json::to_string(&RecordingMode::Toggle).unwrap(),
             "\"toggle\""
         );
+        assert_eq!(
+            serde_json::to_string(&RecordingMode::HandsFree).unwrap(),
+            "\"hands_free\""
+        );
     }
 
     #[test]
@@ -1412,6 +1448,10 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<RecordingMode>("\"toggle\"").unwrap(),
             RecordingMode::Toggle
+        );
+        assert_eq!(
+            serde_json::from_str::<RecordingMode>("\"hands_free\"").unwrap(),
+            RecordingMode::HandsFree
         );
     }
 
@@ -1459,7 +1499,8 @@ mod tests {
                 toggle_recording_alt: None,
                 copy_last: None,
                 toggle_enhancement: None,
-                recording_mode: RecordingMode::Toggle,
+                recording_mode: RecordingMode::HandsFree,
+                hands_free_silence_secs: 3.5,
             },
             enhancement: EnhancementConfig {
                 enabled: true,
@@ -1503,7 +1544,8 @@ mod tests {
 
         assert_eq!(restored.shortcuts.toggle_recording, "F12");
         assert!(restored.shortcuts.toggle_recording_alt.is_none());
-        assert_eq!(restored.shortcuts.recording_mode, RecordingMode::Toggle);
+        assert_eq!(restored.shortcuts.recording_mode, RecordingMode::HandsFree);
+        assert_eq!(restored.shortcuts.hands_free_silence_secs, 3.5);
 
         assert!(restored.enhancement.enabled);
         assert_eq!(restored.enhancement.model, "mistral");

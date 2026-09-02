@@ -360,8 +360,16 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, Error> {
             // The indicator window is pre-warmed at startup so no JS init wait needed.
 
             // Start recording metering AFTER the indicator is visible
-            if let Err(e) = crate::audio::start_recording_metering(app) {
+            if let Err(e) = crate::audio::start_recording_metering(app.clone()) {
                 tracing::warn!("Pipeline: Failed to start recording metering: {}", e);
+            }
+
+            // Hands-free (#88): let silence end the recording. Read fresh so a
+            // mode change in Settings applies to the very next press.
+            if let Ok(config) = crate::config::get_config()
+                && config.shortcuts.recording_mode == crate::config::RecordingMode::HandsFree
+            {
+                spawn_hands_free_watcher(app, config.shortcuts.hands_free_silence());
             }
 
             Ok(path)
@@ -377,6 +385,82 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, Error> {
             Err(e)
         }
     }
+}
+
+/// Generation counter for hands-free watchers.
+///
+/// A watcher polls across recordings' lifetimes, so a stale one from an
+/// earlier press must never stop a later recording. Each spawn takes the next
+/// generation and retires as soon as it is no longer the current one.
+static HANDS_FREE_GENERATION: AtomicUsize = AtomicUsize::new(0);
+
+/// How often the hands-free watcher checks the live gate.
+///
+/// Finer than this buys nothing: the trigger is measured in audio time by the
+/// gate, not by how often it is read, so polling only sets how late the stop
+/// lands, not how much speech is kept.
+const HANDS_FREE_TICK: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Whether the trailing silence has reached the hands-free timeout.
+///
+/// `None` means the user has not spoken yet — silence before anyone has
+/// started is not a finished utterance, and a recording must never end on it.
+fn hands_free_should_stop(silence_ms: Option<u64>, timeout: std::time::Duration) -> bool {
+    match silence_ms {
+        Some(ms) => ms >= timeout.as_millis() as u64,
+        None => false,
+    }
+}
+
+/// Watch the live speech gate and end the recording once it goes quiet (#88).
+///
+/// Runs only in `RecordingMode::HandsFree`. The hotkey still stops a recording
+/// by hand at any point; this watcher retires the moment capture stops, by
+/// whatever route.
+fn spawn_hands_free_watcher(app: AppHandle, timeout: std::time::Duration) {
+    let generation = HANDS_FREE_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    tracing::info!(
+        "Pipeline: hands-free watcher armed, stopping after {:.1}s of silence",
+        timeout.as_secs_f32()
+    );
+
+    tauri::async_runtime::spawn(async move {
+        let activity = crate::audio::speech_gate::speech_activity();
+        loop {
+            tokio::time::sleep(HANDS_FREE_TICK).await;
+
+            if generation != HANDS_FREE_GENERATION.load(Ordering::SeqCst) {
+                return;
+            }
+            if !crate::audio::is_recording() {
+                // Stopped by hotkey, tray, or cancel. Nothing to do.
+                return;
+            }
+            // The gate publishes from the capture writer thread, which starts
+            // fractionally after the recording does. Until it is live its
+            // numbers belong to the PREVIOUS recording — `stop` deliberately
+            // leaves `heard_speech` set — so they must not be read at all.
+            if !activity.is_live() {
+                continue;
+            }
+            if !hands_free_should_stop(activity.silence_ms_after_speech(), timeout) {
+                continue;
+            }
+
+            tracing::info!(
+                target: "telemetry",
+                silence_ms = activity.silence_ms_after_speech().unwrap_or(0),
+                "hands_free_auto_stop"
+            );
+            // Same order as the hotkey stop: the cue is paired with the
+            // decision, before capture disarms.
+            crate::sound::play_sound(crate::sound::SoundEvent::RecordingStop);
+            if let Err(e) = pipeline_stop_and_process(app, None).await {
+                tracing::warn!("Pipeline: hands-free auto-stop failed: {}", e);
+            }
+            return;
+        }
+    });
 }
 
 /// Stop recording and kick off the transcription pipeline asynchronously.
@@ -1544,6 +1628,77 @@ mod tests {
         assert!(json.contains("\"success\":true"));
         assert!(json.contains("\"text\":\"Hello world\""));
         assert!(json.contains("\"transcriptionModelName\""));
+    }
+
+    /// Hands-free must never end a recording before the user has spoken.
+    /// Silence at the top of a recording is someone gathering their thoughts,
+    /// not a finished sentence, and stopping there loses the whole utterance.
+    #[test]
+    fn hands_free_never_stops_before_speech() {
+        let timeout = std::time::Duration::from_secs(2);
+        assert!(
+            !hands_free_should_stop(None, timeout),
+            "no speech yet must never trigger auto-stop, however long the silence"
+        );
+    }
+
+    /// The trigger is the timeout, exactly.
+    #[test]
+    fn hands_free_stops_at_the_timeout() {
+        let timeout = std::time::Duration::from_secs(2);
+        assert!(!hands_free_should_stop(Some(0), timeout));
+        assert!(
+            !hands_free_should_stop(Some(1999), timeout),
+            "a pause one tick short of the timeout must not cut the user off"
+        );
+        assert!(hands_free_should_stop(Some(2000), timeout));
+        assert!(hands_free_should_stop(Some(9999), timeout));
+    }
+
+    /// A hand-edited config must not be able to set a timeout that stops the
+    /// user mid-sentence, or one that never stops at all.
+    #[test]
+    fn hands_free_timeout_is_clamped() {
+        use crate::config::{HANDS_FREE_SILENCE_RANGE, ShortcutConfig};
+
+        let low = ShortcutConfig {
+            hands_free_silence_secs: 0.0,
+            ..ShortcutConfig::default()
+        };
+        assert_eq!(
+            low.hands_free_silence().as_secs_f32(),
+            *HANDS_FREE_SILENCE_RANGE.start()
+        );
+
+        let high = ShortcutConfig {
+            hands_free_silence_secs: 3600.0,
+            ..ShortcutConfig::default()
+        };
+        assert_eq!(
+            high.hands_free_silence().as_secs_f32(),
+            *HANDS_FREE_SILENCE_RANGE.end()
+        );
+
+        let sane = ShortcutConfig {
+            hands_free_silence_secs: 2.5,
+            ..ShortcutConfig::default()
+        };
+        assert_eq!(sane.hands_free_silence().as_secs_f32(), 2.5);
+    }
+
+    /// Toggle stays the default: hands-free is opt-in, and an existing config
+    /// that predates the setting must not silently gain it.
+    #[test]
+    fn toggle_remains_the_default_recording_mode() {
+        use crate::config::{RecordingMode, ShortcutConfig};
+        assert_eq!(
+            ShortcutConfig::default().recording_mode,
+            RecordingMode::Toggle
+        );
+
+        let old: ShortcutConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.recording_mode, RecordingMode::Toggle);
+        assert_eq!(old.hands_free_silence_secs, 2.0);
     }
 
     /// What a toggle-recording press will do.

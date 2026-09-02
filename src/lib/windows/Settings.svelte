@@ -35,12 +35,18 @@
   import OverviewPane from '../components/OverviewPane.svelte';
   import AboutDialog from '../components/AboutDialog.svelte';
   import ShortcutInput from '../components/ShortcutInput.svelte';
-  import { configStore, type IndicatorStyle, type AutoSubmit } from '../stores/config.svelte';
+  import {
+    configStore,
+    type IndicatorStyle,
+    type AutoSubmit,
+    type RecordingMode,
+  } from '../stores/config.svelte';
   import { pipelineStore } from '../stores/pipeline.svelte';
   import { shortcutsStore, type ShortcutInfo } from '../stores/shortcuts.svelte';
   import { soundStore } from '../stores/sound.svelte';
   import { Button } from '@poodle64/ui/button';
   import { Switch } from '@poodle64/ui/switch';
+  import * as RadioGroup from '../components/ui/radio-group';
   import WindowControls from '../components/WindowControls.svelte';
 
   /** Settings pane definition */
@@ -214,6 +220,39 @@
     await configStore.save();
   }
 
+  /**
+   * Recording-mode options.
+   *
+   * The hints say what the user does, not what the VAD does — the mode is a
+   * choice about the hotkey, and describing it in signal-processing terms is
+   * how a settings pane stops being readable.
+   */
+  const RECORDING_MODES: { value: RecordingMode; label: string; hint: string }[] = [
+    { value: 'toggle', label: 'Toggle', hint: 'Press once to start, again to stop' },
+    { value: 'hands_free', label: 'Hands-free', hint: 'Press once to start; a pause ends it' },
+  ];
+
+  /**
+   * Bounds on the hands-free timeout.
+   *
+   * These mirror HANDS_FREE_SILENCE_RANGE in src-tauri/src/config.rs, which
+   * clamps whatever arrives — so the slider cannot offer a value the backend
+   * would refuse, and a drifted copy here narrows the slider rather than
+   * changing behaviour.
+   */
+  const HANDS_FREE_SILENCE_MIN = 0.8;
+  const HANDS_FREE_SILENCE_MAX = 10;
+
+  async function handleRecordingModeChange(mode: RecordingMode) {
+    configStore.updateShortcuts('recordingMode', mode);
+    await configStore.save();
+  }
+
+  async function handleSilenceTimeoutChange(secs: number) {
+    configStore.updateShortcuts('handsFreeSilenceSecs', secs);
+    await configStore.save();
+  }
+
   async function handleIndicatorStyleChange(style: IndicatorStyle) {
     configStore.updateGeneral('indicatorStyle', style);
     await configStore.save();
@@ -378,6 +417,57 @@
               </p>
             </div>
             <div class="flex flex-col gap-2">
+              <div class="flex flex-col gap-3 rounded-md border border-border bg-card p-3">
+                <div class="flex flex-col gap-1">
+                  <span class="text-sm font-medium text-foreground">Recording Mode</span>
+                  <span class="text-xs text-muted-foreground">How a recording ends</span>
+                </div>
+                <RadioGroup.Root
+                  value={configStore.shortcuts.recordingMode}
+                  onValueChange={(v) => handleRecordingModeChange(v as RecordingMode)}
+                  class="flex flex-col gap-1"
+                >
+                  {#each RECORDING_MODES as opt (opt.value)}
+                    <label
+                      class="flex cursor-pointer items-start gap-3 rounded-md px-2 py-1.5 transition-colors hover:bg-muted"
+                    >
+                      <RadioGroup.Item value={opt.value} id="rec-mode-{opt.value}" class="mt-0.5" />
+                      <span class="flex flex-col gap-0.5">
+                        <span class="text-sm font-medium text-foreground">{opt.label}</span>
+                        <span class="text-xs text-muted-foreground">{opt.hint}</span>
+                      </span>
+                    </label>
+                  {/each}
+                </RadioGroup.Root>
+              </div>
+              {#if configStore.shortcuts.recordingMode === 'hands_free'}
+                <div
+                  class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3"
+                >
+                  <div class="flex flex-1 flex-col gap-1">
+                    <span class="text-sm font-medium text-foreground">Stop After Silence</span>
+                    <span class="text-xs text-muted-foreground"
+                      >How long a pause has to run before recording ends</span
+                    >
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min={HANDS_FREE_SILENCE_MIN}
+                      max={HANDS_FREE_SILENCE_MAX}
+                      step="0.1"
+                      class="accent-primary h-1 w-32 cursor-pointer"
+                      aria-label="Seconds of silence before recording stops"
+                      value={configStore.shortcuts.handsFreeSilenceSecs}
+                      oninput={(e) => handleSilenceTimeoutChange(Number(e.currentTarget.value))}
+                    />
+                    <span class="text-muted-foreground w-9 text-right text-xs tabular-nums">
+                      {configStore.shortcuts.handsFreeSilenceSecs.toFixed(1)}s
+                    </span>
+                  </div>
+                </div>
+              {/if}
+              <div class="row-separator"></div>
               <div
                 class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3"
               >
