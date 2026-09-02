@@ -1422,7 +1422,17 @@ pub async fn pipeline_retranscribe(
 pub async fn pipeline_toggle_recording(
     app: AppHandle,
     config: Option<PipelineConfig>,
+    intent: Option<ToggleIntent>,
 ) -> Result<ToggleOutcome, Error> {
+    // A key-up in hold-to-record mode (#111) is not a toggle: it must stop a
+    // running recording and, crucially, must never START one. Inferring from
+    // `is_recording()` gets that wrong whenever the press failed or has not
+    // landed yet, and the user is then holding a key that started nothing and
+    // released one that started everything.
+    if intent.unwrap_or_default() == ToggleIntent::StopOnly && !crate::audio::is_recording() {
+        return Ok(ToggleOutcome::Ignored);
+    }
+
     if crate::audio::is_recording() {
         // --- STOP ---
         // Play BONG now, before disarming, so the sound is always paired with
@@ -1441,6 +1451,19 @@ pub async fn pipeline_toggle_recording(
     }
 }
 
+/// What the caller wants, when it knows something `is_recording()` does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ToggleIntent {
+    /// Decide from the current state. The hotkey's toggle behaviour, and the
+    /// default when a caller passes nothing.
+    #[default]
+    Toggle,
+    /// Stop a running recording; do nothing if there is none. Hold-to-record's
+    /// key-up (#111), which must never start one.
+    StopOnly,
+}
+
 /// The outcome of a `pipeline_toggle_recording` call.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -1449,6 +1472,9 @@ pub enum ToggleOutcome {
     Started { path: String },
     /// An active recording was stopped; processing is detached.
     Stopped,
+    /// Nothing to do — a `StopOnly` call with no recording running. Not an
+    /// error: a key-up after a press that never started is ordinary.
+    Ignored,
 }
 
 /// Emit a pipeline progress event
@@ -1699,6 +1725,51 @@ mod tests {
         let old: ShortcutConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(old.recording_mode, RecordingMode::Toggle);
         assert_eq!(old.hands_free_silence_secs, 2.0);
+    }
+
+    /// A hold-to-record key-up must never START a recording. If the press
+    /// failed, or has not landed yet, an inferred toggle would do exactly
+    /// that — and the user would be holding a key that started nothing and
+    /// have released one that started everything.
+    #[test]
+    fn stop_only_is_a_no_op_when_nothing_is_recording() {
+        assert_eq!(
+            toggle_action_from_capturing(false),
+            ToggleAction::Start,
+            "an inferred toggle would start here, which is the whole problem"
+        );
+        // The command short-circuits before that inference when the intent is
+        // StopOnly and nothing is running; this asserts the intent it keys on.
+        assert_eq!(ToggleIntent::default(), ToggleIntent::Toggle);
+        assert_ne!(ToggleIntent::StopOnly, ToggleIntent::default());
+    }
+
+    /// The intent crosses IPC as snake_case, and an absent one must read as
+    /// the ordinary toggle so every existing caller is unchanged.
+    #[test]
+    fn toggle_intent_round_trips_and_defaults_to_toggle() {
+        assert_eq!(
+            serde_json::to_string(&ToggleIntent::StopOnly).unwrap(),
+            "\"stop_only\""
+        );
+        assert_eq!(
+            serde_json::from_str::<ToggleIntent>("\"toggle\"").unwrap(),
+            ToggleIntent::Toggle
+        );
+        // How the command reads it: an absent intent is the ordinary toggle,
+        // so every caller that predates this parameter is unchanged.
+        let absent: Option<ToggleIntent> = serde_json::from_str("null").unwrap();
+        assert_eq!(absent.unwrap_or_default(), ToggleIntent::Toggle);
+    }
+
+    /// The frontend branches on this tag; a rename would silently make the
+    /// ignored case look like a failure.
+    #[test]
+    fn the_ignored_outcome_serialises_as_the_frontend_expects() {
+        assert_eq!(
+            serde_json::to_string(&ToggleOutcome::Ignored).unwrap(),
+            "{\"action\":\"ignored\"}"
+        );
     }
 
     /// What a toggle-recording press will do.

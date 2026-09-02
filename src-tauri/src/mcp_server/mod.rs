@@ -575,7 +575,7 @@ impl ThothMcp {
             "toggle" => {
                 let cfg = crate::pipeline::effective_pipeline_config()
                     .map_err(|e| core_err(e.to_string()))?;
-                let outcome = crate::pipeline::pipeline_toggle_recording(app, Some(cfg))
+                let outcome = crate::pipeline::pipeline_toggle_recording(app, Some(cfg), None)
                     .await
                     .map_err(|e| core_err(e.to_string()))?;
                 json_result(&outcome)

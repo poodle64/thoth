@@ -173,6 +173,12 @@ function createPipelineStore() {
   // Toggle cooldown: after a state change (start/stop), ignore further toggles
   // for this duration. Prevents accidental double-toggles from immediately reversing the action.
   // Key bounce is handled by the Rust shortcut debounce (50ms); this is a higher-level guard.
+  /**
+   * What a toggle call intends. Mirrors the Rust `ToggleIntent`; serialised
+   * snake_case over IPC.
+   */
+  type ToggleIntent = 'toggle' | 'stop_only';
+
   const TOGGLE_COOLDOWN_MS = 300;
   let lastToggleTime = 0;
   let isToggling = false;
@@ -330,6 +336,16 @@ function createPipelineStore() {
     debug(' shortcut-triggered listener registered');
     unlisteners.push(shortcutUnlisten);
 
+    // Hold-to-record's key-up (#111). Rust emits this ONLY in that mode and
+    // only for a recording shortcut, so there is no mode check here — and it
+    // asks to stop rather than to toggle, so a release can never start a
+    // recording the press failed to.
+    const releaseUnlisten = await listen<string>('shortcut-released', async (event) => {
+      debug('Shortcut released:', event.payload, '— stopping');
+      await toggleRecording(undefined, 'stop_only');
+    });
+    unlisteners.push(releaseUnlisten);
+
     // Seed the mirror from the backend's current state so a reload/HMR shows
     // the true state rather than defaulting to idle.
     try {
@@ -367,13 +383,20 @@ function createPipelineStore() {
    * - BONG is played by pipeline_toggle_recording before capture disarms.
    */
   async function toggleRecording(
-    config?: Partial<PipelineConfig>
+    config?: Partial<PipelineConfig>,
+    intent: ToggleIntent = 'toggle'
   ): Promise<{ success: boolean; result?: PipelineResult; error?: string }> {
     // Cooldown: ignore toggles that arrive too soon after the last state change.
     // Prevents key bounce from immediately reversing a start or stop.
+    //
+    // A hold-to-record key-up is exempt (#111). It is a deliberate second
+    // event, not bounce, and a hold shorter than the cooldown is completely
+    // ordinary — applying it there would swallow the stop and leave the
+    // recording running with the key already released. Rust still debounces
+    // each edge at 50ms, so bounce protection is not lost.
     const now = Date.now();
     const elapsed = now - lastToggleTime;
-    if (elapsed < TOGGLE_COOLDOWN_MS) {
+    if (intent !== 'stop_only' && elapsed < TOGGLE_COOLDOWN_MS) {
       debug(`Toggle cooldown active (${elapsed}ms < ${TOGGLE_COOLDOWN_MS}ms), ignoring`);
       return { success: false, error: 'Toggle cooldown active' };
     }
@@ -392,12 +415,16 @@ function createPipelineStore() {
       const defaultConfig = await getDefaultConfig();
       const fullConfig: PipelineConfig = { ...defaultConfig, ...config };
 
-      type ToggleOutcome = { action: 'started'; path: string } | { action: 'stopped' };
+      type ToggleOutcome =
+        | { action: 'started'; path: string }
+        | { action: 'stopped' }
+        | { action: 'ignored' };
 
       let outcome: ToggleOutcome;
       try {
         outcome = await invoke<ToggleOutcome>('pipeline_toggle_recording', {
           config: fullConfig,
+          intent,
         });
       } catch (e) {
         const errorMsg = `${e}`;
@@ -408,7 +435,10 @@ function createPipelineStore() {
         return { success: false, error: errorMsg };
       }
 
-      if (outcome.action === 'started') {
+      if (outcome.action === 'ignored') {
+        // A key-up with nothing running. Ordinary, not a failure.
+        debug(' Rust decided: nothing to stop');
+      } else if (outcome.action === 'started') {
         debug(' Rust decided: START, path:', outcome.path);
         // State is owned by the recording-state event emitted by Rust.
         // Set only local non-state fields here.

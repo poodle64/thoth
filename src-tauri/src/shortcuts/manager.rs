@@ -209,9 +209,19 @@ pub(crate) fn dispatch_shortcut_action<R: Runtime>(
         return;
     }
 
-    match app.emit("shortcut-triggered", shortcut_id.to_string()) {
-        Ok(_) => tracing::info!("Emitted shortcut-triggered event for: {}", shortcut_id),
-        Err(e) => tracing::error!("Failed to emit shortcut-triggered event: {}", e),
+    // A hold-to-record release goes out on its own channel, not as another
+    // `shortcut-triggered` (#111). The frontend's toggle handler applies a
+    // 300 ms cooldown against key bounce, which would swallow the key-up of
+    // any hold shorter than that and leave the recording running with the key
+    // already let go — and a toggle would also START a recording if the press
+    // had failed. The release is a stop, and says so.
+    let channel = match edge {
+        Edge::Press => "shortcut-triggered",
+        Edge::Release => "shortcut-released",
+    };
+    match app.emit(channel, shortcut_id.to_string()) {
+        Ok(_) => tracing::info!("Emitted {} event for: {}", channel, shortcut_id),
+        Err(e) => tracing::error!("Failed to emit {} event: {}", channel, e),
     }
 }
 
