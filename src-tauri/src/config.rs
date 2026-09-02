@@ -1357,6 +1357,18 @@ mod tests {
                  .claude/CLAUDE.md."
             );
         }
+
+        // The numeric defaults need the same guard as the string ones: a number
+        // that happens to match reads as harmless and is exactly how the
+        // shortcut defaults drifted for eight months (#127).
+        let numeric = format!("{:?}", defaults.hands_free_silence_secs);
+        assert!(
+            !block.contains(&numeric),
+            "src/lib/stores/config.svelte.ts restates the hands-free silence default \
+             {numeric}. It has one definition, ShortcutConfig::default() in this file, \
+             and reaches the frontend via get_default_config(); the placeholder in that \
+             block must be a value that is deliberately NOT the default."
+        );
     }
 
     #[test]

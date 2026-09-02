@@ -380,6 +380,22 @@ impl AudioRecorder {
     }
 }
 
+/// Stops the live speech gate when the writer thread leaves, by any route.
+///
+/// The writer has several `?` paths — a full disk, a revoked permission, a
+/// volume that went away mid-recording — and every one of them returns
+/// without reaching the end of the function. A gate left `live` after its
+/// writer has gone is worse than no gate: hands-free auto-stop (#88) reads a
+/// silence count frozen at whatever it was when the thread died, so the
+/// recording never ends by itself and the user has to notice.
+struct ActiveGate;
+
+impl Drop for ActiveGate {
+    fn drop(&mut self) {
+        speech_activity().stop();
+    }
+}
+
 /// Feed one block of finished 16kHz mono PCM to the live speech gate.
 fn feed_gate(gate: &mut SpeechGate, pcm: &[i16]) {
     let samples: Vec<f32> = pcm.iter().map(|&s| s as f32 / 32768.0).collect();
@@ -442,6 +458,7 @@ fn write_audio_to_file(
     let mut gate = SpeechGate::new(GateConfig::default());
     let activity = speech_activity();
     activity.start();
+    let _gate_guard = ActiveGate;
 
     let drain_full_chunks = |accumulator: &mut Vec<f32>,
                              converter: &mut AudioConverter,
@@ -496,9 +513,6 @@ fn write_audio_to_file(
     total_samples += tail.len();
     feed_gate(&mut gate, &tail);
     activity.publish(&gate);
-    // The gate stops with the writer, so a reader between recordings sees
-    // "no live gate" rather than the last recording's final frame.
-    activity.stop();
 
     writer.finalize()?;
     let duration_secs = total_samples as f32 / TARGET_SAMPLE_RATE as f32;
@@ -601,6 +615,34 @@ mod tests {
             "the gate must stop when the recording does"
         );
         fs::remove_file(path).ok();
+    }
+
+    /// Stand-in for the writer's several `?` paths: it starts the gate, then
+    /// leaves through an error rather than through the `Stop` sentinel.
+    fn writer_that_fails_after_starting_the_gate() -> Result<()> {
+        let activity = speech_activity();
+        activity.start();
+        let _gate_guard = ActiveGate;
+        assert!(activity.is_live(), "the gate is live while the writer runs");
+        Err(anyhow!("write failed mid-recording"))
+    }
+
+    /// The gate must stop when the writer leaves by an ERROR path, not only by
+    /// the `Stop` sentinel. A writer that dies on a full disk leaves the gate
+    /// `live` with a frozen silence count, and hands-free auto-stop (#88) then
+    /// waits on a number that will never move again.
+    #[test]
+    #[serial_test::serial(writer_thread)]
+    fn the_gate_stops_when_the_writer_fails() {
+        let activity = speech_activity();
+
+        let outcome = writer_that_fails_after_starting_the_gate();
+
+        assert!(outcome.is_err());
+        assert!(
+            !activity.is_live(),
+            "an error on the way out must still stop the gate"
+        );
     }
 
     #[test]
