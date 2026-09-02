@@ -304,8 +304,12 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, Error> {
     // Otherwise the user records into a void and the pipeline hangs at the
     // transcription stage waiting for a model that will never arrive.
     if !transcription::is_transcription_ready() {
-        if transcription::warmup_failed() || !transcription::download::check_model_downloaded(None)
-        {
+        // A warmup that failed on a model which has already loaded here is a
+        // reload that went wrong, not proof that nothing can load (#105): the
+        // pipeline retries it rather than refusing to record until a restart.
+        let nothing_can_load =
+            transcription::warmup_failed() && !transcription::model_has_loaded();
+        if nothing_can_load || !transcription::download::check_model_downloaded(None) {
             PIPELINE_RUNNING.store(false, Ordering::SeqCst);
             tracing::warn!("Pipeline: No usable transcription model, blocking recording");
             tracing::warn!(target: "telemetry", reason = "no_usable_model", "model_load_failure");
@@ -645,6 +649,16 @@ async fn run_transcription_pipeline(
             PipelineState::Transcribing,
             "Loading transcription model...",
         );
+        // Nothing else will load it from here. `pipeline_start_recording` only
+        // starts a warmup when the model was already missing when recording
+        // began, and the idle unload (#105) can drop it after that check — so
+        // without this the user waits out the full 60 s and is told the model
+        // failed to load. Warmup is idempotent and serialised, so this is a
+        // no-op when a load is already in flight.
+        std::thread::spawn(|| {
+            transcription::warmup_transcription();
+        });
+
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         while !transcription::is_transcription_ready() {
             // Bail the moment the background warmup reports it could load nothing,

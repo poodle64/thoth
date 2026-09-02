@@ -112,6 +112,21 @@ pub fn warmup_failed() -> bool {
     WARMUP_FAILED.load(Ordering::SeqCst)
 }
 
+/// Whether a model has ever loaded in this process.
+///
+/// [`WARMUP_FAILED`] used to be equivalent to "nothing can load on this
+/// machine", because a model was loaded at most once per process. Since the
+/// idle unload (#105) a warmup can also fail while RE-loading a model that was
+/// working minutes ago, and refusing to record from then until a restart turns a
+/// transient fault into a permanent one. Recording is blocked outright only when
+/// nothing has ever loaded; a failed reload gets another attempt.
+static MODEL_HAS_LOADED: AtomicBool = AtomicBool::new(false);
+
+/// Returns `true` once a transcription model has loaded at least once here.
+pub fn model_has_loaded() -> bool {
+    MODEL_HAS_LOADED.load(Ordering::SeqCst)
+}
+
 /// Initialise the transcription service with whisper backend (primary)
 #[tauri::command]
 pub fn init_whisper_transcription(model_path: String) -> Result<(), Error> {
@@ -451,16 +466,18 @@ const IDLE_UNLOAD_TICK: Duration = Duration::from_secs(10);
 /// Record that the loaded model has just been loaded or used.
 fn touch_model_used() {
     *LAST_USED.lock() = Some(Instant::now());
+    MODEL_HAS_LOADED.store(true, Ordering::SeqCst);
 }
 
 /// Whether an idle model should be unloaded now.
 ///
 /// Separate from the unload itself so the decision is testable without a
 /// multi-gigabyte model behind it. Each way of answering "no" is a real case:
-/// nothing is loaded, the model is still inside its timeout, or the user is
-/// recording right now and is about to need it.
-fn should_unload(last_used: Option<Instant>, timeout: Duration, recording: bool) -> bool {
-    if recording {
+/// nothing is loaded, the model is still inside its timeout, or the model is
+/// busy — the user is recording, or a transcription is running or queued behind
+/// the gate and would only have to load it again.
+fn should_unload(last_used: Option<Instant>, timeout: Duration, busy: bool) -> bool {
+    if busy {
         return false;
     }
     match last_used {
@@ -513,7 +530,8 @@ pub fn unload_transcription_model() -> UnloadOutcome {
 /// Unload the model when it has been idle for at least `timeout`.
 pub fn maybe_unload_idle_model(timeout: Duration) -> UnloadOutcome {
     let last_used = *LAST_USED.lock();
-    if !should_unload(last_used, timeout, crate::audio::is_recording()) {
+    let busy = crate::audio::is_recording() || gate::gate().in_use();
+    if !should_unload(last_used, timeout, busy) {
         return UnloadOutcome::NotLoaded;
     }
     unload_transcription_model()
@@ -824,7 +842,8 @@ mod tests {
     }
 
     /// The dangerous case. The user holds the hotkey down for a five-minute
-    /// dictation, so the model is idle by the clock and about to be needed.
+    /// dictation, or a queued job is waiting on the gate, so the model is idle
+    /// by the clock and about to be needed.
     #[test]
     fn an_idle_model_is_not_unloaded_while_recording() {
         let long_ago = Instant::now() - Duration::from_secs(3600);

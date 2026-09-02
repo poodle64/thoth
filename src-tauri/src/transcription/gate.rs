@@ -93,6 +93,17 @@ impl TranscriptionGate {
 
         GatePermit { gate: self }
     }
+
+    /// Whether the model is being used or is about to be.
+    ///
+    /// True while a permit is held, and while an interactive request is queued
+    /// for one — which also covers a background job waiting, since it only waits
+    /// when one of those two is true. The idle unload (#105) reads this so it
+    /// does not drop a model a queued job is about to need.
+    pub fn in_use(&self) -> bool {
+        let state = self.state.lock();
+        state.busy || state.interactive_waiting > 0
+    }
 }
 
 impl Default for TranscriptionGate {
@@ -132,6 +143,21 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
+
+    /// What the idle unload reads before dropping a model (#105): a held permit
+    /// must read as in use, and a released one must not, or the watcher either
+    /// unloads under a live transcription or never unloads at all.
+    #[test]
+    fn in_use_tracks_the_permit() {
+        let gate = TranscriptionGate::new();
+        assert!(!gate.in_use(), "an idle gate is not in use");
+
+        let permit = gate.acquire(Priority::Interactive);
+        assert!(gate.in_use(), "a held permit must read as in use");
+
+        drop(permit);
+        assert!(!gate.in_use(), "a released permit must not");
+    }
 
     /// Time each simulated transcription occupies the model.
     const HOLD: Duration = Duration::from_millis(50);
