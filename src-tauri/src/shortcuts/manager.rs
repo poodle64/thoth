@@ -90,7 +90,7 @@ pub(crate) enum Edge {
 /// here. Two conditions, and both matter: the mode has to be hold-to-record,
 /// and it has to be a recording shortcut — releasing the copy-last or
 /// toggle-enhancement key must not do it a second time.
-pub(crate) fn release_acts(mode: RecordingMode, shortcut_id: &str) -> bool {
+pub fn release_acts(mode: RecordingMode, shortcut_id: &str) -> bool {
     mode == RecordingMode::HoldToRecord && is_recording_shortcut(shortcut_id)
 }
 

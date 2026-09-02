@@ -169,10 +169,10 @@ async fn run_portal(app: AppHandle) {
     // nothing from the proxy, and a second `while let` is the same shape as the
     // activation loop that already works here. A compositor that emits no
     // Deactivated signal costs only hold-to-record, not the whole loop.
-    match shortcuts.receive_deactivated().await {
+    let release_task = match shortcuts.receive_deactivated().await {
         Ok(mut deactivated) => {
             let release_app = app.clone();
-            tauri::async_runtime::spawn(async move {
+            Some(tauri::async_runtime::spawn(async move {
                 use futures_util::StreamExt;
                 while let Some(deactivation) = deactivated.next().await {
                     let id = deactivation.shortcut_id().to_string();
@@ -180,12 +180,15 @@ async fn run_portal(app: AppHandle) {
                     super::manager::dispatch_shortcut_action(&release_app, &id, Edge::Release);
                 }
                 tracing::debug!("Wayland shortcut deactivation stream ended");
-            });
+            }))
         }
-        Err(e) => tracing::warn!(
-            "No Wayland shortcut deactivation signal ({e}); hold-to-record will not stop on key-up here"
-        ),
-    }
+        Err(e) => {
+            tracing::warn!(
+                "No Wayland shortcut deactivation signal ({e}); hold-to-record will not stop on key-up here"
+            );
+            None
+        }
+    };
 
     tracing::info!("Wayland global-shortcut activation loop started");
     while let Some(activation) = activated.next().await {
@@ -194,6 +197,13 @@ async fn run_portal(app: AppHandle) {
         super::manager::dispatch_shortcut_action(&app, &id, Edge::Press);
     }
     tracing::warn!("Wayland global-shortcut activation stream ended");
+
+    // The activation stream ending means the session is over. Closing the
+    // session does not necessarily end the deactivation stream, so the task
+    // would otherwise sit on a stream that will never produce again.
+    if let Some(task) = release_task {
+        task.abort();
+    }
 
     // The stream ended (the session was revoked or the bus dropped). Close the
     // session explicitly — `Session` has no `Drop`, so without this the bus-side

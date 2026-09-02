@@ -678,6 +678,17 @@ fn process_monitoring(app: &AppHandle, keys: &HashSet<Keycode>) {
         } else if !is_pressed && was_pressed {
             // Key just released
             let press_duration = press_time.map(|t| t.elapsed().as_millis()).unwrap_or(0);
+            // A modifier binding reaches this path instead of the global-shortcut
+            // dispatcher, so hold-to-record (#111) has to be honoured here too or
+            // the setting is inert for anyone whose recording key is a bare
+            // modifier — silently, which is the failure the earlier push-to-talk
+            // attempt was deleted for.
+            let hold_to_record = crate::shortcuts::manager::release_acts(
+                crate::config::get_config()
+                    .map(|c| c.shortcuts.recording_mode)
+                    .unwrap_or_default(),
+                &shortcut.id,
+            );
 
             {
                 let mut registry = get_registry().write();
@@ -685,7 +696,15 @@ fn process_monitoring(app: &AppHandle, keys: &HashSet<Keycode>) {
                     key_state.is_pressed = false;
                     key_state.press_time = None;
 
-                    if press_duration < BRIEF_PRESS_THRESHOLD_MS as u128 {
+                    if hold_to_record {
+                        // The user asked for hold-to-record, so the release
+                        // ends the recording however brief the hold was. The
+                        // tap-vs-hold heuristic below is what this path does
+                        // when no mode has been chosen; it is not a second
+                        // opinion on one that has.
+                        key_state.hands_free_mode = false;
+                        key_state.last_trigger = Some(Instant::now());
+                    } else if press_duration < BRIEF_PRESS_THRESHOLD_MS as u128 {
                         // Brief press: enter hands-free mode (don't stop yet)
                         key_state.hands_free_mode = true;
                         tracing::debug!(
@@ -700,8 +719,7 @@ fn process_monitoring(app: &AppHandle, keys: &HashSet<Keycode>) {
                 }
             }
 
-            // Only emit release if it was a long press (not brief/hands-free)
-            if press_duration >= BRIEF_PRESS_THRESHOLD_MS as u128 {
+            if hold_to_record || press_duration >= BRIEF_PRESS_THRESHOLD_MS as u128 {
                 emit_shortcut_event(app, &shortcut.id, "released");
             }
         }
@@ -720,6 +738,23 @@ fn emit_shortcut_event(app: &AppHandle, id: &str, state: &str) {
         if let Err(e) = app.emit("shortcut-triggered", id.to_string()) {
             tracing::error!("Failed to emit shortcut-triggered: {}", e);
         }
+        return;
+    }
+
+    // A release only reaches the frontend in hold-to-record mode, on the same
+    // stop-only channel the global-shortcut path uses (#111). Before this it
+    // reached nothing at all: the long-press branch above computed "stop
+    // recording" and then emitted an event this function dropped on the floor,
+    // so a held modifier key started a recording that only a second press
+    // could end.
+    if crate::shortcuts::manager::release_acts(
+        crate::config::get_config()
+            .map(|c| c.shortcuts.recording_mode)
+            .unwrap_or_default(),
+        id,
+    ) && let Err(e) = app.emit("shortcut-released", id.to_string())
+    {
+        tracing::error!("Failed to emit shortcut-released: {}", e);
     }
 }
 
