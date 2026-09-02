@@ -784,19 +784,16 @@ pub fn get_model_info() -> Vec<super::manifest::ModelInfo> {
 }
 
 /// Delete the downloaded model files
+///
+/// The id is required. It used to default to the manifest's recommended model,
+/// which on a platform that cannot run that model deleted nothing and reported
+/// success (#139) — and resolving it properly instead would have made an
+/// implicit call delete the user's active model, gigabytes of it, from an
+/// argument they never passed. Every caller has always passed an id, so the
+/// default was a trap with no user.
 #[tauri::command]
-pub fn delete_model(model_id: Option<String>) -> Result<(), Error> {
-    // Get the model info from manifest
+pub fn delete_model(model_id: String) -> Result<(), Error> {
     let manifest = get_fallback_manifest();
-    let model_id = model_id.unwrap_or_else(|| {
-        manifest
-            .models
-            .iter()
-            .find(|m| m.recommended)
-            .or_else(|| manifest.models.first())
-            .map(|m| m.id.clone())
-            .unwrap_or_else(|| "ggml-large-v3-turbo".to_string())
-    });
 
     let model = manifest
         .models
@@ -883,6 +880,19 @@ mod tests {
         // Should return false when model files don't exist
         // (unless they happen to be installed on this machine)
         let _result = check_model_downloaded(None);
+    }
+
+    /// The half of #139 that was a real fault rather than a trap: an id the
+    /// manifest does not carry must fail, never report success for a deletion
+    /// that did not happen. Safe to run — no such model exists to delete.
+    #[test]
+    fn deleting_an_unknown_model_is_an_error() {
+        let err = delete_model("not-a-model-in-the-manifest".to_string())
+            .expect_err("an unknown model id must not report success");
+        assert!(
+            err.to_string().contains("Model not found"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
