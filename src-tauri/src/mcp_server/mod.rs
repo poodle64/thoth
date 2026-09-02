@@ -71,7 +71,7 @@ pub struct DictionaryParams {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CanonicalParams {
-    /// The operation: `list`, `add`, `update`, or `remove`.
+    /// The operation: `list`, `add`, `update`, `remove`, or `suggest`.
     pub action: String,
     /// For `add`/`update`: the canonical term string (e.g. "portcullis", "LiteLLM").
     #[serde(default)]
@@ -85,6 +85,12 @@ pub struct CanonicalParams {
     /// For `update`/`remove`: the zero-based index of the term (from `list`).
     #[serde(default)]
     pub index: Option<usize>,
+    /// For `suggest`: how many recent transcriptions to scan. Default 2000.
+    #[serde(default)]
+    pub history_limit: Option<i64>,
+    /// For `suggest`: how often a spelling must occur to be reported. Default 2.
+    #[serde(default)]
+    pub min_occurrences: Option<usize>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -314,7 +320,7 @@ impl ThothMcp {
     }
 
     #[tool(
-        description = "Manage Thoth's canonical-term registry (phonetic/fuzzy snapping of acoustic variants to a registered spelling). Register a term ONCE and all acoustic/spelling variants auto-snap to it. Action: list | add | update | remove. add/update require term (+ optional aliases, policy, index for update/remove). policy: aliasOnly (default, exact aliases only), phonetic (AND gate: Double-Metaphone key match AND edit-distance >= 0.55), conservative (same AND gate, higher 0.85 threshold for terms that collide with common words). Returns: the term list (list), or a compact ack {ok, action, index, count} (add/update/remove)."
+        description = "Manage Thoth's canonical-term registry (phonetic/fuzzy snapping of acoustic variants to a registered spelling). Register a term ONCE and all acoustic/spelling variants auto-snap to it. Action: list | add | update | remove | suggest. add/update require term (+ optional aliases, policy, index for update/remove). policy: aliasOnly (default, exact aliases only), phonetic (AND gate: Double-Metaphone key match AND edit-distance >= 0.55), conservative (same AND gate, higher 0.85 threshold for terms that collide with common words). `suggest` reads the transcription history and reports spellings that look like a registered term but were NOT snapped to it — the mis-hearings still escaping, ranked by how often they occur, each with the term's own frequency and a line of context. It is ADVISORY and changes nothing: judge each row (an ordinary English word will read as one in its context) and register the real ones with `update`. Returns: the term list (list), a compact ack {ok, action, index, count} (add/update/remove), or the candidate list (suggest)."
     )]
     async fn canonical(
         &self,
@@ -377,6 +383,14 @@ impl ThothMcp {
                     .map_err(|e| core_err(e.to_string()))?
                     .len();
                 mutation_ack("remove", index, count)
+            }
+            "suggest" => {
+                let suggestions = crate::canonical::suggest_aliases_from_history(
+                    p.history_limit.unwrap_or(2000),
+                    p.min_occurrences.unwrap_or(2),
+                )
+                .map_err(|e| core_err(e.to_string()))?;
+                json_result(&suggestions)
             }
             other => Err(core_err(format!("unknown action: {}", other))),
         }

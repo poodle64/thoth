@@ -43,7 +43,7 @@ Once connected, the assistant can call these tools:
 | Tool                       | What it does                                                                             |
 | -------------------------- | ---------------------------------------------------------------------------------------- |
 | `dictionary`               | List, add, update, delete, import, or export flat dictionary entries                     |
-| `canonical`                | List, add, update, or remove canonical terms (see the [Dictionary guide](dictionary.md)) |
+| `canonical`                | List, add, update, remove, or suggest canonical terms (see the [Dictionary guide](dictionary.md)) |
 | `setting`                  | Read or change a setting                                                                 |
 | `transcription`            | List past transcriptions, fetch one, or get stats                                        |
 | `transcribe_file`          | Transcribe a local audio file as a background job                                        |

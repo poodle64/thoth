@@ -83,8 +83,17 @@ Thoth exposes an MCP (Model Context Protocol) server so an AI assistant can mana
 - **add**: register a new canonical term (with optional aliases and a policy; the policy defaults to AliasOnly).
 - **update**: change an existing term by its position in the list.
 - **remove**: delete a term by its position.
+- **suggest**: read your transcription history and report spellings that look like a registered term but were not snapped to it — the mis-hearings still getting through.
 
 The policy values you pass are `aliasOnly`, `phonetic`, or `conservative`. So you can simply ask your assistant something like "register LiteLLM as a canonical term with the phonetic policy" and it will call this tool for you.
+
+### Finding what is still getting through
+
+The registry only fixes mis-hearings you have told it about, and you learn about a new one by noticing it in pasted text. `suggest` does that noticing for you: it scans your recent transcriptions for spellings close to a term you have already registered, and reports each one with how often it occurs, how often the correct spelling occurs, and a line of surrounding text.
+
+It changes nothing. Some rows will be ordinary English words that merely resemble your term, and the context line is there so you can tell at a glance — a "Mac Studio" is not a bad transcription of `stdio`. Ask your assistant to run it and add the real ones, and the list you maintain by hand stops growing by hand.
+
+Two shapes it looks for. One is a spelling close enough to the term to be a plain mis-hearing. The other is the term heard correctly and then extended — "Claude" becoming "Claudette" — which no phonetic comparison catches, because the extra syllable changes the sound. It ignores ordinary inflections (`symlinks`, `symlinked`), which are word forms rather than errors, and anything the ASR produces more often than the correct spelling, which is almost always a real word.
 
 The flat dictionary has its own `dictionary` MCP tool (list, add, update, delete, import, export) covered in [automation.md](automation.md).
 
@@ -94,6 +103,7 @@ The flat dictionary has its own `dictionary` MCP tool (list, add, update, delete
 - Promote a term to **Phonetic** only when it is a coined or invented name you never use as an ordinary word; this is where the registry saves you the most upkeep.
 - Use **Conservative** for any name that is also a real English word, so you do not corrupt normal text.
 - Leave a term on **AliasOnly** if you would rather list its variants by hand than risk any automatic guessing.
+- Run **suggest** every so often rather than waiting to spot a bad transcription yourself; it is the cheapest way to keep the registry current.
 
 ## See also
 
