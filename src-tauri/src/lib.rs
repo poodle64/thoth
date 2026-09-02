@@ -498,25 +498,25 @@ pub fn run() {
                 }
             }
 
-            // macOS-specific setup
-            #[cfg(target_os = "macos")]
-            {
-                // Detect an applied update and reset stale macOS permissions.
-                //
-                // macOS keys TCC grants to the code-signing identity, which
-                // changes on each build, so after an update the previously
-                // granted microphone / accessibility / input-monitoring
-                // permissions silently stop working. When the recorded
-                // last-run version differs from this binary's version we reset
-                // those three permissions once so the user re-grants from a
-                // clean slate. A genuinely fresh install (no recorded version)
-                // does NOT trigger a reset — there is nothing stale yet.
+            // Version bookkeeping, on EVERY platform.
+            //
+            // Two things read this and only one of them is macOS-specific, so
+            // the recording cannot be: macOS resets stale TCC grants after an
+            // update, and every platform suppresses the release-notes modal on
+            // a first launch (#113). Keeping the write inside the macOS block
+            // left Linux with `last_run_version` permanently unset, so a fresh
+            // Linux install opened with notes for a release it had never run.
+            //
+            // Underscore-prefixed because only the macOS branch below consumes
+            // it; the work above happens on every platform regardless.
+            let _update_from = {
                 let current = env!("CARGO_PKG_VERSION").to_string();
+
                 // A genuinely fresh install has no prior version recorded, and
-                // this is the only moment that is knowable — `record_last_run_version`
-                // below overwrites it. Mark the release notes as already seen so
-                // a first launch does not open with a changelog for a release
-                // the user was never on (#113).
+                // this is the only moment that is knowable — the call below
+                // overwrites it. Marking the notes seen here is what stops a
+                // first launch opening with a changelog for a release the user
+                // was never on.
                 let fresh_install = config::get_config()
                     .map(|c| c.general.last_run_version.is_none())
                     .unwrap_or(false);
@@ -525,33 +525,50 @@ pub fn run() {
                 {
                     tracing::warn!("Failed to record initial what's-new version: {}", e);
                 }
+
                 // Record the running version by mutating only this field on the
                 // live config and writing it — NOT via a get_config()/set_config()
                 // round-trip. That round-trip serialises a masked loki_auth and,
                 // on a version-change launch, was blanking loki_url/loki_auth.
                 // record_last_run_version writes only when the version changed.
                 match config::record_last_run_version(&current) {
-                    // Some(prev): a different version was recorded before, i.e. a
-                    // genuine update — reset the now-stale macOS permissions once.
-                    Ok(Some(prev)) => {
-                        tracing::info!(
-                            "Update detected ({} → {}); resetting macOS permissions",
-                            prev,
-                            current
-                        );
-                        // Spawn so the admin-prompt does not block window setup.
-                        tauri::async_runtime::spawn_blocking(|| {
-                            match platform::reset_permissions_after_update() {
-                                Ok(msg) => tracing::info!("Post-update permission reset: {}", msg),
-                                Err(e) => {
-                                    tracing::warn!("Post-update permission reset skipped: {}", e)
-                                }
-                            }
-                        });
+                    // Some(prev): a different version was recorded before, i.e.
+                    // a genuine update.
+                    Ok(prev) => prev.map(|prev| (prev, current)),
+                    Err(e) => {
+                        tracing::error!("Failed to record last-run version: {}", e);
+                        None
                     }
-                    // None: same version (no write) or a fresh install (nothing stale).
-                    Ok(None) => {}
-                    Err(e) => tracing::error!("Failed to record last-run version: {}", e),
+                }
+            };
+
+            // macOS-specific setup
+            #[cfg(target_os = "macos")]
+            {
+                // Reset stale macOS permissions after an applied update.
+                //
+                // macOS keys TCC grants to the code-signing identity, which
+                // changes on each build, so after an update the previously
+                // granted microphone / accessibility / input-monitoring
+                // permissions silently stop working; reset them once so the
+                // user re-grants from a clean slate. A genuinely fresh install
+                // does NOT trigger a reset — there is nothing stale yet, which
+                // is why this reads the UPDATE rather than merely the version.
+                if let Some((prev, current)) = &_update_from {
+                    tracing::info!(
+                        "Update detected ({} → {}); resetting macOS permissions",
+                        prev,
+                        current
+                    );
+                    // Spawn so the admin-prompt does not block window setup.
+                    tauri::async_runtime::spawn_blocking(|| {
+                        match platform::reset_permissions_after_update() {
+                            Ok(msg) => tracing::info!("Post-update permission reset: {}", msg),
+                            Err(e) => {
+                                tracing::warn!("Post-update permission reset skipped: {}", e)
+                            }
+                        }
+                    });
                 }
 
                 // Set dock visibility based on user config
