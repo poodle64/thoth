@@ -597,6 +597,16 @@ pub struct GeneralConfig {
     /// `None` on a genuinely fresh install — no reset is triggered then.
     #[serde(default)]
     pub last_run_version: Option<String>,
+    /// The version whose release notes the user has already been shown.
+    ///
+    /// Deliberately NOT `last_run_version`: that one is overwritten on every
+    /// launch to drive the TCC reset above, so by the time a "what's new"
+    /// check ran it would already equal the running version and the modal
+    /// would never appear. `None` means never shown — on a fresh install the
+    /// app records the running version without showing anything, so a first
+    /// run does not open with a changelog nobody asked for.
+    #[serde(default)]
+    pub whats_new_seen_version: Option<String>,
 }
 
 impl Default for GeneralConfig {
@@ -610,6 +620,7 @@ impl Default for GeneralConfig {
             indicator_style: IndicatorStyle::default(),
             window_decorations: true,
             last_run_version: None,
+            whats_new_seen_version: None,
         }
     }
 }
@@ -1189,6 +1200,21 @@ pub fn record_last_run_version(version: &str) -> Result<Option<String>, Error> {
     Ok(prev) // Some(old) on a real update; None on a fresh install
 }
 
+/// Record that a version's release notes have been shown (#113).
+///
+/// Writes the live config singleton directly for the same reason
+/// [`record_last_run_version`] does: a full `set_config` round-trip can blank
+/// masked fields such as `loki_auth`, and dismissing a modal is no reason to
+/// risk the user's telemetry credentials.
+pub fn record_whats_new_seen(version: &str) -> Result<(), Error> {
+    let mut cached = get_config_instance().write();
+    if cached.general.whats_new_seen_version.as_deref() == Some(version) {
+        return Ok(()); // unchanged — no write
+    }
+    cached.general.whats_new_seen_version = Some(version.to_string());
+    save_to_disk(&cached).map_err(Into::into)
+}
+
 /// Set shortcut config directly, bypassing set_config's preservation logic.
 ///
 /// Used by the Settings UI when intentionally changing shortcuts. The
@@ -1569,6 +1595,7 @@ mod tests {
                 indicator_style: IndicatorStyle::CursorDot,
                 window_decorations: true,
                 last_run_version: None,
+                whats_new_seen_version: Some("2026.6.6".to_string()),
             },
             recorder: RecorderConfig {
                 position: RecorderPosition::Centre,
@@ -1601,6 +1628,10 @@ mod tests {
         assert_eq!(restored.enhancement.model, "mistral");
 
         assert!(restored.general.launch_at_login);
+        assert_eq!(
+            restored.general.whats_new_seen_version.as_deref(),
+            Some("2026.6.6")
+        );
         assert!(!restored.general.show_in_menu_bar);
 
         assert_eq!(restored.recorder.position, RecorderPosition::Centre);

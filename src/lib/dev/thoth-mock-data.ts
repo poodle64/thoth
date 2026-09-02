@@ -416,6 +416,12 @@ export const thothMockCommands: CommandMap = {
   init_transcription: () => undefined,
   get_pipeline_state: () => 'idle',
 
+  // -- What's new (#113). Null keeps the dev shell free of the modal; the
+  //    real command answers only when the running version's notes are unseen.
+  whats_new: () => null,
+  mark_whats_new_seen: () => undefined,
+  changelog_releases: () => [],
+
   // -- Sounds (called during soundStore.load()) --
   are_sounds_enabled: () => true,
   get_sound_volume: () => 1,

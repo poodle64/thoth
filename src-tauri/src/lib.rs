@@ -9,6 +9,7 @@ use crate::error::Error;
 pub mod app_handle;
 pub mod audio;
 pub mod canonical;
+pub mod changelog;
 pub mod clipboard;
 pub mod commands;
 pub mod config;
@@ -511,6 +512,19 @@ pub fn run() {
                 // clean slate. A genuinely fresh install (no recorded version)
                 // does NOT trigger a reset — there is nothing stale yet.
                 let current = env!("CARGO_PKG_VERSION").to_string();
+                // A genuinely fresh install has no prior version recorded, and
+                // this is the only moment that is knowable — `record_last_run_version`
+                // below overwrites it. Mark the release notes as already seen so
+                // a first launch does not open with a changelog for a release
+                // the user was never on (#113).
+                let fresh_install = config::get_config()
+                    .map(|c| c.general.last_run_version.is_none())
+                    .unwrap_or(false);
+                if fresh_install
+                    && let Err(e) = config::record_whats_new_seen(&current)
+                {
+                    tracing::warn!("Failed to record initial what's-new version: {}", e);
+                }
                 // Record the running version by mutating only this field on the
                 // live config and writing it — NOT via a get_config()/set_config()
                 // round-trip. That round-trip serialises a masked loki_auth and,
@@ -706,6 +720,9 @@ pub fn run() {
             export::export_to_txt,
             export::get_transcriptions,
             // Config
+            changelog::whats_new,
+            changelog::mark_whats_new_seen,
+            changelog::changelog_releases,
             config::get_config,
             config::get_default_config,
             config::set_config,

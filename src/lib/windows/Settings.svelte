@@ -34,6 +34,7 @@
   import TranscribePane from '../components/TranscribePane.svelte';
   import OverviewPane from '../components/OverviewPane.svelte';
   import AboutDialog from '../components/AboutDialog.svelte';
+  import WhatsNewDialog from '../components/WhatsNewDialog.svelte';
   import ShortcutInput from '../components/ShortcutInput.svelte';
   import {
     configStore,
@@ -1004,6 +1005,14 @@
 </div>
 
 <AboutDialog open={showAbout} onclose={() => (showAbout = false)} />
+
+<!--
+  Decides for itself whether to open: it asks the backend, which answers only
+  when the running version's notes have not been seen. Mounted here rather than
+  in the recorder or indicator windows so it appears once, in the window a user
+  actually reads, and never over a recording.
+-->
+<WhatsNewDialog />
 
 <style>
   /* Settings window layout - component-specific styles only */
