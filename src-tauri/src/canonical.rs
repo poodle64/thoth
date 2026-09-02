@@ -210,38 +210,44 @@ enum Span<'a> {
 
 /// Split `text` into alternating Word/Gap spans (starts with a gap if text
 /// begins with non-alnum; each contiguous alnum run is one Word).
+///
+/// One classification per character, by `char::is_alphanumeric` throughout.
+/// Deciding a run's kind from its first BYTE while ending it on the CHARACTER
+/// test made the two disagree for any word starting with a non-ASCII letter
+/// ("Привет", "Émile"): the gap branch was entered, its loop could not advance,
+/// and the function spun pushing empty spans until memory ran out. Nothing
+/// upstream can catch that — `catch_post_processing` unwinds a panic, not a
+/// loop — and it sits on the path every dictation takes.
 fn tokenise(text: &str) -> Vec<Span<'_>> {
     let mut spans = Vec::new();
-    let bytes = text.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
+    let mut run_start = 0usize;
+    let mut run_is_word: Option<bool> = None;
 
-    while i < len {
-        if bytes[i].is_ascii_alphanumeric() {
-            // Find end of alnum run (may include Unicode letters via char check below)
-            let start = i;
-            while i < len
-                && text[i..]
-                    .chars()
-                    .next()
-                    .is_some_and(|c| c.is_alphanumeric())
-            {
-                i += text[i..].chars().next().map_or(1, |c| c.len_utf8());
+    for (i, c) in text.char_indices() {
+        let is_word = c.is_alphanumeric();
+        match run_is_word {
+            Some(was) if was == is_word => continue,
+            Some(was) => {
+                spans.push(if was {
+                    Span::Word(&text[run_start..i])
+                } else {
+                    Span::Gap(&text[run_start..i])
+                });
             }
-            spans.push(Span::Word(&text[start..i]));
-        } else {
-            let start = i;
-            while i < len
-                && !text[i..]
-                    .chars()
-                    .next()
-                    .is_some_and(|c| c.is_alphanumeric())
-            {
-                i += text[i..].chars().next().map_or(1, |c| c.len_utf8());
-            }
-            spans.push(Span::Gap(&text[start..i]));
+            None => {}
         }
+        run_start = i;
+        run_is_word = Some(is_word);
     }
+
+    if let Some(was) = run_is_word {
+        spans.push(if was {
+            Span::Word(&text[run_start..])
+        } else {
+            Span::Gap(&text[run_start..])
+        });
+    }
+
     spans
 }
 
@@ -1156,6 +1162,34 @@ mod tests {
             phonetic_match("naïve", "naive"),
             "naïve must phonetically match naive after ASCII folding"
         );
+    }
+
+    /// A word STARTING with a non-ASCII letter used to hang the tokeniser: the
+    /// run's kind was decided from its first byte (not alphanumeric ASCII, so a
+    /// gap) while the loop that ended it tested the character (alphanumeric, so
+    /// never), leaving nothing to advance the cursor. `catch_post_processing`
+    /// unwinds a panic; it cannot interrupt a loop, so the app would have sat
+    /// there allocating.
+    ///
+    /// Run on a worker with a deadline: a regression here hangs the suite
+    /// rather than failing it, and a hung suite reads as a slow machine.
+    #[test]
+    fn test_a_word_starting_with_a_non_ascii_letter_terminates() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            // Cyrillic and an accented capital, each preceded by a space so the
+            // tokeniser meets them at the start of a run. Both shapes appear in
+            // real transcripts — this machine's history holds three.
+            let out: Vec<String> = [" Привет мир", "Wrote to Émile.", "· ñandú"]
+                .iter()
+                .map(|t| apply_canonical(t))
+                .collect();
+            let _ = tx.send(out);
+        });
+        let out = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("tokenising a non-ASCII word must terminate");
+        assert_eq!(out, vec![" Привет мир", "Wrote to Émile.", "· ñandú"]);
     }
 
     #[test]
