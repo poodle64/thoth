@@ -4,6 +4,9 @@
 # Run manually: pre-commit run --all-files
 # Update hooks: pre-commit autoupdate
 
+# Merge commits run no gate without pre-merge-commit; changing this needs `pre-commit install` re-run.
+default_install_hook_types: [pre-commit, pre-merge-commit]
+
 repos:
   # ---------------------------------------------------------------------------- #
   #                              Security Scanning                                #
