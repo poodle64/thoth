@@ -9,6 +9,7 @@ pub mod format;
 pub mod metering;
 pub mod preview;
 pub mod ring_buffer;
+pub mod speech_gate;
 pub mod vad;
 
 pub use capture::AudioRecorder;

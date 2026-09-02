@@ -20,6 +20,7 @@
 
 use super::format::AudioConverter;
 use super::ring_buffer::AudioRingBuffer;
+use super::speech_gate::{GateConfig, SpeechGate, speech_activity};
 use anyhow::{Result, anyhow};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_channel::{Receiver, Sender};
@@ -379,6 +380,12 @@ impl AudioRecorder {
     }
 }
 
+/// Feed one block of finished 16kHz mono PCM to the live speech gate.
+fn feed_gate(gate: &mut SpeechGate, pcm: &[i16]) {
+    let samples: Vec<f32> = pcm.iter().map(|&s| s as f32 / 32768.0).collect();
+    gate.push(&samples);
+}
+
 /// Resample queued capture samples to a 16kHz mono WAV file.
 ///
 /// Receives device-native interleaved f32 blocks from the capture channel,
@@ -387,6 +394,11 @@ impl AudioRecorder {
 /// (`AudioConverter`). Runs until the `Stop` sentinel, then finalises the
 /// trailing partial chunk and drains the resampler's internal delay so the very
 /// end of the recording reaches the file. The WAV header is stamped at 16kHz.
+///
+/// This thread also drives the live speech gate. It is the only place that
+/// holds the resampled 16kHz mono stream, and it is off the cpal callback, so
+/// gating here costs the real-time path nothing and sees exactly the audio the
+/// transcriber will.
 fn write_audio_to_file(
     receiver: Receiver<RecordingMsg>,
     path: &Path,
@@ -424,10 +436,18 @@ fn write_audio_to_file(
     let mut writer = hound::WavWriter::create(path, spec)?;
     let mut total_samples = 0usize;
 
+    // The gate is not Send (see `speech_gate::WebRtcDetector`), so it is built
+    // here rather than handed in, and its state reaches other threads through
+    // the shared snapshot.
+    let mut gate = SpeechGate::new(GateConfig::default());
+    let activity = speech_activity();
+    activity.start();
+
     let drain_full_chunks = |accumulator: &mut Vec<f32>,
                              converter: &mut AudioConverter,
                              writer: &mut hound::WavWriter<std::io::BufWriter<std::fs::File>>,
-                             total: &mut usize|
+                             total: &mut usize,
+                             gate: &mut SpeechGate|
      -> Result<()> {
         while accumulator.len() >= frames_per_chunk {
             let chunk: Vec<f32> = accumulator.drain(..frames_per_chunk).collect();
@@ -438,6 +458,7 @@ fn write_audio_to_file(
                 writer.write_sample(*sample)?;
             }
             *total += resampled.len();
+            feed_gate(gate, &resampled);
         }
         Ok(())
     };
@@ -454,7 +475,9 @@ fn write_audio_to_file(
                     &mut converter,
                     &mut writer,
                     &mut total_samples,
+                    &mut gate,
                 )?;
+                activity.publish(&gate);
             }
             RecordingMsg::Stop => break,
         }
@@ -471,6 +494,11 @@ fn write_audio_to_file(
         writer.write_sample(*sample)?;
     }
     total_samples += tail.len();
+    feed_gate(&mut gate, &tail);
+    activity.publish(&gate);
+    // The gate stops with the writer, so a reader between recordings sees
+    // "no live gate" rather than the last recording's final frame.
+    activity.stop();
 
     writer.finalize()?;
     let duration_secs = total_samples as f32 / TARGET_SAMPLE_RATE as f32;
@@ -487,6 +515,7 @@ fn write_audio_to_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audio::speech_gate::speech_activity;
     use std::fs;
     use tempfile::tempdir;
 
@@ -519,6 +548,61 @@ mod tests {
         reader.into_samples::<i16>().count()
     }
 
+    /// The live gate must actually run on the recording path. A gate that
+    /// compiles but is never fed reports silence for every recording, which
+    /// looks exactly like a user who never spoke — so this drives real speech
+    /// through the real writer thread and asserts the published snapshot.
+    #[test]
+    #[serial_test::serial(writer_thread)]
+    fn the_writer_thread_publishes_live_speech() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/speech_no_custom_terms.wav");
+        let pcm: Vec<f32> = hound::WavReader::open(&fixture)
+            .unwrap()
+            .into_samples::<i16>()
+            .map(|s| s.unwrap() as f32 / 32768.0)
+            .collect();
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("gate_test.wav");
+        let (tx, rx) = crossbeam_channel::unbounded::<RecordingMsg>();
+        let writer_path = path.to_path_buf();
+        // 16kHz mono in, 16kHz mono out: no resampling, so the gate sees the
+        // fixture unchanged and the assertion is about the gate, not rubato.
+        let handle =
+            std::thread::spawn(move || write_audio_to_file(rx, &writer_path, 16_000, 1));
+
+        for block in pcm.chunks(512) {
+            tx.send(RecordingMsg::Samples(block.to_vec())).unwrap();
+        }
+
+        // Assert while the writer is still running: `Stop` ends the gate.
+        // `is_live` comes first because `stop` deliberately leaves
+        // `heard_speech` set for a reader that arrives after the recording —
+        // so waiting on it alone would read the PREVIOUS recording's answer.
+        let activity = speech_activity();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !activity.is_live() && std::time::Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        assert!(activity.is_live(), "the gate runs for the whole recording");
+        while !activity.has_heard_speech() && std::time::Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        assert!(
+            activity.has_heard_speech(),
+            "a spoken fixture must register as speech on the live path"
+        );
+
+        tx.send(RecordingMsg::Stop).unwrap();
+        handle.join().unwrap().unwrap();
+        assert!(
+            !activity.is_live(),
+            "the gate must stop when the recording does"
+        );
+        fs::remove_file(path).ok();
+    }
+
     #[test]
     fn test_recorder_new() {
         let recorder = AudioRecorder::new();
@@ -527,6 +611,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(writer_thread)]
     fn test_writer_produces_correct_rate_wav() {
         // 0.25s of 48kHz stereo should resample to ~4000 samples at 16kHz,
         // proving the writer genuinely resamples rather than relabelling.
@@ -542,6 +627,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(writer_thread)]
     fn test_writer_preserves_tail_on_long_recording() {
         // The whole point of the decoupled pipeline: a long recording must not
         // lose its tail. 30s of 48kHz mono = 480000 frames -> ~480000 samples at
@@ -563,6 +649,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(writer_thread)]
     fn test_record_and_stop() {
         // Skip if no usable audio input. Probing default_input_device() is not
         // enough: a headless ALSA host (CI) still reports a "default" device
