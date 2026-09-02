@@ -285,9 +285,14 @@ fn play_linux_sound(event: SoundEvent, volume: f32) {
 const CUE_MAX_HOLD_SECS: f64 = 5.0;
 
 /// Hold time used when `AVAudioPlayer` reports a duration that cannot be trusted
-/// (NaN, negative, infinite). Long enough to cover any of the four cues.
+/// (NaN, negative, infinite).
+///
+/// Sized against the real assets [`SoundEvent::sound_path`] returns, measured with
+/// `afinfo`: `dt-begin` 0.315s, `dt-confirm` 0.339s, `Basso` 0.768s, `Glass`
+/// 1.650s. The fallback has to clear the longest of them, or the case it exists to
+/// handle is the case where the cue gets cut off.
 #[cfg(target_os = "macos")]
-const CUE_FALLBACK_SECS: f64 = 0.5;
+const CUE_FALLBACK_SECS: f64 = 2.0;
 
 /// Extra time held after the reported duration, so the output device drains its
 /// last buffer before the player is released. Matches the Linux cue's tail.
@@ -593,6 +598,47 @@ mod tests {
         assert_eq!(hold, std::time::Duration::from_secs_f64(0.35) + CUE_RELEASE_TAIL);
     }
 
+    /// The fallback hold exists for the case where `duration()` cannot be
+    /// trusted, so it has to clear the longest cue Thoth actually plays — or the
+    /// one case it exists to handle is the one where the sound gets cut off.
+    ///
+    /// Durations are read from the real files rather than hardcoded, so a macOS
+    /// release that ships a longer asset fails here instead of silently
+    /// truncating the cue.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cue_fallback_covers_every_real_cue() {
+        for event in [
+            SoundEvent::RecordingStart,
+            SoundEvent::RecordingStop,
+            SoundEvent::TranscriptionComplete,
+            SoundEvent::Error,
+        ] {
+            let path = event.sound_path();
+            let out = std::process::Command::new("afinfo")
+                .arg(path)
+                .output()
+                .expect("afinfo(1) not runnable");
+            let info = String::from_utf8_lossy(&out.stdout);
+            let secs: f64 = info
+                .lines()
+                .find_map(|l| l.trim().strip_prefix("estimated duration:"))
+                .and_then(|v| v.split_whitespace().next())
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(|| panic!("no duration for {path} in:\n{info}"));
+
+            assert!(
+                CUE_FALLBACK_SECS >= secs,
+                "{event:?} is {secs}s but the fallback hold is only \
+                 {CUE_FALLBACK_SECS}s — an untrusted duration would cut it off"
+            );
+            assert!(
+                CUE_MAX_HOLD_SECS >= secs,
+                "{event:?} is {secs}s, past the {CUE_MAX_HOLD_SECS}s ceiling"
+            );
+        }
+    }
+
     /// `duration()` crosses FFI, so an untrustworthy value must not panic
     /// `Duration::from_secs_f64` or pin the thread for minutes.
     #[cfg(target_os = "macos")]
@@ -637,21 +683,43 @@ mod tests {
             .arg(std::process::id().to_string())
             .output()
             .expect("heap(1) not runnable");
+        assert!(
+            out.status.success(),
+            "heap(1) failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         let report = String::from_utf8_lossy(&out.stdout);
 
         // `heap`'s object table is: COUNT  BYTES  AVG  CLASS_NAME  TYPE  BINARY.
-        report
+        let rows: Vec<(usize, &str)> = report
             .lines()
             .filter_map(|line| {
                 let fields: Vec<&str> = line.split_whitespace().collect();
                 let [count, _bytes, _avg, class, ..] = fields.as_slice() else {
                     return None;
                 };
-                if *class != "AVAudioPlayer" {
-                    return None;
-                }
-                count.replace(',', "").parse::<usize>().ok()
+                Some((count.replace(',', "").parse::<usize>().ok()?, *class))
             })
+            .collect();
+
+        // Without this the test is vacuous: an unparsed report yields no rows,
+        // both counts read zero, and the assertion passes whether or not the
+        // players were released. That already happened once, with the class name
+        // read from the wrong column. The header is checked as well as the rows,
+        // because it is what pins the column order this parse assumes.
+        assert!(
+            report.contains("COUNT") && report.contains("CLASS_NAME"),
+            "heap(1) output is not the table this parses:\n{report}"
+        );
+        assert!(
+            !rows.is_empty(),
+            "heap(1) reported a table but no row parsed — the column order \
+             changed, and this test would pass vacuously"
+        );
+
+        rows.iter()
+            .filter(|(_, class)| *class == "AVAudioPlayer")
+            .map(|(count, _)| count)
             .sum()
     }
 
