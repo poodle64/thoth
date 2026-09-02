@@ -65,7 +65,6 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, String> {
 }
 
 /// Check pipeline state without locking
-#[tauri::command]
 pub fn is_pipeline_running() -> bool {
     PIPELINE_RUNNING.load(Ordering::SeqCst)
 }
