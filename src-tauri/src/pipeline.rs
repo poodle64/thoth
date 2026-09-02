@@ -452,11 +452,20 @@ fn spawn_hands_free_watcher(app: AppHandle, timeout: std::time::Duration) {
                 silence_ms = activity.silence_ms_after_speech().unwrap_or(0),
                 "hands_free_auto_stop"
             );
-            // Same order as the hotkey stop: the cue is paired with the
-            // decision, before capture disarms.
-            crate::sound::play_sound(crate::sound::SoundEvent::RecordingStop);
-            if let Err(e) = pipeline_stop_and_process(app, None).await {
-                tracing::warn!("Pipeline: hands-free auto-stop failed: {}", e);
+            // Through the toggle with an explicit stop-only intent, not
+            // `pipeline_stop_and_process` directly. The watcher and a manual
+            // stop can decide in the same instant, and whichever loses used to
+            // surface "No recording in progress" as a failure although the
+            // recording had stopped correctly. StopOnly answers `Ignored`
+            // instead, which is what that moment actually is. The toggle also
+            // plays the stop cue, paired with the decision as the hotkey path
+            // pairs it.
+            match pipeline_toggle_recording(app, None, Some(ToggleIntent::StopOnly)).await {
+                Ok(ToggleOutcome::Ignored) => {
+                    tracing::debug!("Pipeline: hands-free auto-stop raced a manual stop");
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!("Pipeline: hands-free auto-stop failed: {}", e),
             }
             return;
         }
