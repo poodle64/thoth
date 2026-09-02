@@ -53,7 +53,16 @@ A packaged `.deb` declares these; if you run a raw binary, install them yourself
 
 **Recommended (the app works without them, with reduced functionality):**
 
-- `wtype` — native Wayland text insertion. Without it, insertion falls back to XWayland emulation, which on GNOME triggers an "Allow Remote Interaction" permission prompt each session.
+- **A typing tool** — native text insertion. Without one, insertion falls back to XWayland emulation, which on GNOME triggers an "Allow Remote Interaction" permission prompt each session. Which one depends on your desktop, and installing the wrong one buys nothing:
+
+  | Session | Install | Why |
+  | --- | --- | --- |
+  | Sway, Hyprland, river | `wtype` | Speaks `zwp_virtual_keyboard_manager_v1`, which these compositors implement |
+  | KDE Plasma (Wayland) | `kwtype` | KWin does **not** implement the virtual-keyboard protocol, so `wtype` can never work there; kwtype uses KDE's own Fake Input protocol |
+  | GNOME (Wayland) | `dotool` or `ydotool` | Mutter does not implement it either, and GNOME has no equivalent of its own; both of these go through `/dev/uinput` instead |
+  | X11 | `xdotool` | Talks XTEST, which is X11-only |
+
+  `dotool` and `ydotool` work under any compositor and are the fallback everywhere, at the cost of `/dev/uinput` permissions. Thoth tries them in this order automatically; Settings → Recording → Typing Tool pins one if the automatic choice behaves badly on your setup.
 - `xdg-utils` — opens external links and settings panels (`xdg-open`).
 - `libayatana-appindicator3-1` — the system tray icon (the modern AppIndicator runtime).
 

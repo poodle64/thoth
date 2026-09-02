@@ -40,6 +40,7 @@
     type IndicatorStyle,
     type AutoSubmit,
     type RecordingMode,
+    type TypingTool,
   } from '../stores/config.svelte';
   import { pipelineStore } from '../stores/pipeline.svelte';
   import { shortcutsStore, type ShortcutInfo } from '../stores/shortcuts.svelte';
@@ -242,6 +243,27 @@
    */
   const HANDS_FREE_SILENCE_MIN = 0.8;
   const HANDS_FREE_SILENCE_MAX = 10;
+
+  /**
+   * Linux typing tools, in the order the auto chain considers them.
+   *
+   * The hints say what each one needs, because that is the whole decision: a
+   * user on KDE or GNOME cannot make `wtype` work however much they want to.
+   */
+  const TYPING_TOOLS: { value: TypingTool; label: string; hint: string }[] = [
+    { value: 'auto', label: 'Automatic', hint: 'Order the tools by what this desktop is' },
+    { value: 'wtype', label: 'wtype', hint: 'Wayland virtual keyboard — not KDE or GNOME' },
+    { value: 'kwtype', label: 'kwtype', hint: "KDE's own Fake Input protocol" },
+    { value: 'dotool', label: 'dotool', hint: 'Any compositor, via /dev/uinput' },
+    { value: 'ydotool', label: 'ydotool', hint: 'Any compositor, via its own daemon' },
+    { value: 'xdotool', label: 'xdotool', hint: 'X11 sessions only' },
+    { value: 'enigo', label: 'Built-in', hint: 'No external tool; XWayland on Wayland' },
+  ];
+
+  async function handleTypingToolChange(tool: TypingTool) {
+    configStore.updateTranscription('typingTool', tool);
+    await configStore.save();
+  }
 
   async function handleRecordingModeChange(mode: RecordingMode) {
     configStore.updateShortcuts('recordingMode', mode);
@@ -465,6 +487,38 @@
                       {configStore.shortcuts.handsFreeSilenceSecs.toFixed(1)}s
                     </span>
                   </div>
+                </div>
+              {/if}
+              {#if isLinux}
+                <div class="flex flex-col gap-3 rounded-md border border-border bg-card p-3">
+                  <div class="flex flex-col gap-1">
+                    <span class="text-sm font-medium text-foreground">Typing Tool</span>
+                    <span class="text-xs text-muted-foreground">
+                      Which tool sends the keystrokes. A pinned tool is tried first; the others
+                      still follow it, so a missing one never stops you dictating.
+                    </span>
+                  </div>
+                  <RadioGroup.Root
+                    value={configStore.transcription.typingTool}
+                    onValueChange={(v) => handleTypingToolChange(v as TypingTool)}
+                    class="flex flex-col gap-1"
+                  >
+                    {#each TYPING_TOOLS as opt (opt.value)}
+                      <label
+                        class="flex cursor-pointer items-start gap-3 rounded-md px-2 py-1.5 transition-colors hover:bg-muted"
+                      >
+                        <RadioGroup.Item
+                          value={opt.value}
+                          id="typing-tool-{opt.value}"
+                          class="mt-0.5"
+                        />
+                        <span class="flex flex-col gap-0.5">
+                          <span class="text-sm font-medium text-foreground">{opt.label}</span>
+                          <span class="text-xs text-muted-foreground">{opt.hint}</span>
+                        </span>
+                      </label>
+                    {/each}
+                  </RadioGroup.Root>
                 </div>
               {/if}
               <div class="row-separator"></div>

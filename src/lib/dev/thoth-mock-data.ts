@@ -35,6 +35,7 @@ const MOCK_CONFIG = {
     spoken_numbers_to_digits: false,
     voice_formatting_commands: true,
     vocabulary_bias: true,
+    typing_tool: 'auto' as const,
     model_idle_unload_secs: null,
   },
   shortcuts: {

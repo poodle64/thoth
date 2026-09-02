@@ -3,6 +3,7 @@
 //! Provides cross-platform text insertion at cursor position in any application.
 //! Supports multiple insertion methods with configurable delays.
 
+use crate::config::TypingTool;
 use crate::error::Error;
 use std::thread;
 use std::time::Duration;
@@ -28,6 +29,102 @@ impl InsertionMethod {
             _ => Self::Typing,
         }
     }
+}
+
+/// What happened when a typing tool was asked to do its job.
+///
+/// "Absent" and "broken" are kept apart because the user needs different
+/// advice for each: install one of these, versus this one is installed and is
+/// not working.
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolOutcome {
+    /// The text went in.
+    Typed,
+    /// The binary is not on PATH.
+    NotInstalled,
+    /// The binary ran and did not succeed.
+    Failed,
+}
+
+/// What the Linux session looks like, as far as tool choice cares.
+///
+/// Taken as data rather than read from the environment inside the resolver, so
+/// the ordering — the part that is easy to get wrong and impossible to see
+/// wrong — is testable on any platform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DesktopSession {
+    /// The session is Wayland rather than X11.
+    pub wayland: bool,
+    /// The desktop is KDE Plasma.
+    pub kde: bool,
+    /// The desktop is GNOME.
+    pub gnome: bool,
+}
+
+impl DesktopSession {
+    /// Read the session from the environment. The variables are the ones every
+    /// desktop sets: `WAYLAND_DISPLAY`/`XDG_SESSION_TYPE` for the protocol,
+    /// `XDG_CURRENT_DESKTOP` (plus KDE's own `KDE_SESSION_VERSION`) for the
+    /// desktop.
+    #[cfg(target_os = "linux")]
+    pub fn detect() -> Self {
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP")
+            .unwrap_or_default()
+            .to_uppercase();
+        Self {
+            wayland: std::env::var("WAYLAND_DISPLAY").is_ok()
+                || std::env::var("XDG_SESSION_TYPE")
+                    .map(|v| v.eq_ignore_ascii_case("wayland"))
+                    .unwrap_or(false),
+            kde: desktop.contains("KDE") || std::env::var("KDE_SESSION_VERSION").is_ok(),
+            gnome: desktop.contains("GNOME"),
+        }
+    }
+}
+
+/// The order in which typing tools are tried for this session.
+///
+/// Two facts drive it, and both are why trying `wtype` first everywhere was
+/// wrong: `wtype` needs `zwp_virtual_keyboard_manager_v1`, which neither KWin
+/// nor Mutter implements, so on KDE and GNOME it can never work and asking the
+/// user to install it is a dead end; and `xdotool` talks XTEST, so it is X11
+/// only. `dotool` and `ydotool` go through `/dev/uinput` and work under any
+/// compositor, which is why they sit behind the native choice everywhere.
+///
+/// [`TypingTool::Enigo`] is always last. It is in-process, needs nothing
+/// installed, and on Wayland drives XWayland — which is what raises GNOME's
+/// "Allow Remote Interaction" prompt, and why it is a last resort rather than
+/// a default.
+///
+/// A pinned tool moves to the front and the rest of the order follows it. That
+/// is deliberate: pinning is a preference, and a preference must not be able to
+/// leave someone unable to type because the tool they named is not installed.
+pub fn typing_tool_order(preferred: TypingTool, session: DesktopSession) -> Vec<TypingTool> {
+    let mut order = if session.wayland {
+        if session.kde {
+            // KDE's own Fake Input protocol, which is what kwtype speaks.
+            vec![TypingTool::Kwtype, TypingTool::Dotool, TypingTool::Ydotool]
+        } else if session.gnome {
+            vec![TypingTool::Dotool, TypingTool::Ydotool]
+        } else {
+            // Sway, Hyprland, river and friends do implement virtual-keyboard.
+            vec![
+                TypingTool::Wtype,
+                TypingTool::Dotool,
+                TypingTool::Ydotool,
+            ]
+        }
+    } else {
+        vec![TypingTool::Xdotool, TypingTool::Ydotool]
+    };
+    order.push(TypingTool::Enigo);
+
+    if preferred != TypingTool::Auto {
+        order.retain(|t| *t != preferred);
+        order.insert(0, preferred);
+    }
+    order
 }
 
 /// Configuration for text insertion.
@@ -132,7 +229,10 @@ impl TextInsertService {
             let pasted = if is_hyprland() {
                 Self::paste_with_hyprctl()
             } else {
-                Self::try_paste_with_wtype() || Self::paste_with_enigo().is_ok()
+                // The same chain the keystroke path uses (#110), so a KDE or
+                // GNOME session — where wtype cannot work at all — reaches
+                // dotool or ydotool instead of dropping straight to XWayland.
+                self.paste_linux().is_ok()
             };
             if pasted {
                 info!(
@@ -278,48 +378,164 @@ impl TextInsertService {
 
     #[cfg(target_os = "linux")]
     fn insert_by_typing_linux(&self, text: &str) -> Result<(), String> {
-        // Try wtype first (native Wayland support)
-        if Self::try_type_with_wtype(text, self.config.keystroke_delay_ms) {
-            info!("Successfully inserted {} characters via wtype", text.len());
-            return Ok(());
+        let session = DesktopSession::detect();
+        let preferred = crate::config::get_config()
+            .map(|c| c.transcription.typing_tool)
+            .unwrap_or_default();
+        let order = typing_tool_order(preferred, session);
+
+        let mut missing: Vec<&'static str> = Vec::new();
+        for tool in order {
+            if tool == TypingTool::Enigo {
+                // Reached only when every external tool is absent or failed.
+                // Logged at warn, not debug: on Wayland this is the moment the
+                // user starts seeing GNOME's "Allow Remote Interaction" prompt,
+                // and the cause has to be visible. The startup advisory
+                // (`emit_linux_typing_advisory`) tells them how to fix it.
+                if !missing.is_empty() {
+                    warn!(
+                        "No Linux typing tool available ({}); falling back to enigo/XWayland. Install one of them, or grant Remote Interaction.",
+                        missing.join(", ")
+                    );
+                }
+                return Self::type_with_enigo(text, self.config.keystroke_delay_ms);
+            }
+
+            match Self::try_type_with_tool(tool, text, self.config.keystroke_delay_ms) {
+                ToolOutcome::Typed => {
+                    info!(
+                        "Successfully inserted {} characters via {}",
+                        text.len(),
+                        Self::tool_binary(tool)
+                    );
+                    return Ok(());
+                }
+                ToolOutcome::NotInstalled => missing.push(Self::tool_binary(tool)),
+                ToolOutcome::Failed => warn!(
+                    "{} is installed but failed to type; trying the next tool",
+                    Self::tool_binary(tool)
+                ),
+            }
         }
 
-        // Fall back to enigo (X11/XWayland). On native Wayland this is where the
-        // user feels a missing `wtype`: enigo drives XWayland and on GNOME
-        // triggers the "Allow Remote Interaction" prompt. Logged at warn (not
-        // debug) so the cause is visible; the startup advisory toast
-        // (`emit_linux_typing_advisory`) tells the user how to fix it.
-        warn!(
-            "wtype unavailable or failed; falling back to enigo for typing (Wayland users: install wtype or grant Remote Interaction)"
-        );
+        // `typing_tool_order` always ends with Enigo, so this is unreachable.
         Self::type_with_enigo(text, self.config.keystroke_delay_ms)
     }
 
+    /// The binary a tool runs as.
     #[cfg(target_os = "linux")]
-    fn try_type_with_wtype(text: &str, keystroke_delay_ms: u64) -> bool {
+    pub(crate) fn tool_binary(tool: TypingTool) -> &'static str {
+        match tool {
+            TypingTool::Wtype => "wtype",
+            TypingTool::Kwtype => "kwtype",
+            TypingTool::Dotool => "dotool",
+            TypingTool::Ydotool => "ydotool",
+            TypingTool::Xdotool => "xdotool",
+            TypingTool::Auto | TypingTool::Enigo => "enigo",
+        }
+    }
+
+    /// Type `text` with one external tool.
+    ///
+    /// Absent and broken are answered separately because they need different
+    /// advice: "install one of these" versus "this one is installed and is not
+    /// working". Nothing probes `which` first — a missing binary already comes
+    /// back as `NotFound` from the spawn, and one spawn beats two.
+    #[cfg(target_os = "linux")]
+    fn try_type_with_tool(tool: TypingTool, text: &str, keystroke_delay_ms: u64) -> ToolOutcome {
+        if keystroke_delay_ms == 0 {
+            return Self::run_type_command(tool, text);
+        }
+
+        // A configured keystroke delay means one invocation per character —
+        // the only way to space keystrokes when the tool itself types a whole
+        // string atomically. Control characters are skipped: they are not
+        // keystrokes these tools accept as text.
+        for c in text.chars() {
+            if c.is_control() {
+                continue;
+            }
+            match Self::run_type_command(tool, &c.to_string()) {
+                ToolOutcome::Typed => {}
+                other => return other,
+            }
+            thread::sleep(Duration::from_millis(keystroke_delay_ms));
+        }
+        ToolOutcome::Typed
+    }
+
+    /// One tool, one string. Argument forms verified against each tool's own
+    /// CLI; `--` guards text that begins with a dash.
+    #[cfg(target_os = "linux")]
+    fn run_type_command(tool: TypingTool, text: &str) -> ToolOutcome {
         use std::process::Command;
 
-        // wtype is a native Wayland tool (requires virtual-keyboard protocol support)
-        if keystroke_delay_ms > 0 {
-            // Type character by character with delay
-            for c in text.chars() {
-                if c.is_control() {
-                    continue;
-                }
-                match Command::new("wtype").arg(c.to_string()).status() {
-                    Ok(status) if status.success() => {}
-                    _ => return false,
-                }
-                thread::sleep(Duration::from_millis(keystroke_delay_ms));
+        // dotool is the odd one out: it reads commands on stdin rather than
+        // taking the text as an argument.
+        if tool == TypingTool::Dotool {
+            return Self::run_dotool(&format!("type {}\n", text));
+        }
+
+        let mut command = Command::new(Self::tool_binary(tool));
+        match tool {
+            TypingTool::Wtype | TypingTool::Kwtype => {
+                command.arg("--").arg(text);
             }
-            true
-        } else {
-            // Type all at once
-            Command::new("wtype")
-                .arg(text)
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
+            TypingTool::Ydotool => {
+                command.args(["type", "--"]).arg(text);
+            }
+            TypingTool::Xdotool => {
+                // --clearmodifiers stops a modifier the user is still holding
+                // from being folded into every typed character.
+                command.args(["type", "--clearmodifiers", "--"]).arg(text);
+            }
+            TypingTool::Auto | TypingTool::Dotool | TypingTool::Enigo => {
+                return ToolOutcome::NotInstalled;
+            }
+        }
+
+        Self::classify(command.status())
+    }
+
+    /// Feed one command line to dotool on stdin.
+    #[cfg(target_os = "linux")]
+    fn run_dotool(line: &str) -> ToolOutcome {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let mut child = match Command::new("dotool")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return ToolOutcome::NotInstalled;
+            }
+            Err(_) => return ToolOutcome::Failed,
+        };
+
+        if let Some(mut stdin) = child.stdin.take()
+            && stdin.write_all(line.as_bytes()).is_err()
+        {
+            return ToolOutcome::Failed;
+        }
+
+        match child.wait() {
+            Ok(status) if status.success() => ToolOutcome::Typed,
+            _ => ToolOutcome::Failed,
+        }
+    }
+
+    /// Turn a spawn result into the three answers the caller acts on.
+    #[cfg(target_os = "linux")]
+    fn classify(result: std::io::Result<std::process::ExitStatus>) -> ToolOutcome {
+        match result {
+            Ok(status) if status.success() => ToolOutcome::Typed,
+            Ok(_) => ToolOutcome::Failed,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => ToolOutcome::NotInstalled,
+            Err(_) => ToolOutcome::Failed,
         }
     }
 
@@ -349,41 +565,73 @@ impl TextInsertService {
 
     #[cfg(target_os = "linux")]
     fn paste_linux(&self) -> Result<(), String> {
-        // Try wtype first (native Wayland support, no modifier key issues)
-        if Self::try_paste_with_wtype() {
-            debug!("Pasted via wtype (native Wayland)");
-            return Ok(());
+        let session = DesktopSession::detect();
+        let preferred = crate::config::get_config()
+            .map(|c| c.transcription.typing_tool)
+            .unwrap_or_default();
+
+        for tool in typing_tool_order(preferred, session) {
+            if tool == TypingTool::Enigo {
+                warn!(
+                    "No Linux tool could send the paste combo; falling back to enigo/XWayland (Wayland users: install wtype/dotool/ydotool, or grant Remote Interaction)"
+                );
+                return Self::paste_with_enigo();
+            }
+            if Self::try_paste_with_tool(tool) {
+                debug!("Pasted via {}", Self::tool_binary(tool));
+                return Ok(());
+            }
         }
 
-        // Fall back to enigo (X11/XWayland). See insert_by_typing_linux for why
-        // this is the Wayland pain point; warn so the cause is visible.
-        warn!(
-            "wtype unavailable or failed; falling back to enigo for paste (Wayland users: install wtype or grant Remote Interaction)"
-        );
+        // `typing_tool_order` always ends with Enigo, so this is unreachable.
         Self::paste_with_enigo()
     }
 
+    /// Send Ctrl+Shift+V with one tool.
+    ///
+    /// Ctrl+Shift+V, not Ctrl+V, for the reason the Hyprland path already
+    /// records: terminal emulators reserve Ctrl+V, and the shifted form also
+    /// pastes in mainstream GUI apps, so it is the one safe binding.
+    ///
+    /// `kwtype` is absent here on purpose — it speaks KDE's Fake Input
+    /// protocol for TEXT and has no key-combo mode, so on KDE the paste falls
+    /// through to dotool/ydotool.
     #[cfg(target_os = "linux")]
-    fn try_paste_with_wtype() -> bool {
+    fn try_paste_with_tool(tool: TypingTool) -> bool {
         use std::process::Command;
 
-        // wtype is a native Wayland tool that avoids modifier key sync issues
-        // Note: Only works on compositors supporting the virtual-keyboard protocol (Sway, Hyprland, etc.)
-        // Falls back to enigo on GNOME which triggers the "Allow Remote Interaction" dialog.
-        //
-        // Use Ctrl+Shift+V, not Ctrl+V: terminal emulators (GNOME Terminal, Konsole,
-        // Alacritty, kitty, foot, xterm) reserve Ctrl+V for other functions and only
-        // accept Ctrl+Shift+V as paste, so a plain Ctrl+V pasted nothing in a
-        // terminal. Ctrl+Shift+V also pastes correctly in mainstream GUI apps
-        // (browsers, editors, GTK/Qt text fields), so it is the single safe binding.
-        match Command::new("wtype")
-            .args([
-                "-M", "ctrl", "-M", "shift", "v", "-m", "shift", "-m", "ctrl",
-            ])
-            .status()
-        {
-            Ok(status) => status.success(),
-            Err(_) => false,
+        match tool {
+            TypingTool::Wtype => Command::new("wtype")
+                .args([
+                    "-M", "ctrl", "-M", "shift", "v", "-m", "shift", "-m", "ctrl",
+                ])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false),
+            TypingTool::Dotool => {
+                Self::run_dotool("key ctrl+shift+v\n") == ToolOutcome::Typed
+            }
+            TypingTool::Ydotool => {
+                // Raw keycodes from linux/input-event-codes.h — KEY_LEFTCTRL
+                // 29, KEY_LEFTSHIFT 42, KEY_V 47, with :1 press and :0
+                // release. Newer ydotool also accepts "ctrl+shift+v", but the
+                // keycode form is the one every version understands, and a
+                // version that rejects it simply falls through to the next
+                // tool.
+                Command::new("ydotool")
+                    .args(["key", "29:1", "42:1", "47:1", "47:0", "42:0", "29:0"])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            }
+            TypingTool::Xdotool => Command::new("xdotool")
+                .args(["key", "--clearmodifiers", "ctrl+shift+v"])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false),
+            // kwtype types text and cannot send a combo; the other two are not
+            // tools.
+            TypingTool::Kwtype | TypingTool::Auto | TypingTool::Enigo => false,
         }
     }
 
@@ -549,20 +797,26 @@ impl Default for TextInsertService {
 /// fatal (enigo via XWayland is the fallback) but on GNOME Wayland the fallback
 /// triggers a permission prompt, so it is worth telling the user.
 ///
-/// Detection is by `PATH` lookup rather than executing `wtype`: `wtype` has no
-/// `--version`/`--help` flag (it would interpret the argument as text to type),
-/// so running it to probe would mis-report and could emit a keystroke.
+/// Detection is by `PATH` lookup rather than by executing the tool: `wtype` has
+/// no `--version`/`--help` flag (it would interpret the argument as text to
+/// type), so running it to probe would mis-report and could emit a keystroke.
 #[cfg(target_os = "linux")]
-pub fn wtype_available() -> bool {
+pub fn tool_on_path(binary: &str) -> bool {
     let Some(paths) = std::env::var_os("PATH") else {
         return false;
     };
-    std::env::split_paths(&paths).any(|dir| dir.join("wtype").is_file())
+    std::env::split_paths(&paths).any(|dir| dir.join(binary).is_file())
 }
 
-/// On Linux/Wayland without `wtype`, emit a one-time advisory so the user knows
-/// why text insertion may prompt for permission and how to make it seamless.
-/// Called once at startup; no-op on X11, macOS, or when `wtype` is present.
+/// On Linux/Wayland with no usable typing tool installed, emit a one-time
+/// advisory so the user knows why text insertion may prompt for permission and
+/// how to make it seamless. Called once at startup; no-op on X11, macOS, or
+/// when a tool this session can actually use is present.
+///
+/// It names the tool that suits THIS session rather than always `wtype`.
+/// Telling a KDE or GNOME user to install `wtype` was advice that could never
+/// work: neither KWin nor Mutter implements the protocol it needs, so they
+/// would install it and land back on XWayland regardless (#110).
 ///
 /// The frontend listens for `text-insertion-advisory` and shows a toast. The
 /// insertion path itself has no `AppHandle`, so the advice is surfaced here at
@@ -574,13 +828,24 @@ pub fn emit_linux_typing_advisory(app: &tauri::AppHandle) {
     if crate::shortcuts::get_display_server() != crate::shortcuts::DisplayServer::Wayland {
         return;
     }
-    if wtype_available() {
+
+    let session = DesktopSession::detect();
+    let candidates: Vec<&'static str> = typing_tool_order(TypingTool::Auto, session)
+        .into_iter()
+        .take_while(|t| *t != TypingTool::Enigo)
+        .map(TextInsertService::tool_binary)
+        .collect();
+
+    if candidates.iter().any(|binary| tool_on_path(binary)) {
         return;
     }
 
-    let message = "For seamless text insertion on Wayland, install `wtype`. Without it, Thoth \
-                   falls back to XWayland, which on GNOME asks for the \"Allow Remote \
-                   Interaction\" permission each session.";
+    let message = format!(
+        "For seamless text insertion on Wayland, install one of: {}. Without one, Thoth falls \
+         back to XWayland, which on GNOME asks for the \"Allow Remote Interaction\" permission \
+         each session.",
+        candidates.join(", ")
+    );
     tracing::info!("{message}");
     if let Err(e) = app.emit("text-insertion-advisory", message) {
         tracing::error!("Failed to emit text-insertion-advisory event: {e}");
@@ -924,6 +1189,146 @@ pub fn apply_trailing_space(text: &str, enabled: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A KDE Wayland session.
+    fn kde() -> DesktopSession {
+        DesktopSession {
+            wayland: true,
+            kde: true,
+            gnome: false,
+        }
+    }
+
+    /// A GNOME Wayland session.
+    fn gnome() -> DesktopSession {
+        DesktopSession {
+            wayland: true,
+            kde: false,
+            gnome: true,
+        }
+    }
+
+    /// Sway, Hyprland, river — a Wayland compositor that implements the
+    /// virtual-keyboard protocol.
+    fn wlroots() -> DesktopSession {
+        DesktopSession {
+            wayland: true,
+            kde: false,
+            gnome: false,
+        }
+    }
+
+    fn x11() -> DesktopSession {
+        DesktopSession::default()
+    }
+
+    /// The point of the whole chain: `wtype` needs a protocol KWin and Mutter
+    /// do not implement, so offering it there is a dead end — the previous
+    /// behaviour, which then told the user to install it.
+    #[test]
+    fn wtype_is_not_offered_where_it_cannot_work() {
+        for session in [kde(), gnome(), x11()] {
+            let order = typing_tool_order(TypingTool::Auto, session);
+            assert!(
+                !order.contains(&TypingTool::Wtype),
+                "wtype must not be tried on {session:?}"
+            );
+        }
+        assert_eq!(
+            typing_tool_order(TypingTool::Auto, wlroots())[0],
+            TypingTool::Wtype,
+            "on a compositor that does implement it, wtype is still first"
+        );
+    }
+
+    /// KDE's own protocol first on KDE; X11's own tool first on X11.
+    #[test]
+    fn each_session_leads_with_its_native_tool() {
+        assert_eq!(typing_tool_order(TypingTool::Auto, kde())[0], TypingTool::Kwtype);
+        assert_eq!(typing_tool_order(TypingTool::Auto, x11())[0], TypingTool::Xdotool);
+        assert_eq!(
+            typing_tool_order(TypingTool::Auto, gnome())[0],
+            TypingTool::Dotool,
+            "GNOME has no native tool of its own, so it starts at the uinput pair"
+        );
+    }
+
+    /// `xdotool` speaks XTEST, so it is meaningless on a Wayland session.
+    #[test]
+    fn xdotool_is_not_offered_on_wayland() {
+        for session in [kde(), gnome(), wlroots()] {
+            assert!(!typing_tool_order(TypingTool::Auto, session).contains(&TypingTool::Xdotool));
+        }
+    }
+
+    /// Enigo is the safety net and must be reachable from every session, last.
+    #[test]
+    fn enigo_is_always_the_last_resort() {
+        for session in [kde(), gnome(), wlroots(), x11()] {
+            let order = typing_tool_order(TypingTool::Auto, session);
+            assert_eq!(*order.last().unwrap(), TypingTool::Enigo, "{session:?}");
+            assert_eq!(
+                order.iter().filter(|t| **t == TypingTool::Enigo).count(),
+                1,
+                "listed once, not once per branch"
+            );
+        }
+    }
+
+    /// Pinning moves a tool to the front. It does NOT empty the rest of the
+    /// chain: a pinned tool that is not installed must not leave the user
+    /// unable to type.
+    #[test]
+    fn pinning_reorders_rather_than_replaces() {
+        let order = typing_tool_order(TypingTool::Xdotool, wlroots());
+        assert_eq!(order[0], TypingTool::Xdotool);
+        assert!(order.contains(&TypingTool::Wtype), "the rest still follows");
+        assert_eq!(*order.last().unwrap(), TypingTool::Enigo);
+    }
+
+    /// Pinning a tool the session would have chosen anyway must not list it
+    /// twice — the second attempt would be a wasted process spawn per
+    /// insertion.
+    #[test]
+    fn pinning_the_native_tool_does_not_duplicate_it() {
+        let order = typing_tool_order(TypingTool::Kwtype, kde());
+        assert_eq!(order[0], TypingTool::Kwtype);
+        assert_eq!(
+            order.iter().filter(|t| **t == TypingTool::Kwtype).count(),
+            1
+        );
+    }
+
+    /// Pinning enigo is a legitimate choice — it means "stop trying external
+    /// tools" — and must not leave it listed twice either.
+    #[test]
+    fn enigo_can_be_pinned() {
+        let order = typing_tool_order(TypingTool::Enigo, wlroots());
+        assert_eq!(order[0], TypingTool::Enigo);
+        assert_eq!(order.iter().filter(|t| **t == TypingTool::Enigo).count(), 1);
+    }
+
+    /// Every tool the config can name has to appear when pinned, or the
+    /// setting silently does nothing.
+    #[test]
+    fn every_pinnable_tool_reaches_the_front() {
+        for tool in [
+            TypingTool::Wtype,
+            TypingTool::Kwtype,
+            TypingTool::Dotool,
+            TypingTool::Ydotool,
+            TypingTool::Xdotool,
+            TypingTool::Enigo,
+        ] {
+            for session in [kde(), gnome(), wlroots(), x11()] {
+                assert_eq!(
+                    typing_tool_order(tool, session)[0],
+                    tool,
+                    "{tool:?} pinned on {session:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn test_insertion_method_parse() {

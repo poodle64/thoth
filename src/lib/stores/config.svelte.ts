@@ -47,12 +47,28 @@ export interface TranscriptionConfig {
   voiceFormattingCommands: boolean;
   /** Whether to feed dictionary and canonical terms to the decoder as an initial prompt */
   vocabularyBias: boolean;
+  /** Which Linux tool types the text; 'auto' orders them by the session */
+  typingTool: TypingTool;
   /** Unload the transcription model after this many idle seconds; null means never */
   modelIdleUnloadSecs: number | null;
 }
 
 /** Recording mode options */
 export type RecordingMode = 'toggle' | 'hands_free';
+
+/**
+ * Which Linux tool synthesises keystrokes. Linux only; ignored on macOS.
+ *
+ * Mirrors the Rust `TypingTool` enum; serialised snake_case over IPC.
+ */
+export type TypingTool =
+  | 'auto'
+  | 'wtype'
+  | 'kwtype'
+  | 'dotool'
+  | 'ydotool'
+  | 'xdotool'
+  | 'enigo';
 
 /**
  * Key combination sent after a successful insertion.
@@ -211,6 +227,7 @@ interface ConfigRaw {
     sentence_case: boolean;
     voice_formatting_commands: boolean;
     vocabulary_bias: boolean;
+    typing_tool: TypingTool;
     model_idle_unload_secs: number | null;
   };
   shortcuts: {
@@ -285,6 +302,7 @@ function parseConfig(raw: ConfigRaw): Config {
       sentenceCase: raw.transcription.sentence_case ?? false,
       voiceFormattingCommands: raw.transcription.voice_formatting_commands ?? true,
       vocabularyBias: raw.transcription.vocabulary_bias ?? true,
+      typingTool: raw.transcription.typing_tool ?? 'auto',
       modelIdleUnloadSecs: raw.transcription.model_idle_unload_secs ?? null,
     },
     shortcuts: {
@@ -360,6 +378,7 @@ function serialiseConfig(config: Config): ConfigRaw {
       sentence_case: config.transcription.sentenceCase,
       voice_formatting_commands: config.transcription.voiceFormattingCommands,
       vocabulary_bias: config.transcription.vocabularyBias,
+      typing_tool: config.transcription.typingTool,
       model_idle_unload_secs: config.transcription.modelIdleUnloadSecs,
     },
     shortcuts: {
@@ -435,6 +454,7 @@ function getDefaultConfig(): Config {
       sentenceCase: false,
       voiceFormattingCommands: true,
       vocabularyBias: true,
+      typingTool: 'auto',
       modelIdleUnloadSecs: null,
     },
     // Shortcut defaults are NOT restated here. They live in ShortcutConfig::default()

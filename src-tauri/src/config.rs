@@ -283,6 +283,34 @@ pub enum AutoSubmit {
     CmdEnter,
 }
 
+/// Which external tool synthesises keystrokes on Linux.
+///
+/// Linux has no single working answer: `wtype` needs the
+/// `zwp_virtual_keyboard_manager_v1` protocol, which KWin and Mutter do not
+/// implement; `xdotool` is X11-only; `ydotool` and `dotool` go through
+/// `/dev/uinput` and work anywhere but need permission set up. So the chain is
+/// chosen per session, and pinned by the user when a session picks badly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TypingTool {
+    /// Order the tools by what the session is (Wayland/X11, KDE/GNOME/other).
+    #[default]
+    Auto,
+    /// Native Wayland, virtual-keyboard protocol. Not KDE or GNOME.
+    Wtype,
+    /// KDE's own Fake Input protocol.
+    Kwtype,
+    /// `/dev/uinput`, reads commands on stdin.
+    Dotool,
+    /// `/dev/uinput`, via its own daemon.
+    Ydotool,
+    /// X11 only.
+    Xdotool,
+    /// The in-process fallback. On Wayland it drives XWayland, which is what
+    /// raises GNOME's "Allow Remote Interaction" prompt.
+    Enigo,
+}
+
 /// Transcription engine configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -341,6 +369,13 @@ pub struct TranscriptionConfig {
     /// pulling its own words into unrelated audio.
     #[serde(default = "default_true")]
     pub vocabulary_bias: bool,
+    /// Which Linux tool types the text. Ignored on macOS.
+    ///
+    /// `Auto` orders the candidates by what the session is. Pinning one moves
+    /// it to the front of that order; it does NOT remove the rest, so a pinned
+    /// tool that is missing or fails still leaves the user able to dictate.
+    #[serde(default)]
+    pub typing_tool: TypingTool,
     /// Unload the transcription model after this many seconds with no use.
     ///
     /// `None` means never, which is the default: unloading trades the next
@@ -376,6 +411,7 @@ impl Default for TranscriptionConfig {
             sentence_case: false,
             voice_formatting_commands: true,
             vocabulary_bias: true,
+            typing_tool: TypingTool::default(),
             model_idle_unload_secs: None,
         }
     }
@@ -1504,6 +1540,7 @@ mod tests {
                 sentence_case: false,
                 voice_formatting_commands: true,
                 vocabulary_bias: false,
+                typing_tool: TypingTool::Ydotool,
                 model_idle_unload_secs: Some(900),
             },
             shortcuts: ShortcutConfig {
@@ -1553,6 +1590,7 @@ mod tests {
 
         assert!(!restored.transcription.auto_copy);
         assert!(restored.transcription.add_leading_space);
+        assert_eq!(restored.transcription.typing_tool, TypingTool::Ydotool);
 
         assert_eq!(restored.shortcuts.toggle_recording, "F12");
         assert!(restored.shortcuts.toggle_recording_alt.is_none());
