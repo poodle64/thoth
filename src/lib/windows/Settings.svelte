@@ -723,6 +723,44 @@
               <ModelManager />
             </div>
           </section>
+          <section class="flex flex-col">
+            <div class="mb-3">
+              <h2 class="text-base font-semibold text-foreground m-0">Memory</h2>
+              <p class="text-xs text-muted-foreground m-0">
+                What the loaded model does while you are not dictating
+              </p>
+            </div>
+            <div
+              class="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-3"
+            >
+              <div class="flex flex-1 flex-col gap-1">
+                <span class="text-sm font-medium text-foreground">Unload when idle</span>
+                <span class="text-xs text-muted-foreground"
+                  >Free the model's memory after a spell without dictation. The next dictation
+                  reloads it, which costs a few seconds.</span
+                >
+              </div>
+              <select
+                class="border-border bg-card text-foreground rounded-md border px-2 py-1 text-sm"
+                aria-label="Unload the model when idle"
+                value={String(configStore.transcription.modelIdleUnloadSecs ?? 'never')}
+                onchange={async (e) => {
+                  const chosen = e.currentTarget.value;
+                  configStore.updateTranscription(
+                    'modelIdleUnloadSecs',
+                    chosen === 'never' ? null : Number(chosen)
+                  );
+                  await configStore.save();
+                }}
+              >
+                <option value="never">Never</option>
+                <option value="300">After 5 minutes</option>
+                <option value="900">After 15 minutes</option>
+                <option value="1800">After 30 minutes</option>
+                <option value="3600">After 1 hour</option>
+              </select>
+            </div>
+          </section>
         </div>
       {:else if activePane === 'ai'}
         <div class="pane">

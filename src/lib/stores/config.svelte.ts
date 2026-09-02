@@ -45,6 +45,8 @@ export interface TranscriptionConfig {
   sentenceCase: boolean;
   /** Whether to convert spoken formatting commands ("new paragraph" / "new line") into line breaks */
   voiceFormattingCommands: boolean;
+  /** Unload the transcription model after this many idle seconds; null means never */
+  modelIdleUnloadSecs: number | null;
 }
 
 /** Recording mode options */
@@ -204,6 +206,7 @@ interface ConfigRaw {
     cleanup_punctuation: boolean;
     sentence_case: boolean;
     voice_formatting_commands: boolean;
+    model_idle_unload_secs: number | null;
   };
   shortcuts: {
     toggle_recording: string;
@@ -275,6 +278,7 @@ function parseConfig(raw: ConfigRaw): Config {
       cleanupPunctuation: raw.transcription.cleanup_punctuation ?? true,
       sentenceCase: raw.transcription.sentence_case ?? false,
       voiceFormattingCommands: raw.transcription.voice_formatting_commands ?? true,
+      modelIdleUnloadSecs: raw.transcription.model_idle_unload_secs ?? null,
     },
     shortcuts: {
       toggleRecording: raw.shortcuts.toggle_recording,
@@ -347,6 +351,7 @@ function serialiseConfig(config: Config): ConfigRaw {
       cleanup_punctuation: config.transcription.cleanupPunctuation,
       sentence_case: config.transcription.sentenceCase,
       voice_formatting_commands: config.transcription.voiceFormattingCommands,
+      model_idle_unload_secs: config.transcription.modelIdleUnloadSecs,
     },
     shortcuts: {
       toggle_recording: config.shortcuts.toggleRecording,
@@ -419,6 +424,7 @@ function getDefaultConfig(): Config {
       cleanupPunctuation: true,
       sentenceCase: false,
       voiceFormattingCommands: true,
+      modelIdleUnloadSecs: null,
     },
     // Shortcut defaults are NOT restated here. They live in ShortcutConfig::default()
     // in src-tauri/src/config.rs and arrive via get_default_config(); this placeholder

@@ -23,6 +23,7 @@ use parking_lot::Mutex;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 /// Transcription backend type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -118,6 +119,7 @@ pub fn init_whisper_transcription(model_path: String) -> Result<(), Error> {
 
     let mut guard = get_service().lock();
     *guard = Some(service);
+    touch_model_used();
 
     tracing::info!(
         "Whisper transcription service initialised ({} backend)",
@@ -136,6 +138,7 @@ pub fn init_parakeet_transcription(_model_dir: String) -> Result<(), Error> {
 
         let mut guard = get_service().lock();
         *guard = Some(service);
+        touch_model_used();
 
         tracing::info!("Parakeet transcription service initialised");
         Ok(())
@@ -156,6 +159,7 @@ pub fn init_fluidaudio_transcription() -> Result<(), Error> {
 
         let mut guard = get_service().lock();
         *guard = Some(service);
+        touch_model_used();
 
         // Write sentinel marker so check_model_downloaded() returns true
         if let Err(e) = fluidaudio::write_ready_marker() {
@@ -320,14 +324,23 @@ pub fn transcribe_file_with_priority(
     let _permit = gate::gate().acquire(priority);
 
     let mut guard = get_service().lock();
+    if guard.is_none() {
+        // The idle watcher may have unloaded between the caller's readiness
+        // check and here, and the control API's background jobs arrive without
+        // one at all. An unload the user opted into costs latency; it must
+        // never cost a dictation.
+        drop(guard);
+        tracing::info!("No transcription model loaded at transcribe time, reloading");
+        warmup_transcription();
+        guard = get_service().lock();
+    }
     let service = guard
         .as_mut()
         .ok_or_else(|| "Transcription service not initialised".to_string())?;
 
-    service
-        .transcribe(&wav_path)
-        .map_err(|e| e.to_string())
-        .map_err(Into::into)
+    let transcript = service.transcribe(&wav_path).map_err(|e| e.to_string())?;
+    touch_model_used();
+    Ok(transcript)
     // _permit drops here, releasing the model to the next waiter; _temp drops
     // too, deleting the temp file (if any) on both Ok and Err paths.
 }
@@ -425,6 +438,120 @@ fn audio_has_speech(path: &std::path::Path) -> Result<bool, String> {
 /// slightly further apart than that used to reach here concurrently.
 static WARMUP_LOCK: Mutex<()> = Mutex::new(());
 
+/// When the loaded model was last used, or loaded. `None` when none is loaded.
+static LAST_USED: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// How often the idle watcher looks at the clock and re-reads the config.
+///
+/// The timeout a user sets is minutes; a ten-second tick is finer than they can
+/// perceive, and a tick that unloads nothing is one elapsed-time comparison.
+const IDLE_UNLOAD_TICK: Duration = Duration::from_secs(10);
+
+/// Record that the loaded model has just been loaded or used.
+fn touch_model_used() {
+    *LAST_USED.lock() = Some(Instant::now());
+}
+
+/// Whether an idle model should be unloaded now.
+///
+/// Separate from the unload itself so the decision is testable without a
+/// multi-gigabyte model behind it. Each way of answering "no" is a real case:
+/// nothing is loaded, the model is still inside its timeout, or the user is
+/// recording right now and is about to need it.
+fn should_unload(last_used: Option<Instant>, timeout: Duration, recording: bool) -> bool {
+    if recording {
+        return false;
+    }
+    match last_used {
+        Some(used) => used.elapsed() >= timeout,
+        None => false,
+    }
+}
+
+/// What an unload attempt did.
+///
+/// Three outcomes rather than a bool because "did not unload" has two very
+/// different meanings, and only one of them is the safety property worth
+/// asserting: `Busy` says the model was being used and was deliberately left
+/// alone, `NotLoaded` says there was nothing there in the first place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnloadOutcome {
+    /// The model was dropped and its memory released.
+    Unloaded,
+    /// Nothing was loaded, so there was nothing to reclaim.
+    NotLoaded,
+    /// A warmup or a transcription holds the model; it was left loaded.
+    Busy,
+}
+
+/// Drop the loaded transcription model, freeing its weights.
+///
+/// Never waits on a lock: [`WARMUP_LOCK`] held means a model is being built and
+/// the service lock held means one is transcribing, and both are reasons to
+/// leave it alone until the next tick rather than to queue behind it. That is
+/// what stops an unload landing in the middle of a dictation.
+pub fn unload_transcription_model() -> UnloadOutcome {
+    let Some(_serialised) = WARMUP_LOCK.try_lock() else {
+        tracing::debug!("Idle unload skipped: a warmup is in flight");
+        return UnloadOutcome::Busy;
+    };
+    let Some(mut guard) = get_service().try_lock() else {
+        tracing::debug!("Idle unload skipped: the model is in use");
+        return UnloadOutcome::Busy;
+    };
+    if guard.take().is_none() {
+        return UnloadOutcome::NotLoaded;
+    }
+    // Lock order is service -> LAST_USED wherever both are held;
+    // `maybe_unload_idle_model` reads LAST_USED and releases it before calling in here.
+    *LAST_USED.lock() = None;
+    tracing::info!("Transcription model unloaded after idle timeout");
+    UnloadOutcome::Unloaded
+}
+
+/// Unload the model when it has been idle for at least `timeout`.
+pub fn maybe_unload_idle_model(timeout: Duration) -> UnloadOutcome {
+    let last_used = *LAST_USED.lock();
+    if !should_unload(last_used, timeout, crate::audio::is_recording()) {
+        return UnloadOutcome::NotLoaded;
+    }
+    unload_transcription_model()
+}
+
+/// The idle timeout a stored setting means.
+///
+/// `None` and `0` both mean never: the config file is hand-editable and `0` is
+/// what someone types for "off", which would otherwise read as "unload
+/// immediately, on every tick".
+fn idle_unload_timeout(setting: Option<u64>) -> Option<Duration> {
+    setting.filter(|secs| *secs > 0).map(Duration::from_secs)
+}
+
+/// The configured idle timeout, or `None` when the user has not asked for one.
+fn configured_idle_unload() -> Option<Duration> {
+    idle_unload_timeout(
+        crate::config::get_config()
+            .ok()?
+            .transcription
+            .model_idle_unload_secs,
+    )
+}
+
+/// Start the background watcher that unloads an idle model (#105).
+///
+/// Re-reads the config every tick, so switching the timeout on or off takes
+/// effect without restarting the app.
+pub fn spawn_idle_unload_watcher() {
+    std::thread::spawn(|| {
+        loop {
+            std::thread::sleep(IDLE_UNLOAD_TICK);
+            if let Some(timeout) = configured_idle_unload() {
+                maybe_unload_idle_model(timeout);
+            }
+        }
+    });
+}
+
 /// Eagerly initialise the transcription model in the background.
 /// Triggers Metal shader compilation so the first recording is instant.
 ///
@@ -457,6 +584,11 @@ pub fn warmup_transcription() {
     warmup_transcription_inner();
     let loaded = is_transcription_ready();
     WARMUP_FAILED.store(!loaded, Ordering::SeqCst);
+    if loaded {
+        // Start the idle clock at the load, so a model warmed and never used is
+        // still reclaimed.
+        touch_model_used();
+    }
     if !loaded {
         tracing::warn!("Warmup finished without loading a usable transcription model");
     }
@@ -665,4 +797,74 @@ pub fn is_fluidaudio_cached() -> bool {
     }
     #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The state the user is in for most of the day: nothing loaded, nothing to
+    /// reclaim. A `true` here would make the watcher log an unload every tick.
+    #[test]
+    fn nothing_loaded_is_not_unloadable() {
+        assert!(!should_unload(None, Duration::from_secs(1), false));
+    }
+
+    #[test]
+    fn a_model_inside_its_timeout_stays_loaded() {
+        let just_used = Instant::now();
+        assert!(!should_unload(Some(just_used), Duration::from_secs(600), false));
+    }
+
+    #[test]
+    fn a_model_past_its_timeout_is_unloaded() {
+        let long_ago = Instant::now() - Duration::from_secs(601);
+        assert!(should_unload(Some(long_ago), Duration::from_secs(600), false));
+    }
+
+    /// The dangerous case. The user holds the hotkey down for a five-minute
+    /// dictation, so the model is idle by the clock and about to be needed.
+    #[test]
+    fn an_idle_model_is_not_unloaded_while_recording() {
+        let long_ago = Instant::now() - Duration::from_secs(3600);
+        assert!(!should_unload(Some(long_ago), Duration::from_secs(600), true));
+    }
+
+    /// A timeout of zero would otherwise mean "unload immediately, every tick".
+    #[test]
+    fn unset_and_zero_timeouts_both_mean_never() {
+        assert_eq!(idle_unload_timeout(None), None);
+        assert_eq!(idle_unload_timeout(Some(0)), None);
+        assert_eq!(
+            idle_unload_timeout(Some(600)),
+            Some(Duration::from_secs(600))
+        );
+    }
+
+    /// The safety property, asserted where it can be proved deterministically.
+    /// `Busy` is only reachable through the `try_lock` branches, so a held
+    /// service lock returning it means the unload really did refuse rather than
+    /// finding nothing to do.
+    #[test]
+    fn an_in_flight_transcription_refuses_the_unload() {
+        let _held = get_service().lock();
+        assert_eq!(unload_transcription_model(), UnloadOutcome::Busy);
+    }
+
+    /// The other half of the same property: a warmup is mid-construction, so
+    /// the model about to be installed must not be unloaded out from under it.
+    #[test]
+    fn a_warmup_in_flight_refuses_the_unload() {
+        let _held = WARMUP_LOCK.lock();
+        assert_eq!(unload_transcription_model(), UnloadOutcome::Busy);
+    }
+
+    /// The shipped default must stay "never": unloading trades the next
+    /// dictation's latency for memory, so it is opt-in.
+    #[test]
+    fn the_default_config_never_unloads() {
+        let config = crate::config::TranscriptionConfig::default();
+        assert_eq!(config.model_idle_unload_secs, None);
+        assert_eq!(idle_unload_timeout(config.model_idle_unload_secs), None);
+    }
 }

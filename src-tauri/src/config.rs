@@ -335,6 +335,13 @@ pub struct TranscriptionConfig {
     /// macOS Dictation, Dragon and Talon.
     #[serde(default = "default_true")]
     pub voice_formatting_commands: bool,
+    /// Unload the transcription model after this many seconds with no use.
+    ///
+    /// `None` means never, which is the default: unloading trades the next
+    /// dictation's latency (a full model load, seconds) for memory the user may
+    /// not need back, so it is opt-in rather than a surprise.
+    #[serde(default)]
+    pub model_idle_unload_secs: Option<u64>,
 }
 
 fn default_true() -> bool {
@@ -362,6 +369,7 @@ impl Default for TranscriptionConfig {
             cleanup_punctuation: true,
             sentence_case: false,
             voice_formatting_commands: true,
+            model_idle_unload_secs: None,
         }
     }
 }
@@ -1436,6 +1444,7 @@ mod tests {
                 cleanup_punctuation: true,
                 sentence_case: false,
                 voice_formatting_commands: true,
+                model_idle_unload_secs: Some(900),
             },
             shortcuts: ShortcutConfig {
                 toggle_recording: "F12".to_string(),

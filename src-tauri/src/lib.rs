@@ -596,6 +596,11 @@ pub fn run() {
                 transcription::warmup_transcription();
             });
 
+            // Reclaim the model's memory once the user has stopped dictating.
+            // Off unless they set a timeout; the watcher re-reads the config
+            // each tick, so it does not need restarting when they do.
+            transcription::spawn_idle_unload_watcher();
+
             // Re-warm the model after wake-from-sleep (CoreML cache eviction)
             #[cfg(target_os = "macos")]
             platform::macos::register_wake_observer();
