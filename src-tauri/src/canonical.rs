@@ -420,8 +420,12 @@ fn window_compatible(ct: &CanonicalTerm, window_size: usize) -> bool {
 // Main entry-point
 // ---------------------------------------------------------------------------
 
-/// True when any gap *inside* the window carries something other than
-/// whitespace — a full stop, a comma, a dash.
+/// Punctuation that ends a clause. A hyphen and an apostrophe are deliberately
+/// absent: they join words rather than separating them, and treating them as a
+/// boundary would stop "port-colours" reaching the alias "port cullis".
+const CLAUSE_BREAKS: [char; 9] = ['.', ',', ';', ':', '!', '?', '\n', '\r', '\u{2026}'];
+
+/// True when a gap *inside* the window ends a clause.
 ///
 /// An alias is matched verbatim and may legitimately contain punctuation
 /// ("standard I. O"), so this gates only the fuzzy pass.  A fuzzy guess that
@@ -429,14 +433,14 @@ fn window_compatible(ct: &CanonicalTerm, window_size: usize) -> bool {
 /// "portcullis'll need": the two-word window "Portcullis You" scored 0.64
 /// against the alias "port cullis" — over the 0.60 floor — and the snap then
 /// deleted the pronoun along with the full stop.
-fn window_spans_punctuation(
+fn window_spans_clause_break(
     spans: &[Span<'_>],
     word_idx: &[usize],
     wi: usize,
     window_size: usize,
 ) -> bool {
     (wi + 1..wi + window_size).any(|w| match &spans[word_idx[w] - 1] {
-        Span::Gap(g) => g.chars().any(|c| !c.is_whitespace()),
+        Span::Gap(g) => g.chars().any(|c| CLAUSE_BREAKS.contains(&c)),
         Span::Word(_) => false,
     })
 }
@@ -501,11 +505,11 @@ fn snap_with_terms(terms: &[CanonicalTerm], text: &str) -> String {
                     continue;
                 }
 
-                // A fuzzy guess may not reach across a full stop, comma or dash;
-                // a registered alias may, because the user wrote it that way.
+                // A fuzzy guess may not reach across a clause break; a
+                // registered alias may, because the user wrote it that way.
                 if !exact_pass
                     && window_size > 1
-                    && window_spans_punctuation(&spans, &word_idx, wi, window_size)
+                    && window_spans_clause_break(&spans, &word_idx, wi, window_size)
                 {
                     continue;
                 }
@@ -620,10 +624,14 @@ const SUGGEST_MIN_LEN: usize = 5;
 /// Longest tail an ASR is likely to have hallucinated onto the end of a name.
 const SUGGEST_MAX_EXTRA: usize = 3;
 
-/// Tails that make an ordinary inflection of the term rather than a mis-hearing
-/// of it. "symlinks" is not a bad transcription of "symlink", and registering it
-/// as an alias would rewrite the plural away.
-const INFLECTIONS: [&str; 6] = ["s", "es", "d", "ed", "ing", "'s"];
+/// Tails that make another form of the term rather than a mis-hearing of it.
+/// "symlinks" is not a bad transcription of "symlink", and registering it as an
+/// alias would rewrite the plural away. The derivational ones are here because
+/// the extension arm below has no similarity floor, so without them a term that
+/// is also an English stem reports its own derivatives ("master" -> "mastery").
+/// No apostrophe forms: the tokeniser splits on the apostrophe, so a candidate
+/// is always alphanumeric.
+const WORD_FORM_TAILS: [&str; 8] = ["s", "es", "d", "ed", "ing", "y", "r", "er"];
 
 /// Characters of transcript to show either side of a candidate.
 const CONTEXT_RADIUS: usize = 55;
@@ -709,7 +717,7 @@ pub fn suggest_aliases(
             // A word form, not a mis-hearing.
             if candidate
                 .strip_prefix(term_key.as_str())
-                .is_some_and(|tail| INFLECTIONS.contains(&tail))
+                .is_some_and(|tail| WORD_FORM_TAILS.contains(&tail))
             {
                 continue;
             }
@@ -1423,16 +1431,32 @@ mod tests {
         assert!(s.context.contains("claudette"));
     }
 
-    /// An inflection is a different word form, not a mis-hearing; registering
-    /// it as an alias would rewrite the plural away.
+    /// Another form of the word is not a mis-hearing of it; registering one as
+    /// an alias would rewrite the plural away. The extension arm has no
+    /// similarity floor, so a term that is also an English stem would otherwise
+    /// report its own derivatives.
     #[test]
-    fn test_an_inflection_of_the_term_is_not_suggested() {
+    fn test_another_form_of_the_term_is_not_suggested() {
         let texts = vec![
             "a symlink here and a symlink there".to_string(),
             "the symlinks are fine".to_string(),
             "he symlinks them, having symlinked one already".to_string(),
         ];
         assert!(suggest_aliases(&texts, &suggest_terms(), 2).is_empty());
+
+        let master = vec![CanonicalTerm {
+            term: "master".to_string(),
+            aliases: vec![],
+            policy: SnapPolicy::AliasOnly,
+            max_words: 3,
+            threshold: None,
+        }];
+        let texts = vec![
+            "master master master master".to_string(),
+            "mastery of it".to_string(),
+            "mastery again".to_string(),
+        ];
+        assert!(suggest_aliases(&texts, &master, 2).is_empty());
     }
 
     /// A spelling the user already registered is not proposed back to them, and
@@ -1484,9 +1508,14 @@ mod tests {
             // Cyrillic and an accented capital, each preceded by a space so the
             // tokeniser meets them at the start of a run. Both shapes appear in
             // real transcripts — this machine's history holds three.
+            //
+            // Against an explicit term list, never the installed registry:
+            // `apply_canonical` seeds and WRITES `~/.thoth/canonical_terms.json`
+            // when it finds none, which is not a thing `cargo test` may do.
+            let terms = vec![portcullis_term(SnapPolicy::Phonetic)];
             let out: Vec<String> = [" Привет мир", "Wrote to Émile.", "· ñandú"]
                 .iter()
-                .map(|t| apply_canonical(t))
+                .map(|t| run_with_registry(terms.clone(), t))
                 .collect();
             let _ = tx.send(out);
         });
@@ -1578,6 +1607,17 @@ mod tests {
         assert_eq!(
             run_with_registry(terms, "unlock portcullus. It's fine"),
             "unlock portcullis. It's fine"
+        );
+    }
+
+    /// A hyphen joins words rather than ending a clause, so the guard must not
+    /// treat it as one.
+    #[test]
+    fn test_a_hyphenated_fuzzy_variant_still_snaps() {
+        let terms = vec![portcullis_term(SnapPolicy::Phonetic)];
+        assert_eq!(
+            run_with_registry(terms, "lower the port-colours now"),
+            "lower the portcullis now"
         );
     }
 

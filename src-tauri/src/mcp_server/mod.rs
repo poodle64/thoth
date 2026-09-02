@@ -385,8 +385,11 @@ impl ThothMcp {
                 mutation_ack("remove", index, count)
             }
             "suggest" => {
+                // Clamped: SQLite reads a negative LIMIT as "no limit", so an
+                // unchecked -1 would pull the whole history into memory.
+                let limit = p.history_limit.unwrap_or(2000).clamp(1, 100_000);
                 let suggestions = crate::canonical::suggest_aliases_from_history(
-                    p.history_limit.unwrap_or(2000),
+                    limit,
                     p.min_occurrences.unwrap_or(2),
                 )
                 .map_err(|e| core_err(e.to_string()))?;

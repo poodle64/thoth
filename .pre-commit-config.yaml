@@ -70,7 +70,10 @@ repos:
       # The frontend had three gates and Rust had none, so `cargo fmt --all
       # --check` — a required CI step — was the first thing to see the drift.
       # It sat red across six commits on 02/09/2026 for thirty formatting
-      # diffs. Same command CI runs, so the two cannot disagree.
+      # diffs. Same command CI runs, though not necessarily the same rustfmt:
+      # CI floats to whatever `stable` is that day and there is no
+      # rust-toolchain.toml, so a rustfmt release that changes output can still
+      # part the two.
       - id: cargo-fmt
         name: rust - cargo fmt
         entry: cargo fmt --manifest-path src-tauri/Cargo.toml --all
