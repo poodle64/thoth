@@ -297,21 +297,25 @@ fn output_form(canonical_term: &str, matched_span: &str) -> String {
 // Matching
 // ---------------------------------------------------------------------------
 
-/// True when `candidate` should snap to `ct`.
+/// True when `candidate` is the term itself or one of its registered aliases
+/// (case-insensitive).  Independent of policy — an alias the user typed is a
+/// literal instruction, not a guess, which is why the sweep tries every window
+/// for one of these before it tries any fuzzy match.
+fn matches_exact(candidate: &str, ct: &CanonicalTerm) -> bool {
+    let cand_lc = candidate.to_lowercase();
+    cand_lc == ct.term.to_lowercase() || ct.aliases.iter().any(|a| a.to_lowercase() == cand_lc)
+}
+
+/// True when `candidate` matches `ct` by the policy's fuzzy gate.
 ///
 /// For multi-word candidates, fuzzy policies compare the candidate against
 /// **aliases of the same word count** (e.g. "port colours" ~ alias "port cullis")
 /// rather than against the single-word term directly.  This prevents stop-word
 /// inflation: DoubleMetaphone encodes "portcolours is" the same as "portcolours",
 /// so phrase-level fuzzy must anchor on same-shape comparators.
-fn matches_term(candidate: &str, ct: &CanonicalTerm) -> bool {
+fn matches_fuzzy(candidate: &str, ct: &CanonicalTerm) -> bool {
     let cand_lc = candidate.to_lowercase();
     let term_lc = ct.term.to_lowercase();
-
-    // Exact short-circuit: applies for ALL policies.
-    if cand_lc == term_lc || ct.aliases.iter().any(|a| a.to_lowercase() == cand_lc) {
-        return true;
-    }
 
     match ct.policy {
         SnapPolicy::AliasOnly => false,
@@ -410,6 +414,27 @@ fn window_compatible(ct: &CanonicalTerm, window_size: usize) -> bool {
 // Main entry-point
 // ---------------------------------------------------------------------------
 
+/// True when any gap *inside* the window carries something other than
+/// whitespace — a full stop, a comma, a dash.
+///
+/// An alias is matched verbatim and may legitimately contain punctuation
+/// ("standard I. O"), so this gates only the fuzzy pass.  A fuzzy guess that
+/// reaches across a clause boundary is how "Portcullis. You'll need" became
+/// "portcullis'll need": the two-word window "Portcullis You" scored 0.64
+/// against the alias "port cullis" — over the 0.60 floor — and the snap then
+/// deleted the pronoun along with the full stop.
+fn window_spans_punctuation(
+    spans: &[Span<'_>],
+    word_idx: &[usize],
+    wi: usize,
+    window_size: usize,
+) -> bool {
+    (wi + 1..wi + window_size).any(|w| match &spans[word_idx[w] - 1] {
+        Span::Gap(g) => g.chars().any(|c| !c.is_whitespace()),
+        Span::Word(_) => false,
+    })
+}
+
 /// Apply canonical-term snapping to `text`.
 ///
 /// Scans the text with a sliding n-gram window (largest window first) and
@@ -417,8 +442,16 @@ fn window_compatible(ct: &CanonicalTerm, window_size: usize) -> bool {
 pub fn apply_canonical(text: &str) -> String {
     let registry = get_registry();
     let guard = registry.read();
+    snap_with_terms(&guard.terms, text)
+}
 
-    if guard.terms.is_empty() {
+/// The matching sweep itself, over an explicit term list.
+///
+/// Separated from [`apply_canonical`] so the tests drive the real algorithm
+/// rather than a copy of it: the test module kept its own transcription of this
+/// loop, which meant a change here was not exercised by any of them.
+fn snap_with_terms(terms: &[CanonicalTerm], text: &str) -> String {
+    if terms.is_empty() {
         return text.to_string();
     }
 
@@ -431,8 +464,7 @@ pub fn apply_canonical(text: &str) -> String {
     }
 
     // Maximum window size across all terms (capped at the largest registered max_words).
-    let global_max_window = guard
-        .terms
+    let global_max_window = terms
         .iter()
         .map(|t| t.max_words as usize)
         .max()
@@ -451,56 +483,76 @@ pub fn apply_canonical(text: &str) -> String {
         // Try windows from largest to smallest (longest match wins).
         let max_window = global_max_window.min(n_words - wi);
 
-        for window_size in (1..=max_window).rev() {
-            // Check that none of these words have been consumed already.
-            if (wi..wi + window_size).any(|w| consumed[w]) {
-                continue;
-            }
-
-            // Build the candidate string from words[wi .. wi+window_size],
-            // joined by single spaces (normalised for matching).
-            let candidate_words: Vec<&str> = (wi..wi + window_size)
-                .map(|w| match &spans[word_idx[w]] {
-                    Span::Word(s) => *s,
-                    Span::Gap(_) => "",
-                })
-                .collect();
-            let candidate = candidate_words.join(" ");
-            let cand_lc = candidate.to_lowercase();
-
-            // Length guard: skip very short candidates.
-            if cand_lc.len() < 4 {
-                continue;
-            }
-
-            // Find the first matching term whose word-count is compatible with this window.
-            let snap = guard
-                .terms
-                .iter()
-                .find(|ct| window_compatible(ct, window_size) && matches_term(&candidate, ct));
-
-            if let Some(ct) = snap {
-                // The candidate matched this term.  Build the matched-span string
-                // (original chars, preserving capitalisation of the first word).
-                let first_word = candidate_words[0];
-                let out = output_form(&ct.term, first_word);
-
-                // Mark the span of the first word in `spans` for replacement.
-                replacements[word_idx[wi]] = Some(out);
-
-                // Mark all words in the window as consumed; for words 2..N, mark their
-                // span AND the preceding gap span for deletion (set to empty string).
-                for w in wi..wi + window_size {
-                    consumed[w] = true;
-                    if w > wi {
-                        // Suppress the gap between word wi and word w, and the word itself.
-                        let gap_span_idx = word_idx[w] - 1;
-                        replacements[gap_span_idx] = Some(String::new());
-                        replacements[word_idx[w]] = Some(String::new());
-                    }
+        // Exact first, fuzzy second — across ALL window sizes, not within one.
+        // A longer FUZZY window used to beat a shorter EXACT one, which is how a
+        // correctly-spelled term followed by another word ("Portcullis. You'll")
+        // lost that word to a two-word phonetic guess.  Longest-match-wins still
+        // holds within each pass.
+        for exact_pass in [true, false] {
+            for window_size in (1..=max_window).rev() {
+                // Check that none of these words have been consumed already.
+                if (wi..wi + window_size).any(|w| consumed[w]) {
+                    continue;
                 }
 
-                continue 'outer;
+                // A fuzzy guess may not reach across a full stop, comma or dash;
+                // a registered alias may, because the user wrote it that way.
+                if !exact_pass
+                    && window_size > 1
+                    && window_spans_punctuation(&spans, &word_idx, wi, window_size)
+                {
+                    continue;
+                }
+
+                // Build the candidate string from words[wi .. wi+window_size],
+                // joined by single spaces (normalised for matching).
+                let candidate_words: Vec<&str> = (wi..wi + window_size)
+                    .map(|w| match &spans[word_idx[w]] {
+                        Span::Word(s) => *s,
+                        Span::Gap(_) => "",
+                    })
+                    .collect();
+                let candidate = candidate_words.join(" ");
+                let cand_lc = candidate.to_lowercase();
+
+                // Length guard: skip very short candidates.
+                if cand_lc.len() < 4 {
+                    continue;
+                }
+
+                // Find the first matching term whose word-count is compatible with this window.
+                let snap = terms.iter().find(|ct| {
+                    window_compatible(ct, window_size)
+                        && if exact_pass {
+                            matches_exact(&candidate, ct)
+                        } else {
+                            matches_fuzzy(&candidate, ct)
+                        }
+                });
+
+                if let Some(ct) = snap {
+                    // The candidate matched this term.  Build the matched-span string
+                    // (original chars, preserving capitalisation of the first word).
+                    let first_word = candidate_words[0];
+                    let out = output_form(&ct.term, first_word);
+
+                    // Mark the span of the first word in `spans` for replacement.
+                    replacements[word_idx[wi]] = Some(out);
+
+                    // Mark all words in the window as consumed; for words 2..N, mark their
+                    // span AND the preceding gap span for deletion (set to empty string).
+                    for w in wi..wi + window_size {
+                        consumed[w] = true;
+                        if w > wi {
+                            // Suppress the gap between word wi and word w, and the word itself.
+                            let gap_span_idx = word_idx[w] - 1;
+                            replacements[gap_span_idx] = Some(String::new());
+                            replacements[word_idx[w]] = Some(String::new());
+                        }
+                    }
+
+                    continue 'outer;
+                }
             }
         }
     }
@@ -593,73 +645,10 @@ mod tests {
     // Helpers to build an in-memory registry without touching the filesystem
     // -------------------------------------------------------------------------
 
+    /// Run the real sweep against an explicit term list, bypassing the global
+    /// on-disk registry.  This is the production path, not a copy of it.
     fn run_with_registry(terms: Vec<CanonicalTerm>, text: &str) -> String {
-        // Build spans and run the matching logic directly, bypassing global state.
-        let spans = tokenise(text);
-        let word_idx = word_indices(&spans);
-        let n_words = word_idx.len();
-
-        if n_words == 0 || terms.is_empty() {
-            return text.to_string();
-        }
-
-        let global_max_window = terms
-            .iter()
-            .map(|t| t.max_words as usize)
-            .max()
-            .unwrap_or(1);
-        let mut consumed = vec![false; n_words];
-        let mut replacements: Vec<Option<String>> = vec![None; spans.len()];
-
-        'outer: for wi in 0..n_words {
-            if consumed[wi] {
-                continue;
-            }
-            let max_window = global_max_window.min(n_words - wi);
-            for window_size in (1..=max_window).rev() {
-                if (wi..wi + window_size).any(|w| consumed[w]) {
-                    continue;
-                }
-                let candidate_words: Vec<&str> = (wi..wi + window_size)
-                    .map(|w| match &spans[word_idx[w]] {
-                        Span::Word(s) => *s,
-                        Span::Gap(_) => "",
-                    })
-                    .collect();
-                let candidate = candidate_words.join(" ");
-                if candidate.to_lowercase().len() < 4 {
-                    continue;
-                }
-                let snap = terms
-                    .iter()
-                    .find(|ct| window_compatible(ct, window_size) && matches_term(&candidate, ct));
-                if let Some(ct) = snap {
-                    let first_word = candidate_words[0];
-                    let out = output_form(&ct.term, first_word);
-                    replacements[word_idx[wi]] = Some(out);
-                    for w in wi..wi + window_size {
-                        consumed[w] = true;
-                        if w > wi {
-                            let gap_span_idx = word_idx[w] - 1;
-                            replacements[gap_span_idx] = Some(String::new());
-                            replacements[word_idx[w]] = Some(String::new());
-                        }
-                    }
-                    continue 'outer;
-                }
-            }
-        }
-
-        let mut out = String::with_capacity(text.len());
-        for (i, span) in spans.iter().enumerate() {
-            match &replacements[i] {
-                Some(s) => out.push_str(s),
-                None => match span {
-                    Span::Word(s) | Span::Gap(s) => out.push_str(s),
-                },
-            }
-        }
-        out
+        snap_with_terms(&terms, text)
     }
 
     fn portcullis_term(policy: SnapPolicy) -> CanonicalTerm {
@@ -1185,6 +1174,100 @@ mod tests {
         assert_eq!(
             result, "Oh sí.",
             "non-matching non-ASCII text must pass through unchanged"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // A fuzzy window must not eat the word after a correctly-spelled term
+    // -------------------------------------------------------------------------
+    //
+    // Measured against the operator's own history on 03/09/2026: 33 dictations
+    // since June had a word silently deleted this way, always after a term whose
+    // policy is fuzzy — "Portcullis. You'll need to run that" was stored as
+    // "portcullis'll need to run that". The two-word window "Portcullis You"
+    // scored 0.64 against the alias "port cullis", cleared the 0.60 floor, and
+    // the snap consumed the pronoun and the full stop with it.
+
+    /// The exact single-word term must win over a longer fuzzy window.
+    ///
+    /// Each of these is already correct as dictated, so the text must come back
+    /// untouched; before the fix each lost the word after the term.
+    #[test]
+    fn test_a_fuzzy_window_does_not_swallow_the_following_word() {
+        let terms = vec![portcullis_term(SnapPolicy::Phonetic)];
+        for (input, expected) in [
+            // The alias form still snaps, and the pronoun after it survives.
+            (
+                "removed from port cullis. You'll need to run that",
+                "removed from portcullis. You'll need to run that",
+            ),
+            (
+                "removed from Portcullis. You'll need to run that",
+                "removed from Portcullis. You'll need to run that",
+            ),
+            (
+                "the container for Portcullis. It's not going to have it",
+                "the container for Portcullis. It's not going to have it",
+            ),
+            (
+                "if you look in Portcullis, you'll see it",
+                "if you look in Portcullis, you'll see it",
+            ),
+            (
+                "I still need to unlock Portcullis. I'm the only one",
+                "I still need to unlock Portcullis. I'm the only one",
+            ),
+        ] {
+            assert_eq!(run_with_registry(terms.clone(), input), expected);
+        }
+    }
+
+    /// Same defect one step removed: the first word is itself only a fuzzy
+    /// match, so the exact pass cannot rescue it and the clause boundary must.
+    #[test]
+    fn test_a_fuzzy_window_does_not_reach_across_a_clause_boundary() {
+        let terms = vec![portcullis_term(SnapPolicy::Phonetic)];
+        assert_eq!(
+            run_with_registry(terms.clone(), "unlock portcullus. You'll see"),
+            "unlock portcullis. You'll see",
+            "the term must still snap, and the pronoun must survive"
+        );
+        assert_eq!(
+            run_with_registry(terms.clone(), "unlock portcullus, you'll see"),
+            "unlock portcullis, you'll see"
+        );
+        // Measured at HEAD: this one came back as "unlock portcullis's fine".
+        assert_eq!(
+            run_with_registry(terms, "unlock portcullus. It's fine"),
+            "unlock portcullis. It's fine"
+        );
+    }
+
+    /// The guard is on the fuzzy pass only: an alias the user registered with
+    /// punctuation in it is still matched verbatim across that punctuation.
+    #[test]
+    fn test_an_exact_alias_still_matches_across_punctuation() {
+        let terms = vec![CanonicalTerm {
+            term: "stdio".to_string(),
+            aliases: vec!["standard I O".to_string()],
+            policy: SnapPolicy::AliasOnly,
+            max_words: 3,
+            threshold: None,
+        }];
+        assert_eq!(
+            run_with_registry(terms, "over standard I. O transport"),
+            "over stdio transport"
+        );
+    }
+
+    /// A genuine multi-word variant with no punctuation in it still snaps — the
+    /// fix must not cost the fuzzy phrase matching the feature exists for.
+    #[test]
+    fn test_a_multi_word_fuzzy_variant_still_snaps() {
+        let terms = vec![portcullis_term(SnapPolicy::Phonetic)];
+        assert_eq!(
+            run_with_registry(terms, "lower the port colours now"),
+            "lower the portcullis now"
         );
     }
 }
