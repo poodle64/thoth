@@ -307,8 +307,7 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, Error> {
         // A warmup that failed on a model which has already loaded here is a
         // reload that went wrong, not proof that nothing can load (#105): the
         // pipeline retries it rather than refusing to record until a restart.
-        let nothing_can_load =
-            transcription::warmup_failed() && !transcription::model_has_loaded();
+        let nothing_can_load = transcription::warmup_failed() && !transcription::model_has_loaded();
         if nothing_can_load || !transcription::download::check_model_downloaded(None) {
             PIPELINE_RUNNING.store(false, Ordering::SeqCst);
             tracing::warn!("Pipeline: No usable transcription model, blocking recording");

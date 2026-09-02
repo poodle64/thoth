@@ -990,13 +990,22 @@ mod tests {
     fn prune_never_expires_an_in_flight_job() {
         let past_ttl = JOB_TTL + Duration::from_secs(60);
         let mut jobs = HashMap::new();
-        jobs.insert("running".to_string(), aged_job("processing", past_ttl, None));
+        jobs.insert(
+            "running".to_string(),
+            aged_job("processing", past_ttl, None),
+        );
         jobs.insert("waiting".to_string(), aged_job("queued", past_ttl, None));
-        jobs.insert("done".to_string(), aged_job("completed", past_ttl, Some("x")));
+        jobs.insert(
+            "done".to_string(),
+            aged_job("completed", past_ttl, Some("x")),
+        );
 
         prune_jobs(&mut jobs, Instant::now());
 
-        assert_eq!(jobs["running"].status, "processing", "a running job expired");
+        assert_eq!(
+            jobs["running"].status, "processing",
+            "a running job expired"
+        );
         assert_eq!(jobs["waiting"].status, "queued", "a queued job expired");
         assert_eq!(
             jobs["done"].status, JOB_STATUS_EXPIRED,
@@ -1035,13 +1044,22 @@ mod tests {
         {
             let mut guard = get_jobs().await;
             let jobs = guard.as_mut().unwrap();
-            jobs.insert(running.clone(), aged_job("processing", Duration::from_secs(1), None));
-            jobs.insert(done.clone(), aged_job("completed", Duration::from_secs(1), Some("x")));
+            jobs.insert(
+                running.clone(),
+                aged_job("processing", Duration::from_secs(1), None),
+            );
+            jobs.insert(
+                done.clone(),
+                aged_job("completed", Duration::from_secs(1), Some("x")),
+            );
         }
 
         let active = active_transcribe_jobs().await;
         assert!(active.contains(&running), "a processing job was not listed");
-        assert!(!active.contains(&done), "a completed job was listed as active");
+        assert!(
+            !active.contains(&done),
+            "a completed job was listed as active"
+        );
 
         let mut guard = get_jobs().await;
         let jobs = guard.as_mut().unwrap();
@@ -1057,7 +1075,11 @@ mod tests {
         let mut jobs = HashMap::new();
         jobs.insert(
             "running".to_string(),
-            aged_job("processing", Duration::from_secs(MAX_JOBS as u64 + 100), None),
+            aged_job(
+                "processing",
+                Duration::from_secs(MAX_JOBS as u64 + 100),
+                None,
+            ),
         );
         jobs.insert(
             "waiting".to_string(),

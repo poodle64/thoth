@@ -217,7 +217,9 @@ mod tests {
         );
 
         assert!(
-            !releases.iter().any(|r| r.version.eq_ignore_ascii_case("unreleased")),
+            !releases
+                .iter()
+                .any(|r| r.version.eq_ignore_ascii_case("unreleased")),
             "unreleased work must never be shown as what changed"
         );
 
@@ -296,7 +298,8 @@ mod tests {
     /// A bullet wrapped over several lines is one item, not one per line.
     #[test]
     fn a_wrapped_bullet_is_one_item() {
-        let source = "## [2026.1.0] - 2026-01-01\n\n### Fixed\n\n- **Lead.** First line\n  second line\n";
+        let source =
+            "## [2026.1.0] - 2026-01-01\n\n### Fixed\n\n- **Lead.** First line\n  second line\n";
         let releases = parse(source);
         let items = &releases[0].sections[0].items;
         assert_eq!(items.len(), 1);
@@ -320,7 +323,13 @@ mod tests {
         let source = "## [1.0.0] - Swift Version (Archived)\n\nOriginal implementation.\n";
         let releases = parse(source);
         assert_eq!(releases[0].version, "1.0.0");
-        assert_eq!(releases[0].date.as_deref(), Some("Swift Version (Archived)"));
-        assert_eq!(releases[0].sections[0].items[0].body, "Original implementation.");
+        assert_eq!(
+            releases[0].date.as_deref(),
+            Some("Swift Version (Archived)")
+        );
+        assert_eq!(
+            releases[0].sections[0].items[0].body,
+            "Original implementation."
+        );
     }
 }

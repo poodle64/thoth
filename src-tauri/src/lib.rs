@@ -520,9 +520,7 @@ pub fn run() {
                 let fresh_install = config::get_config()
                     .map(|c| c.general.last_run_version.is_none())
                     .unwrap_or(false);
-                if fresh_install
-                    && let Err(e) = config::record_whats_new_seen(&current)
-                {
+                if fresh_install && let Err(e) = config::record_whats_new_seen(&current) {
                     tracing::warn!("Failed to record initial what's-new version: {}", e);
                 }
 

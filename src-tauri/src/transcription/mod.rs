@@ -597,7 +597,6 @@ pub fn warmup_transcription() {
         return;
     }
 
-
     // Clear the flag so an in-progress retry is treated optimistically; if this
     // attempt also fails to produce a service, it is set again below.
     WARMUP_FAILED.store(false, Ordering::SeqCst);
@@ -833,13 +832,21 @@ mod tests {
     #[test]
     fn a_model_inside_its_timeout_stays_loaded() {
         let just_used = Instant::now();
-        assert!(!should_unload(Some(just_used), Duration::from_secs(600), false));
+        assert!(!should_unload(
+            Some(just_used),
+            Duration::from_secs(600),
+            false
+        ));
     }
 
     #[test]
     fn a_model_past_its_timeout_is_unloaded() {
         let long_ago = Instant::now() - Duration::from_secs(601);
-        assert!(should_unload(Some(long_ago), Duration::from_secs(600), false));
+        assert!(should_unload(
+            Some(long_ago),
+            Duration::from_secs(600),
+            false
+        ));
     }
 
     /// The dangerous case. The user holds the hotkey down for a five-minute
@@ -848,7 +855,11 @@ mod tests {
     #[test]
     fn an_idle_model_is_not_unloaded_while_recording() {
         let long_ago = Instant::now() - Duration::from_secs(3600);
-        assert!(!should_unload(Some(long_ago), Duration::from_secs(600), true));
+        assert!(!should_unload(
+            Some(long_ago),
+            Duration::from_secs(600),
+            true
+        ));
     }
 
     /// A timeout of zero would otherwise mean "unload immediately, every tick".

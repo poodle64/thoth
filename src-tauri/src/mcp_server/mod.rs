@@ -500,7 +500,9 @@ impl ThothMcp {
         // throughout. Without this an agent that had just submitted a job and
         // asked what Thoth was doing was told "nothing".
         let state = if state == crate::pipeline::PipelineState::Idle
-            && !crate::control_api::active_transcribe_jobs().await.is_empty()
+            && !crate::control_api::active_transcribe_jobs()
+                .await
+                .is_empty()
         {
             crate::pipeline::PipelineState::Transcribing
         } else {

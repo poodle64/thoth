@@ -299,9 +299,18 @@ mod tests {
         let _ = get_recording_device(None);
         let resolve = start.elapsed();
 
-        println!("default_input_config, first call : {:>8.3} ms", first.as_secs_f64() * 1000.0);
-        println!("default_input_config, subsequent : {:>8.3} ms (mean of {REPEATS})", repeats.as_secs_f64() * 1000.0);
-        println!("get_recording_device(None)       : {:>8.3} ms", resolve.as_secs_f64() * 1000.0);
+        println!(
+            "default_input_config, first call : {:>8.3} ms",
+            first.as_secs_f64() * 1000.0
+        );
+        println!(
+            "default_input_config, subsequent : {:>8.3} ms (mean of {REPEATS})",
+            repeats.as_secs_f64() * 1000.0
+        );
+        println!(
+            "get_recording_device(None)       : {:>8.3} ms",
+            resolve.as_secs_f64() * 1000.0
+        );
     }
 
     #[test]

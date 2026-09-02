@@ -569,8 +569,8 @@ mod tests {
     #[test]
     #[serial_test::serial(writer_thread)]
     fn the_writer_thread_publishes_live_speech() {
-        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/speech_no_custom_terms.wav");
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/speech_no_custom_terms.wav");
         let pcm: Vec<f32> = hound::WavReader::open(&fixture)
             .unwrap()
             .into_samples::<i16>()
@@ -583,8 +583,7 @@ mod tests {
         let writer_path = path.to_path_buf();
         // 16kHz mono in, 16kHz mono out: no resampling, so the gate sees the
         // fixture unchanged and the assertion is about the gate, not rubato.
-        let handle =
-            std::thread::spawn(move || write_audio_to_file(rx, &writer_path, 16_000, 1));
+        let handle = std::thread::spawn(move || write_audio_to_file(rx, &writer_path, 16_000, 1));
 
         for block in pcm.chunks(512) {
             tx.send(RecordingMsg::Samples(block.to_vec())).unwrap();

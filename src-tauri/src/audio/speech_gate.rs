@@ -23,8 +23,8 @@
 //! why the pure-Rust Silero crate measured as unusable.
 
 use super::vad::VadFrameDuration;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use webrtc_vad::{SampleRate, Vad, VadMode};
 
 /// Sample rate the gate runs at. The capture writer resamples to this before

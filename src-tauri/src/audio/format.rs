@@ -268,9 +268,7 @@ mod tests {
             for _ in 0..CHUNKS_PER_ROUND {
                 let input = InterleavedSlice::new(&chunk, 1, CHUNK).unwrap();
                 let mut output = InterleavedSlice::new_mut(&mut out, 1, max_out).unwrap();
-                let (_, frames) = fft
-                    .process_into_buffer(&input, &mut output, None)
-                    .unwrap();
+                let (_, frames) = fft.process_into_buffer(&input, &mut output, None).unwrap();
                 fft_frames += frames;
             }
             fft_total += start.elapsed();

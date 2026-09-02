@@ -246,12 +246,16 @@ mod tests {
     /// reason the flag is worth reading rather than typing.
     #[test]
     fn the_multilingual_boundary_is_one_token_wide() {
-        assert!(!parse(&header_bytes(51864, 12, 80, 1))
-            .unwrap()
-            .is_multilingual());
-        assert!(parse(&header_bytes(51865, 12, 80, 1))
-            .unwrap()
-            .is_multilingual());
+        assert!(
+            !parse(&header_bytes(51864, 12, 80, 1))
+                .unwrap()
+                .is_multilingual()
+        );
+        assert!(
+            parse(&header_bytes(51865, 12, 80, 1))
+                .unwrap()
+                .is_multilingual()
+        );
     }
 
     #[test]

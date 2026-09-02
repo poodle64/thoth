@@ -133,11 +133,7 @@ pub fn typing_tool_order(preferred: TypingTool, session: DesktopSession) -> Vec<
             vec![TypingTool::Dotool, TypingTool::Ydotool]
         } else {
             // Sway, Hyprland, river and friends do implement virtual-keyboard.
-            vec![
-                TypingTool::Wtype,
-                TypingTool::Dotool,
-                TypingTool::Ydotool,
-            ]
+            vec![TypingTool::Wtype, TypingTool::Dotool, TypingTool::Ydotool]
         }
     } else {
         vec![TypingTool::Xdotool, TypingTool::Ydotool]
@@ -659,9 +655,7 @@ impl TextInsertService {
                 .status()
                 .map(|s| s.success())
                 .unwrap_or(false),
-            TypingTool::Dotool => {
-                Self::run_dotool("key ctrl+shift+v\n") == ToolOutcome::Typed
-            }
+            TypingTool::Dotool => Self::run_dotool("key ctrl+shift+v\n") == ToolOutcome::Typed,
             TypingTool::Ydotool => {
                 // Raw keycodes from linux/input-event-codes.h — KEY_LEFTCTRL
                 // 29, KEY_LEFTSHIFT 42, KEY_V 47, with :1 press and :0
@@ -1303,8 +1297,14 @@ mod tests {
     /// KDE's own protocol first on KDE; X11's own tool first on X11.
     #[test]
     fn each_session_leads_with_its_native_tool() {
-        assert_eq!(typing_tool_order(TypingTool::Auto, kde())[0], TypingTool::Kwtype);
-        assert_eq!(typing_tool_order(TypingTool::Auto, x11())[0], TypingTool::Xdotool);
+        assert_eq!(
+            typing_tool_order(TypingTool::Auto, kde())[0],
+            TypingTool::Kwtype
+        );
+        assert_eq!(
+            typing_tool_order(TypingTool::Auto, x11())[0],
+            TypingTool::Xdotool
+        );
         assert_eq!(
             typing_tool_order(TypingTool::Auto, gnome())[0],
             TypingTool::Dotool,

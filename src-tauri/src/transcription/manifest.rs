@@ -562,7 +562,11 @@ fn probed_languages(remote: &RemoteModelInfo, downloaded: bool) -> Option<Vec<St
             Some(languages)
         }
         Err(e) => {
-            tracing::warn!("Could not read {}'s header ({}); using the manifest's languages", remote.id, e);
+            tracing::warn!(
+                "Could not read {}'s header ({}); using the manifest's languages",
+                remote.id,
+                e
+            );
             None
         }
     }

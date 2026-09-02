@@ -121,7 +121,11 @@ pub(crate) fn dispatch_shortcut_action<R: Runtime>(
             .map(|c| c.shortcuts.recording_mode)
             .unwrap_or_default();
         if !release_acts(mode, shortcut_id) {
-            tracing::debug!("Shortcut released: {} (no action in {:?})", shortcut_id, mode);
+            tracing::debug!(
+                "Shortcut released: {} (no action in {:?})",
+                shortcut_id,
+                mode
+            );
             return;
         }
     }

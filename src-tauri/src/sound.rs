@@ -365,7 +365,11 @@ fn play_macos_sound(path: &'static str, volume: f32) {
                 cue_hold_time(player.duration())
             };
 
-            tracing::debug!("Playing sound via AVAudioPlayer: {} (hold {:?})", path, hold);
+            tracing::debug!(
+                "Playing sound via AVAudioPlayer: {} (hold {:?})",
+                path,
+                hold
+            );
 
             // Hold the player alive for the cue: AVAudioPlayer stops if it is
             // deallocated mid-play. Dropping it at the end of this scope is what
@@ -595,7 +599,10 @@ mod tests {
             hold >= std::time::Duration::from_secs_f64(0.35),
             "hold {hold:?} would cut a 350ms cue short"
         );
-        assert_eq!(hold, std::time::Duration::from_secs_f64(0.35) + CUE_RELEASE_TAIL);
+        assert_eq!(
+            hold,
+            std::time::Duration::from_secs_f64(0.35) + CUE_RELEASE_TAIL
+        );
     }
 
     /// The fallback hold exists for the case where `duration()` cannot be
@@ -651,7 +658,11 @@ mod tests {
         }
 
         let ceiling = std::time::Duration::from_secs_f64(CUE_MAX_HOLD_SECS) + CUE_RELEASE_TAIL;
-        assert_eq!(cue_hold_time(3_600.0), ceiling, "absurd duration not capped");
+        assert_eq!(
+            cue_hold_time(3_600.0),
+            ceiling,
+            "absurd duration not capped"
+        );
     }
 
     /// The default must be full volume, so existing installs sound unchanged.
@@ -749,7 +760,8 @@ mod tests {
         let after = live_av_audio_players();
         println!("live AVAudioPlayer instances: {before} before, {after} after {CUES} cues");
         assert_eq!(
-            after, before,
+            after,
+            before,
             "{CUES} cues left {} AVAudioPlayer instance(s) alive — the players are \
              being retained, not released (#170)",
             after.saturating_sub(before)
