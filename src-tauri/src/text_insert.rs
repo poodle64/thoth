@@ -36,15 +36,39 @@ impl InsertionMethod {
 /// "Absent" and "broken" are kept apart because the user needs different
 /// advice for each: install one of these, versus this one is installed and is
 /// not working.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToolOutcome {
     /// The text went in.
     Typed,
-    /// The binary is not on PATH.
+    /// The binary is not on PATH. Nothing was typed, so the next tool in the
+    /// chain gets the whole string.
     NotInstalled,
-    /// The binary ran and did not succeed.
+    /// The binary ran and did not succeed, having typed nothing. These tools
+    /// take the string in one call and fail before it — bad arguments, no
+    /// `/dev/uinput` permission, no daemon — so the next tool is safe to try.
     Failed,
+    /// The binary ran, typed part of the string, and then failed. The next
+    /// tool must NOT be tried: it would start from the beginning and the user
+    /// would end up with the first part twice.
+    PartiallyTyped,
+}
+
+/// What a per-character run reports, given that `typed` characters already
+/// went in and the next one hit `failure`.
+///
+/// Retrying with another tool is only safe when NOTHING went in. Once a
+/// character has landed in the target app, the next tool in the chain would
+/// start from the beginning and the user would see the first part twice —
+/// which is harder to unpick than a short insertion they can see and finish
+/// themselves.
+#[cfg(any(target_os = "linux", test))]
+fn outcome_after(typed: usize, failure: ToolOutcome) -> ToolOutcome {
+    if typed > 0 {
+        ToolOutcome::PartiallyTyped
+    } else {
+        failure
+    }
 }
 
 /// What the Linux session looks like, as far as tool choice cares.
@@ -415,6 +439,18 @@ impl TextInsertService {
                     "{} is installed but failed to type; trying the next tool",
                     Self::tool_binary(tool)
                 ),
+                ToolOutcome::PartiallyTyped => {
+                    // Falling through here would hand the WHOLE string to the
+                    // next tool, which starts at the beginning — so the user
+                    // gets the first part twice. A partial insertion they can
+                    // see and finish by hand beats a duplicated one they have
+                    // to unpick.
+                    return Err(format!(
+                        "{} typed part of the text and then failed; stopping rather than \
+                         retyping it from the start",
+                        Self::tool_binary(tool)
+                    ));
+                }
             }
         }
 
@@ -451,13 +487,17 @@ impl TextInsertService {
         // the only way to space keystrokes when the tool itself types a whole
         // string atomically. Control characters are skipped: they are not
         // keystrokes these tools accept as text.
+        //
+        // `typed` is what makes a mid-string failure recoverable: once a
+        // character is in the target app, the chain must not start over.
+        let mut typed = 0usize;
         for c in text.chars() {
             if c.is_control() {
                 continue;
             }
             match Self::run_type_command(tool, &c.to_string()) {
-                ToolOutcome::Typed => {}
-                other => return other,
+                ToolOutcome::Typed => typed += 1,
+                failure => return outcome_after(typed, failure),
             }
             thread::sleep(Duration::from_millis(keystroke_delay_ms));
         }
@@ -489,6 +529,8 @@ impl TextInsertService {
                 // from being folded into every typed character.
                 command.args(["type", "--clearmodifiers", "--"]).arg(text);
             }
+            // Neither is a spawnable tool; Dotool went out through run_dotool
+            // above.
             TypingTool::Auto | TypingTool::Dotool | TypingTool::Enigo => {
                 return ToolOutcome::NotInstalled;
             }
@@ -516,9 +558,18 @@ impl TextInsertService {
             Err(_) => return ToolOutcome::Failed,
         };
 
-        if let Some(mut stdin) = child.stdin.take()
-            && stdin.write_all(line.as_bytes()).is_err()
-        {
+        // Dropping `stdin` at the end of this block closes the pipe, which is
+        // dotool's end-of-input. A failed write still has to reap the child:
+        // returning straight out would leave a dotool process behind on every
+        // failure, and this runs once per character when a keystroke delay is
+        // set.
+        let wrote = match child.stdin.take() {
+            Some(mut stdin) => stdin.write_all(line.as_bytes()).is_ok(),
+            None => false,
+        };
+        if !wrote {
+            let _ = child.kill();
+            let _ = child.wait();
             return ToolOutcome::Failed;
         }
 
@@ -830,12 +881,20 @@ pub fn emit_linux_typing_advisory(app: &tauri::AppHandle) {
     }
 
     let session = DesktopSession::detect();
-    let candidates: Vec<&'static str> = typing_tool_order(TypingTool::Auto, session)
+    let preferred = crate::config::get_config()
+        .map(|c| c.transcription.typing_tool)
+        .unwrap_or_default();
+    let candidates: Vec<&'static str> = typing_tool_order(preferred, session)
         .into_iter()
         .take_while(|t| *t != TypingTool::Enigo)
         .map(TextInsertService::tool_binary)
         .collect();
 
+    // Empty means the user pinned the built-in — a deliberate "do not use an
+    // external tool", so there is nothing to advise them to install.
+    if candidates.is_empty() {
+        return;
+    }
     if candidates.iter().any(|binary| tool_on_path(binary)) {
         return;
     }
@@ -1328,6 +1387,56 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Model the per-character loop's bookkeeping over a scripted sequence of
+    /// per-character results, so the rule is tested the way the loop applies
+    /// it rather than in isolation.
+    fn run_chars(results: &[ToolOutcome]) -> ToolOutcome {
+        let mut typed = 0usize;
+        for result in results {
+            match result {
+                ToolOutcome::Typed => typed += 1,
+                failure => return outcome_after(typed, *failure),
+            }
+        }
+        ToolOutcome::Typed
+    }
+
+    /// The defect this exists to prevent: a tool that types half the string
+    /// and then fails must NOT hand the whole string to the next tool, or the
+    /// user gets the first half twice.
+    #[test]
+    fn a_partly_typed_string_is_never_retyped_by_the_next_tool() {
+        use ToolOutcome::*;
+        assert_eq!(
+            run_chars(&[Typed, Typed, Typed, Failed]),
+            PartiallyTyped,
+            "three characters are already in the target app"
+        );
+        assert_eq!(
+            run_chars(&[Typed, NotInstalled]),
+            PartiallyTyped,
+            "however the tool disappeared, the character it typed is still there"
+        );
+    }
+
+    /// ...and a tool that typed nothing must still fall through, or the chain
+    /// is pointless.
+    #[test]
+    fn a_tool_that_typed_nothing_falls_through() {
+        use ToolOutcome::*;
+        assert_eq!(run_chars(&[Failed]), Failed);
+        assert_eq!(run_chars(&[NotInstalled]), NotInstalled);
+    }
+
+    /// A whole string typed one character at a time is a success, not a
+    /// partial one.
+    #[test]
+    fn every_character_typed_is_a_clean_success() {
+        use ToolOutcome::*;
+        assert_eq!(run_chars(&[Typed, Typed, Typed]), Typed);
+        assert_eq!(run_chars(&[]), Typed, "an empty string types cleanly");
     }
 
     #[test]

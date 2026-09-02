@@ -462,8 +462,10 @@ pub fn run() {
                 let app_handle = app.handle().clone();
                 register_shortcuts_from_config(&app_handle, &cfg);
 
-                // On Linux/Wayland without `wtype`, advise the user once so text
-                // insertion does not silently fall back to a permission prompt.
+                // On Linux/Wayland with no usable typing tool installed, advise
+                // the user once so text insertion does not silently fall back
+                // to a permission prompt. Which tools count depends on the
+                // desktop, so the advisory works that out itself (#110).
                 #[cfg(target_os = "linux")]
                 text_insert::emit_linux_typing_advisory(&app_handle);
 
