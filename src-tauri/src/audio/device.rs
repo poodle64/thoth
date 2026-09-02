@@ -260,6 +260,50 @@ mod tests {
         }
     }
 
+    /// Measure what a cold open actually spends on the device query (#104).
+    ///
+    /// Ignored: it is a measurement, not an assertion, and its numbers are
+    /// this machine's. Run it deliberately:
+    ///
+    /// ```text
+    /// cargo test --release --lib device_query_cost -- --ignored --nocapture
+    /// ```
+    ///
+    /// The first call is reported separately from the rest: caching would only
+    /// ever save the repeats, so an expensive first call and cheap repeats
+    /// means a cache buys nothing after warm-up.
+    #[test]
+    #[ignore]
+    fn device_query_cost() {
+        use std::time::Instant;
+
+        let Some(device) = get_default_input_device() else {
+            println!("no input device; nothing to measure");
+            return;
+        };
+
+        let start = Instant::now();
+        let _ = device.default_input_config();
+        let first = start.elapsed();
+
+        const REPEATS: u32 = 50;
+        let start = Instant::now();
+        for _ in 0..REPEATS {
+            let _ = device.default_input_config();
+        }
+        let repeats = start.elapsed() / REPEATS;
+
+        // A genuine cold open resolves the device too, so measure that as well
+        // rather than only the part a config cache would skip.
+        let start = Instant::now();
+        let _ = get_recording_device(None);
+        let resolve = start.elapsed();
+
+        println!("default_input_config, first call : {:>8.3} ms", first.as_secs_f64() * 1000.0);
+        println!("default_input_config, subsequent : {:>8.3} ms (mean of {REPEATS})", repeats.as_secs_f64() * 1000.0);
+        println!("get_recording_device(None)       : {:>8.3} ms", resolve.as_secs_f64() * 1000.0);
+    }
+
     #[test]
     fn test_get_default_device() {
         // Should not panic even if no device available

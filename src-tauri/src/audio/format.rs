@@ -8,6 +8,8 @@ use rubato::{
     Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType,
     WindowFunction,
 };
+#[cfg(test)]
+use rubato::{Fft, FixedSync};
 
 /// Audio format converter for resampling and channel conversion
 pub struct AudioConverter {
@@ -196,6 +198,100 @@ pub fn stereo_to_mono(samples: &[f32]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A/B the shipped sinc resampler against rubato's FFT one on the fixed
+    /// 48 kHz -> 16 kHz ratio live capture actually uses (#104).
+    ///
+    /// Ignored: it is a measurement, not an assertion, and its numbers move
+    /// with whatever else the machine is doing. Run it deliberately, on an
+    /// otherwise quiet machine:
+    ///
+    /// ```text
+    /// cargo test --release --lib resampler_ab -- --ignored --nocapture
+    /// ```
+    ///
+    /// Interleaved rather than one-after-the-other, so a machine that gets
+    /// busier partway through spends that on both arms instead of only the
+    /// second. `--release` matters: a debug build measures rustc's bounds
+    /// checks, not the algorithms.
+    ///
+    /// Read the RATIO, not the milliseconds. Across five runs on one machine
+    /// the absolute figures moved by 6x with load while the ratio stayed
+    /// between 1.3x and 1.8x — which is the interleaving working, and the
+    /// reason a single run of this proves nothing. Run it several times.
+    #[test]
+    #[ignore]
+    fn resampler_ab_sinc_vs_fft() {
+        use std::time::Instant;
+
+        const SOURCE_RATE: u32 = 48_000;
+        const TARGET_RATE: u32 = 16_000;
+        const CHUNK: usize = 1024;
+        // 60 s of mono audio per arm per round: long enough that one chunk's
+        // noise does not decide the answer.
+        const CHUNKS_PER_ROUND: usize = 60 * SOURCE_RATE as usize / CHUNK;
+        const ROUNDS: usize = 5;
+
+        // A 440 Hz tone, so both arms do real filtering work rather than
+        // resampling silence.
+        let chunk: Vec<f32> = (0..CHUNK)
+            .map(|i| {
+                (i as f32 / SOURCE_RATE as f32 * 440.0 * 2.0 * std::f32::consts::PI).sin() * 0.5
+            })
+            .collect();
+
+        let mut sinc_total = std::time::Duration::ZERO;
+        let mut fft_total = std::time::Duration::ZERO;
+        let mut sinc_frames = 0usize;
+        let mut fft_frames = 0usize;
+
+        for _ in 0..ROUNDS {
+            let mut sinc = AudioConverter::new(SOURCE_RATE, TARGET_RATE, 1, CHUNK).unwrap();
+            let start = Instant::now();
+            for _ in 0..CHUNKS_PER_ROUND {
+                sinc_frames += sinc.process(&chunk).unwrap().len();
+            }
+            sinc_total += start.elapsed();
+
+            let mut fft = Fft::<f32>::new(
+                SOURCE_RATE as usize,
+                TARGET_RATE as usize,
+                CHUNK,
+                1,
+                1,
+                FixedSync::Input,
+            )
+            .unwrap();
+            let max_out = fft.output_frames_max();
+            let mut out = vec![0.0f32; max_out];
+            let start = Instant::now();
+            for _ in 0..CHUNKS_PER_ROUND {
+                let input = InterleavedSlice::new(&chunk, 1, CHUNK).unwrap();
+                let mut output = InterleavedSlice::new_mut(&mut out, 1, max_out).unwrap();
+                let (_, frames) = fft
+                    .process_into_buffer(&input, &mut output, None)
+                    .unwrap();
+                fft_frames += frames;
+            }
+            fft_total += start.elapsed();
+        }
+
+        let audio_secs = (ROUNDS * CHUNKS_PER_ROUND * CHUNK) as f64 / SOURCE_RATE as f64;
+        println!(
+            "sinc (shipped): {:>8.1} ms for {audio_secs:.0} s of audio  ({:.0}x real time, {sinc_frames} frames out)",
+            sinc_total.as_secs_f64() * 1000.0,
+            audio_secs / sinc_total.as_secs_f64()
+        );
+        println!(
+            "fft            : {:>8.1} ms for {audio_secs:.0} s of audio  ({:.0}x real time, {fft_frames} frames out)",
+            fft_total.as_secs_f64() * 1000.0,
+            audio_secs / fft_total.as_secs_f64()
+        );
+        println!(
+            "ratio          : sinc is {:.2}x the FFT cost",
+            sinc_total.as_secs_f64() / fft_total.as_secs_f64()
+        );
+    }
 
     #[test]
     fn test_converter_new() {
