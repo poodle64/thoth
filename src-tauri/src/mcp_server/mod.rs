@@ -477,7 +477,7 @@ impl ThothMcp {
     }
 
     #[tool(
-        description = "Check the status of a `transcribe_file` job. Returns status (queued/processing/completed/failed) and, when completed, the transcript."
+        description = "Check the status of a `transcribe_file` job. Returns status (queued/processing/completed/failed/expired) and, when completed, the transcript. `expired` means the job finished more than an hour ago and its transcript has been released; an id that was never issued is an error instead."
     )]
     async fn transcribe_status(
         &self,
@@ -489,9 +489,24 @@ impl ThothMcp {
         }
     }
 
-    #[tool(description = "Get Thoth's current pipeline state (idle, recording, or processing).")]
+    #[tool(
+        description = "Get Thoth's current pipeline state (idle, recording, or transcribing). An unfinished `transcribe_file` job counts as transcribing."
+    )]
     async fn get_state(&self) -> Result<CallToolResult, McpError> {
         let state = crate::pipeline::get_pipeline_state();
+
+        // Background file transcription runs off the live dictation pipeline and
+        // never touches its counter, so `get_pipeline_state()` reports `Idle`
+        // throughout. Without this an agent that had just submitted a job and
+        // asked what Thoth was doing was told "nothing".
+        let state = if state == crate::pipeline::PipelineState::Idle
+            && !crate::control_api::active_transcribe_jobs().await.is_empty()
+        {
+            crate::pipeline::PipelineState::Transcribing
+        } else {
+            state
+        };
+
         json_result(&state)
     }
 

@@ -185,9 +185,25 @@ static JOBS: Mutex<Option<HashMap<String, TranscribeJob>>> = Mutex::const_new(No
 /// Runs on submission rather than on a timer: a background sweep would be a
 /// thread that exists only to tidy a map nobody is reading, and the registry only
 /// grows when a job is submitted.
+/// Whether a job has reached a terminal status and is therefore safe to expire or
+/// evict.
+///
+/// Both the TTL and the cap key off this. A job that is still `queued` or
+/// `processing` must survive both: transcription is deliberately starvable — the
+/// background priority in `transcription::gate` stands aside for live dictation
+/// indefinitely — so a job outliving the TTL while genuinely still running is a
+/// normal state, not a stale one. Expiring it would report `expired` with a null
+/// transcript for work that is about to succeed, and would then make it eligible
+/// for cap eviction, at which point its completion handler's lookup by id finds
+/// nothing and the real transcript is discarded in silence.
+fn job_is_finished(status: &str) -> bool {
+    matches!(status, "completed" | "failed" | JOB_STATUS_EXPIRED)
+}
+
 fn prune_jobs(jobs: &mut HashMap<String, TranscribeJob>, now: Instant) {
     for job in jobs.values_mut() {
-        if job.status != JOB_STATUS_EXPIRED
+        if job_is_finished(&job.status)
+            && job.status != JOB_STATUS_EXPIRED
             && now.saturating_duration_since(job.created) >= JOB_TTL
         {
             job.status = JOB_STATUS_EXPIRED.to_string();
@@ -201,12 +217,10 @@ fn prune_jobs(jobs: &mut HashMap<String, TranscribeJob>, now: Instant) {
         return;
     }
 
-    // Oldest first, and only jobs that have finished: an in-flight job's
-    // completion handler looks itself up by id, so evicting it would drop the
-    // transcript with no error anywhere.
+    // Oldest first, finished jobs only.
     let mut evictable: Vec<(Instant, String)> = jobs
         .iter()
-        .filter(|(_, job)| matches!(job.status.as_str(), "completed" | "failed" | JOB_STATUS_EXPIRED))
+        .filter(|(_, job)| job_is_finished(&job.status))
         .map(|(id, job)| (job.created, id.clone()))
         .collect();
     evictable.sort_unstable_by_key(|(created, _)| *created);
@@ -512,6 +526,26 @@ pub(crate) async fn submit_transcribe_job(path: String) -> Result<String, String
     Ok(job_id)
 }
 
+/// Ids of transcribe jobs that have not finished, oldest first.
+///
+/// Background file transcription runs on `spawn_blocking` and never touches the
+/// live dictation pipeline's `PROCESSING_COUNT`, so `get_pipeline_state()` reports
+/// `Idle` throughout. An agent that submitted a job and then asked what Thoth was
+/// doing was told "nothing", which is how the MCP `get_state` tool came to ignore
+/// its own background work.
+pub(crate) async fn active_transcribe_jobs() -> Vec<String> {
+    let guard = get_jobs().await;
+    let mut active: Vec<(Instant, String)> = guard
+        .as_ref()
+        .unwrap()
+        .iter()
+        .filter(|(_, job)| !job_is_finished(&job.status))
+        .map(|(id, job)| (job.created, id.clone()))
+        .collect();
+    active.sort_unstable_by_key(|(created, _)| *created);
+    active.into_iter().map(|(_, id)| id).collect()
+}
+
 /// Look up a transcription job by id, returning its JSON representation. Shared with MCP.
 ///
 /// A job past [`JOB_TTL`] reports `status: "expired"` rather than vanishing, so
@@ -523,7 +557,8 @@ pub(crate) async fn lookup_transcribe_job(id: &str) -> Option<serde_json::Value>
     let mut guard = get_jobs().await;
     let job = guard.as_mut().unwrap().get_mut(id)?;
 
-    if job.status != JOB_STATUS_EXPIRED
+    if job_is_finished(&job.status)
+        && job.status != JOB_STATUS_EXPIRED
         && Instant::now().saturating_duration_since(job.created) >= JOB_TTL
     {
         job.status = JOB_STATUS_EXPIRED.to_string();
@@ -943,6 +978,75 @@ mod tests {
             jobs.contains_key(&format!("job-{}", MAX_JOBS + 49)),
             "newest job was evicted"
         );
+    }
+
+    /// Transcription is deliberately starvable: background priority stands aside
+    /// for live dictation indefinitely, so a job can still be running an hour
+    /// after submission. Expiring it would report `expired` with a null
+    /// transcript for work that is about to succeed — and would then make it
+    /// evictable, at which point its completion handler finds nothing and the
+    /// real transcript is discarded in silence.
+    #[test]
+    fn prune_never_expires_an_in_flight_job() {
+        let past_ttl = JOB_TTL + Duration::from_secs(60);
+        let mut jobs = HashMap::new();
+        jobs.insert("running".to_string(), aged_job("processing", past_ttl, None));
+        jobs.insert("waiting".to_string(), aged_job("queued", past_ttl, None));
+        jobs.insert("done".to_string(), aged_job("completed", past_ttl, Some("x")));
+
+        prune_jobs(&mut jobs, Instant::now());
+
+        assert_eq!(jobs["running"].status, "processing", "a running job expired");
+        assert_eq!(jobs["waiting"].status, "queued", "a queued job expired");
+        assert_eq!(
+            jobs["done"].status, JOB_STATUS_EXPIRED,
+            "a finished job past the TTL should still expire"
+        );
+    }
+
+    /// The same guard has to hold on the read path, which expires independently
+    /// of the sweep so a quiet process cannot serve a stale transcript forever.
+    #[tokio::test]
+    async fn lookup_never_expires_an_in_flight_job() {
+        let id = format!("in-flight-{}", Uuid::new_v4());
+        {
+            let mut guard = get_jobs().await;
+            guard.as_mut().unwrap().insert(
+                id.clone(),
+                aged_job("processing", JOB_TTL + Duration::from_secs(60), None),
+            );
+        }
+
+        let job = lookup_transcribe_job(&id).await.expect("job vanished");
+        assert_eq!(
+            job["status"], "processing",
+            "polling a still-running job past the TTL reported it expired"
+        );
+
+        get_jobs().await.as_mut().unwrap().remove(&id);
+    }
+
+    /// A job still queued or processing is what `get_state` must see, and it is
+    /// the same predicate the TTL and the cap step over.
+    #[tokio::test]
+    async fn active_jobs_lists_only_unfinished_work() {
+        let running = format!("active-{}", Uuid::new_v4());
+        let done = format!("done-{}", Uuid::new_v4());
+        {
+            let mut guard = get_jobs().await;
+            let jobs = guard.as_mut().unwrap();
+            jobs.insert(running.clone(), aged_job("processing", Duration::from_secs(1), None));
+            jobs.insert(done.clone(), aged_job("completed", Duration::from_secs(1), Some("x")));
+        }
+
+        let active = active_transcribe_jobs().await;
+        assert!(active.contains(&running), "a processing job was not listed");
+        assert!(!active.contains(&done), "a completed job was listed as active");
+
+        let mut guard = get_jobs().await;
+        let jobs = guard.as_mut().unwrap();
+        jobs.remove(&running);
+        jobs.remove(&done);
     }
 
     /// An in-flight job's completion handler writes back by id. Evicting it would
