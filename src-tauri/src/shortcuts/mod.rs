@@ -362,19 +362,3 @@ pub fn check_shortcut_available(app: AppHandle, accelerator: String) -> Result<b
 pub fn get_shortcut_suggestions(shortcut: String) -> Vec<String> {
     conflict::suggest_alternatives(&shortcut)
 }
-
-/// Validate a shortcut string format
-///
-/// Checks if a shortcut string is in a valid format without attempting
-/// to register it.
-///
-/// # Arguments
-/// * `shortcut` - The shortcut string to validate
-///
-/// # Returns
-/// * `Ok(())` if the format is valid
-/// * `Err(String)` describing the format issue
-#[tauri::command]
-pub fn validate_shortcut(shortcut: String) -> Result<(), Error> {
-    conflict::validate_shortcut_format(&shortcut).map_err(Into::into)
-}

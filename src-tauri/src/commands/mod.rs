@@ -24,18 +24,6 @@ pub fn show_window(app: AppHandle, label: &str) -> Result<(), Error> {
     }
 }
 
-/// Hide a window by label
-#[tauri::command]
-pub fn hide_window(app: AppHandle, label: &str) -> Result<(), Error> {
-    if let Some(window) = app.get_webview_window(label) {
-        window.hide().map_err(|e| e.to_string())?;
-        tracing::info!("Hid window: {}", label);
-        Ok(())
-    } else {
-        Err(format!("Window '{}' not found", label).into())
-    }
-}
-
 /// Open a URL in the system's default browser
 #[tauri::command]
 pub fn open_url(url: &str) -> Result<(), Error> {
@@ -103,34 +91,6 @@ pub fn set_audio_device(device_id: Option<String>) -> Result<(), Error> {
     crate::audio::cool_down_recording();
     tracing::info!("Audio device set to: {:?}", device_id);
     Ok(())
-}
-
-/// Get the current audio device setting
-#[tauri::command]
-pub fn get_audio_device() -> Option<String> {
-    crate::config::get_config()
-        .map(|c| c.audio.device_id)
-        .unwrap_or(None)
-}
-
-/// Toggle window visibility
-#[tauri::command]
-pub fn toggle_window(app: AppHandle, label: &str) -> Result<bool, Error> {
-    if let Some(window) = app.get_webview_window(label) {
-        let visible = window.is_visible().map_err(|e| e.to_string())?;
-        if visible {
-            window.hide().map_err(|e| e.to_string())?;
-            tracing::info!("Hid window: {}", label);
-            Ok(false)
-        } else {
-            window.show().map_err(|e| e.to_string())?;
-            window.set_focus().map_err(|e| e.to_string())?;
-            tracing::info!("Showed window: {}", label);
-            Ok(true)
-        }
-    } else {
-        Err(format!("Window '{}' not found", label).into())
-    }
 }
 
 // ─── macOS Permission Helpers ─────────────────────────────────────────────────

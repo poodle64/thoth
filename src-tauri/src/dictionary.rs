@@ -401,7 +401,6 @@ pub fn apply_dictionary_to_text(text: String) -> String {
 /// Returns a list of unique words that appear in dictionary replacements.
 /// These can be included in AI prompts to help the model understand
 /// domain-specific terminology.
-#[tauri::command]
 pub fn get_vocabulary_for_context() -> Vec<String> {
     let dictionary = get_dictionary().read();
 

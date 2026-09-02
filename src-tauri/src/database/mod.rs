@@ -144,15 +144,6 @@ pub fn init_database() -> Result<(), Error> {
         .map_err(Into::into)
 }
 
-/// Returns the path to the database file.
-#[tauri::command]
-pub fn get_database_path_command() -> Result<String, Error> {
-    get_database_path()
-        .map(|p| p.to_string_lossy().to_string())
-        .map_err(|e| format!("Failed to get database path: {}", e))
-        .map_err(Into::into)
-}
-
 // =============================================================================
 // Re-exports
 // =============================================================================

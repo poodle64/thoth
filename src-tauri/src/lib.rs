@@ -642,8 +642,6 @@ pub fn run() {
             // Commands
             commands::greet,
             commands::show_window,
-            commands::hide_window,
-            commands::toggle_window,
             commands::open_url,
             commands::remove_quarantine,
             commands::open_privacy_pane,
@@ -651,7 +649,6 @@ pub fn run() {
             commands::set_show_in_dock,
             commands::get_show_in_dock,
             commands::set_audio_device,
-            commands::get_audio_device,
             // Platform
             platform::check_accessibility,
             platform::request_accessibility,
@@ -664,11 +661,9 @@ pub fn run() {
             audio::device::list_audio_devices,
             audio::preview::start_audio_preview,
             audio::preview::stop_audio_preview,
-            audio::preview::is_audio_preview_running,
             audio::start_recording,
             audio::stop_recording,
             audio::is_recording,
-            audio::warm_up_recording,
             // Transcription
             transcription::init_transcription,
             transcription::init_whisper_transcription,
@@ -680,16 +675,11 @@ pub fn run() {
             transcription::get_whisper_model_directory,
             transcription::is_whisper_model_downloaded,
             transcription::filter_transcription,
-            transcription::get_selected_model_id,
             transcription::set_selected_model_id,
-            transcription::is_parakeet_available,
             transcription::init_fluidaudio_transcription,
-            transcription::is_fluidaudio_available,
-            transcription::is_fluidaudio_cached,
             transcription::download::check_model_downloaded,
             transcription::download::get_download_progress,
             transcription::download::download_model,
-            transcription::download::get_model_info,
             transcription::download::delete_model,
             transcription::download::reset_download_state,
             transcription::manifest::fetch_model_manifest,
@@ -711,7 +701,6 @@ pub fn run() {
             enhancement::prompts::get_prompt_by_id,
             // Database
             database::init_database,
-            database::get_database_path_command,
             database::transcription::save_transcription,
             database::transcription::get_transcription_by_id,
             database::transcription::list_all_transcriptions,
@@ -733,7 +722,6 @@ pub fn run() {
             export::export_to_json,
             export::export_to_csv,
             export::export_to_txt,
-            export::get_transcriptions,
             // Config
             changelog::whats_new,
             changelog::mark_whats_new_seen,
@@ -755,7 +743,6 @@ pub fn run() {
             shortcuts::try_register_shortcut,
             shortcuts::check_shortcut_available,
             shortcuts::get_shortcut_suggestions,
-            shortcuts::validate_shortcut,
             reregister_shortcuts,
             // Dictionary
             dictionary::get_dictionary_entries,
@@ -765,7 +752,6 @@ pub fn run() {
             dictionary::import_dictionary,
             dictionary::export_dictionary,
             dictionary::apply_dictionary_to_text,
-            dictionary::get_vocabulary_for_context,
             // Canonical terms
             canonical::get_canonical_terms,
             canonical::add_canonical_term,
@@ -777,8 +763,6 @@ pub fn run() {
             text_insert::insert_text_by_paste,
             // Clipboard
             clipboard::copy_to_clipboard,
-            clipboard::read_clipboard,
-            clipboard::clear_clipboard,
             clipboard::copy_transcription,
             clipboard::get_clipboard_settings,
             clipboard::set_clipboard_settings,
@@ -805,14 +789,12 @@ pub fn run() {
             pipeline::pipeline_transcribe_file,
             pipeline::pipeline_retranscribe,
             pipeline::pipeline_cancel,
-            pipeline::is_pipeline_running,
             pipeline::get_pipeline_state,
             // Recording indicator
             recording_indicator::show_recording_indicator,
             recording_indicator::hide_recording_indicator,
             // Tray
             tray::get_tray_state_cmd,
-            tray::update_tray_recording_state,
             tray::refresh_tray_menu,
             // Storage management
             storage::get_storage_usage,
@@ -823,7 +805,6 @@ pub fn run() {
             // Keyboard service (shortcut capture + modifier monitoring)
             keyboard_service::enter_capture_mode,
             keyboard_service::exit_capture_mode,
-            keyboard_service::is_capture_active_cmd,
             keyboard_service::check_input_monitoring,
             keyboard_service::request_input_monitoring,
             keyboard_service::try_start_keyboard_service,

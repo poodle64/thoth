@@ -452,12 +452,6 @@ pub fn exit_capture_mode(app: AppHandle) -> Result<(), Error> {
     Ok(())
 }
 
-/// Check if capture mode is currently active (IPC command)
-#[tauri::command]
-pub fn is_capture_active_cmd() -> bool {
-    is_capture_active()
-}
-
 /// Report a key event from the webview (used on Wayland where native capture doesn't work)
 // All args are required by the Tauri IPC contract; grouping would change the JS call-site.
 #[allow(clippy::too_many_arguments)]

@@ -154,13 +154,6 @@ fn stop_audio_preview_inner() {
     }
 }
 
-/// Check if audio preview is currently running
-#[tauri::command]
-pub fn is_audio_preview_running() -> bool {
-    let state_guard = PREVIEW_STATE.lock();
-    state_guard.is_some()
-}
-
 // =============================================================================
 // Recording Metering (for the recording indicator overlay)
 // =============================================================================

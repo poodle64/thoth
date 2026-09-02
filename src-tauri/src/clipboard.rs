@@ -306,37 +306,6 @@ pub async fn copy_to_clipboard(
     Ok(())
 }
 
-/// Read text from the system clipboard.
-///
-/// Returns the current text content of the clipboard, or an empty string
-/// if the clipboard is empty or does not contain text.
-#[tauri::command]
-pub async fn read_clipboard(app: AppHandle) -> Result<String, Error> {
-    debug!("Reading from clipboard");
-
-    app.clipboard()
-        .read_text()
-        .map_err(|e| {
-            error!("Failed to read clipboard: {}", e);
-            format!("Failed to read clipboard: {}", e)
-        })
-        .map_err(Into::into)
-}
-
-/// Clear the system clipboard.
-#[tauri::command]
-pub async fn clear_clipboard(app: AppHandle) -> Result<(), Error> {
-    debug!("Clearing clipboard");
-
-    app.clipboard()
-        .clear()
-        .map_err(|e| {
-            error!("Failed to clear clipboard: {}", e);
-            format!("Failed to clear clipboard: {}", e)
-        })
-        .map_err(Into::into)
-}
-
 /// Copy transcription to clipboard with auto-copy settings applied.
 ///
 /// This is the main entry point for copying transcription results. It checks

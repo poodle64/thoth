@@ -611,12 +611,6 @@ pub fn pipeline_cancel(app: AppHandle) -> Result<(), Error> {
     Ok(())
 }
 
-/// Check if the pipeline is currently running
-#[tauri::command]
-pub fn is_pipeline_running() -> bool {
-    PIPELINE_RUNNING.load(Ordering::SeqCst)
-}
-
 /// Get the current pipeline state
 #[tauri::command]
 pub fn get_pipeline_state() -> PipelineState {

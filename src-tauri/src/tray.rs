@@ -983,12 +983,6 @@ pub fn get_tray_state_cmd() -> TrayStateInfo {
     }
 }
 
-/// Update tray recording state (called from pipeline)
-#[tauri::command]
-pub fn update_tray_recording_state(app: AppHandle, is_recording: bool) {
-    set_recording_state(&app, is_recording);
-}
-
 /// Refresh the tray menu (e.g. after permissions change)
 #[tauri::command]
 pub fn refresh_tray_menu(app: AppHandle) {

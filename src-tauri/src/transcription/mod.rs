@@ -776,14 +776,6 @@ pub fn filter_transcription(text: String, options: Option<FilterOptions>) -> Str
     output_filter.filter(&text)
 }
 
-/// Get the currently selected model ID from config
-#[tauri::command]
-pub fn get_selected_model_id() -> Option<String> {
-    crate::config::get_config()
-        .ok()
-        .and_then(|c| c.transcription.model_id.clone())
-}
-
 /// Set the selected model ID in config
 #[tauri::command]
 pub fn set_selected_model_id(model_id: Option<String>) -> Result<(), Error> {
@@ -793,29 +785,6 @@ pub fn set_selected_model_id(model_id: Option<String>) -> Result<(), Error> {
 
     tracing::info!("Selected model ID set to: {:?}", model_id);
     Ok(())
-}
-
-/// Check if the Parakeet (Sherpa-ONNX) backend is available in this build
-#[tauri::command]
-pub fn is_parakeet_available() -> bool {
-    cfg!(feature = "parakeet")
-}
-
-/// Check if the FluidAudio (Apple Neural Engine) backend is available in this build
-#[tauri::command]
-pub fn is_fluidaudio_available() -> bool {
-    cfg!(all(target_os = "macos", feature = "fluidaudio"))
-}
-
-/// Check if FluidAudio models are cached (fast init possible)
-#[tauri::command]
-pub fn is_fluidaudio_cached() -> bool {
-    #[cfg(all(target_os = "macos", feature = "fluidaudio"))]
-    {
-        fluidaudio::is_cached()
-    }
-    #[cfg(not(all(target_os = "macos", feature = "fluidaudio")))]
-    false
 }
 
 #[cfg(test)]

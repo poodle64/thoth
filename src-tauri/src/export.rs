@@ -462,15 +462,6 @@ pub fn export_to_txt(
     export_records(&ids, Path::new(&path), search_params, export_txt).map_err(Into::into)
 }
 
-/// Gets transcriptions by their IDs.
-///
-/// # Arguments
-/// * `ids` - List of transcription IDs to retrieve
-#[tauri::command]
-pub fn get_transcriptions(ids: Vec<String>) -> Result<Vec<TranscriptionRecord>, Error> {
-    get_transcriptions_by_ids(&ids).map_err(Into::into)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

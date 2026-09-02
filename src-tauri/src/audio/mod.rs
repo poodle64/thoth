@@ -81,39 +81,6 @@ pub fn cool_down_recording() {
     tracing::info!("Audio: warm stream cooled down");
 }
 
-/// Pre-warm the recorder on the configured device without arming.
-///
-/// Callers may invoke this proactively (e.g., at startup or after device
-/// selection) to eliminate the first-record latency entirely.
-#[tauri::command]
-pub fn warm_up_recording() -> Result<(), Error> {
-    let config = crate::config::get_config().map_err(|e| format!("Failed to get config: {}", e))?;
-
-    // Only warm if the feature is enabled.
-    if !config.audio.warm_stream {
-        return Ok(());
-    }
-
-    let device_id = config.audio.device_id.as_deref();
-    let audio_device = device::get_recording_device(device_id)
-        .ok_or_else(|| "No audio input device available".to_string())?;
-
-    let mut recorder = get_recorder().lock();
-    if recorder.is_warm() {
-        return Ok(());
-    }
-
-    // Attach a fresh metering buffer so the indicator can show levels immediately.
-    let metering_buf = Arc::new(AudioRingBuffer::new());
-    recorder.set_metering_buffer(metering_buf.clone());
-    *get_metering_buffer().lock() = Some(metering_buf);
-
-    recorder.warm_up(&audio_device).map_err(|e| e.to_string())?;
-
-    tracing::info!("Audio: pre-warm complete");
-    Ok(())
-}
-
 /// Whether an idle-teardown scheduled for `scheduled` has been superseded by a
 /// newer recording (the live counter has moved past it).
 ///

@@ -279,7 +279,6 @@ Example: `thoth_recording_20250214_143022.wav`
 | Command                         | Description                               |
 | ------------------------------- | ----------------------------------------- |
 | `init_database`                 | Initialise database and run migrations    |
-| `get_database_path_command`     | Get the database file path                |
 | `save_transcription`            | Save a new transcription                  |
 | `get_transcription_by_id`       | Get a transcription by ID                 |
 | `list_all_transcriptions`       | List transcriptions with pagination       |
@@ -298,13 +297,12 @@ Example: `thoth_recording_20250214_143022.wav`
 
 ### Dictionary Commands
 
-| Command                      | Description                   |
-| ---------------------------- | ----------------------------- |
-| `get_dictionary_entries`     | Get all dictionary entries    |
-| `add_dictionary_entry`       | Add a new entry               |
-| `update_dictionary_entry`    | Update an existing entry      |
-| `remove_dictionary_entry`    | Remove an entry by index      |
-| `import_dictionary`          | Import entries from JSON      |
-| `export_dictionary`          | Export entries as JSON        |
-| `apply_dictionary_to_text`   | Apply replacements to text    |
-| `get_vocabulary_for_context` | Get vocabulary for AI context |
+| Command                    | Description                |
+| -------------------------- | -------------------------- |
+| `get_dictionary_entries`   | Get all dictionary entries |
+| `add_dictionary_entry`     | Add a new entry            |
+| `update_dictionary_entry`  | Update an existing entry   |
+| `remove_dictionary_entry`  | Remove an entry by index   |
+| `import_dictionary`        | Import entries from JSON   |
+| `export_dictionary`        | Export entries as JSON     |
+| `apply_dictionary_to_text` | Apply replacements to text |

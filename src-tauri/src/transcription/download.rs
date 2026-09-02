@@ -765,24 +765,6 @@ fn emit_progress(app: &AppHandle, progress: DownloadProgress) {
 
 // Note: ModelInfo is now defined in manifest.rs and re-exported from mod.rs
 
-/// Get information about available models (using manifest)
-#[tauri::command]
-pub fn get_model_info() -> Vec<super::manifest::ModelInfo> {
-    let manifest = get_fallback_manifest();
-    let selected_id = crate::config::get_config()
-        .ok()
-        .and_then(|c| c.transcription.model_id.clone());
-
-    let resolved_id =
-        super::manifest::resolve_selected_id(&manifest.models, selected_id.as_deref());
-
-    manifest
-        .models
-        .iter()
-        .map(|m| super::manifest::to_model_info(m, resolved_id))
-        .collect()
-}
-
 /// Delete the downloaded model files
 ///
 /// The id is required. It used to default to the manifest's recommended model,
