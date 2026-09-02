@@ -5,17 +5,6 @@
   ],
   "packageRules": [
     {
-      "description": "sherpa-onnx-sys 1.13.5 fails to link on macOS ('could not find native static library sherpa-onnx-c-api'), breaking the default-features build that the macOS CI leg and macOS releases use. Linux is unaffected because it builds --no-default-features and excludes Parakeet, so Linux CI cannot catch a regression here. Hold at the last known-good 1.13.2 until #149 is resolved; remove this rule in the same commit that fixes it.",
-      "matchManagers": [
-        "cargo"
-      ],
-      "matchPackageNames": [
-        "sherpa-onnx",
-        "sherpa-onnx-sys"
-      ],
-      "allowedVersions": "<=1.13.2"
-    },
-    {
       "description": "package.json's packageManager pin must equal the pnpm nixpkgs supplies; the pnpm-version-matches check in flake.nix fails the build when they drift, because CI's pnpm/action-setup resolves the lockfile with the declared pnpm while fetchPnpmDeps consumes it with the nixpkgs one. Renovate can only move one side, so every bump it proposes fails that check (#123). Bumping pnpm is a two-part change — packageManager plus the nixpkgs input — so it is done by hand, not by Renovate. Note this disables the update rather than capping it with allowedVersions: a cap would retype the nixpkgs pnpm version into a third location, which is the drift this rule exists to prevent.",
       "matchManagers": [
         "npm"
