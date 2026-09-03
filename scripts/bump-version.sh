@@ -27,6 +27,12 @@ ALLOWED_STALE=(
     "CHANGELOG.md"
     "src-tauri/Cargo.lock"
     "pnpm-lock.yaml"
+    # This script's own tests. Their versions are FIXTURES written into temp
+    # dirs — a starting point for "rejects a lower version", "accepts a new
+    # month" and so on — not a declaration of what the app ships. They collide
+    # with the outgoing version only because the fixture happens to equal it,
+    # and rewriting them would corrupt the cases they encode.
+    "scripts/test-bump-version.sh"
 )
 
 die() {
