@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.9.0] - 2026-09-04
+
 ### Fixed
 
 - **The MCP dictionary tool now tells a caller the shape it wants, and its errors name what went wrong.** `import` accepted only the `{"entries": [...]}` wrapper that `export` returns, and nothing said so — the tool description called it "a JSON string of dictionary entries" — while a bare array was refused with `invalid type: map, expected a sequence`, which describes the opposite of what happened. An agent lost two round-trips to it. Import now takes a bare array as well as the wrapper, a wrong shape is answered with the shape it wanted, and the docstrings state the export/import symmetry with a literal example. The same defect class was swept across the other dispatchers: an unknown action lists the valid ones, a missing transcription echoes the id it looked up, and the `canonical` docstrings now say that `update` REPLACES a whole term rather than merging into it — omitting `aliases` clears them and omitting `policy` resets it.
