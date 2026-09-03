@@ -61,7 +61,10 @@ pub struct DictionaryParams {
     /// deletes a different, working entry when it is wrong.
     #[serde(default)]
     pub index: Option<usize>,
-    /// For `import`: a JSON string of dictionary entries.
+    /// For `import`: a JSON string of entries — exactly what `export` returns,
+    /// e.g. `{"entries":[{"from":"x","to":"y","caseSensitive":false}]}`. A bare
+    /// array of those entry objects (`[{"from":"x","to":"y","caseSensitive":false}]`)
+    /// also works.
     #[serde(default)]
     pub json: Option<String>,
     /// For `import`: merge with existing entries (true) or replace (false). Default true.
@@ -76,10 +79,13 @@ pub struct CanonicalParams {
     /// For `add`/`update`: the canonical term string (e.g. "portcullis", "LiteLLM").
     #[serde(default)]
     pub term: Option<String>,
-    /// For `add`/`update`: explicit spelling aliases (case-insensitive exact matches).
+    /// For `add`/`update`: explicit spelling aliases (case-insensitive exact
+    /// matches). `update` replaces the whole term, so omitting this CLEARS the
+    /// term's aliases — send back everything `list` showed that you want kept.
     #[serde(default)]
     pub aliases: Option<Vec<String>>,
-    /// For `add`/`update`: matching policy — `aliasOnly` (default), `phonetic`, or `conservative`.
+    /// For `add`/`update`: matching policy — `aliasOnly` (default), `phonetic`,
+    /// or `conservative`. Omitting it on `update` resets the term to `aliasOnly`.
     #[serde(default)]
     pub policy: Option<String>,
     /// For `update`/`remove`: the zero-based index of the term (from `list`).
@@ -199,7 +205,7 @@ impl ThothMcp {
     }
 
     #[tool(
-        description = "Manage Thoth's personal dictionary (find/replace entries applied to transcriptions). Use this to view or change spelling corrections and word replacements. Action: list | add | update | delete | import | export. add requires from + to (+ optional caseSensitive). update/delete identify the entry EITHER by from (its own text — preferred, refuses if it is not unique) OR by index; update also requires to. import requires json (+ optional merge). Returns: the entry list, each row carrying its index (list), a compact ack {ok, action, index, count} (add/update/delete), a count (import), or a JSON string (export)."
+        description = "Manage Thoth's personal dictionary (find/replace entries applied to transcriptions). Use this to view or change spelling corrections and word replacements. Action: list | add | update | delete | import | export. add requires from + to (+ optional caseSensitive). update/delete identify the entry EITHER by from (its own text — preferred, refuses if it is not unique) OR by index; update also requires to. import requires json — exactly what `export` returns, e.g. {\"entries\":[{\"from\":\"x\",\"to\":\"y\",\"caseSensitive\":false}]}; a bare array of those entry objects also works (+ optional merge, default true: dedupe by `from`; false replaces the whole dictionary). Returns: the entry list, each row carrying its index (list), a compact ack {ok, action, index, count} (add/update/delete), a count (import), or a JSON string (export)."
     )]
     async fn dictionary(
         &self,
@@ -315,12 +321,15 @@ impl ThothMcp {
                     crate::dictionary::export_dictionary().map_err(|e| core_err(e.to_string()))?;
                 Ok(CallToolResult::success(vec![Content::text(json)]))
             }
-            other => Err(core_err(format!("unknown action: {}", other))),
+            other => Err(core_err(format!(
+                "unknown action '{}'; must be list | add | update | delete | import | export",
+                other
+            ))),
         }
     }
 
     #[tool(
-        description = "Manage Thoth's canonical-term registry (phonetic/fuzzy snapping of acoustic variants to a registered spelling). Register a term ONCE and all acoustic/spelling variants auto-snap to it. Action: list | add | update | remove | suggest. add/update require term (+ optional aliases, policy, index for update/remove). policy: aliasOnly (default, exact aliases only), phonetic (AND gate: Double-Metaphone key match AND edit-distance >= 0.55), conservative (same AND gate, higher 0.85 threshold for terms that collide with common words). `suggest` reads the transcription history and reports spellings that look like a registered term but were NOT snapped to it — the mis-hearings still escaping, ranked by how often they occur, each with the term's own frequency and a line of context. It is ADVISORY and changes nothing: judge each row (an ordinary English word will read as one in its context) and register the real ones with `update`. Returns: the term list (list), a compact ack {ok, action, index, count} (add/update/remove), or the candidate list (suggest)."
+        description = "Manage Thoth's canonical-term registry (phonetic/fuzzy snapping of acoustic variants to a registered spelling). Register a term ONCE and all acoustic/spelling variants auto-snap to it. Action: list | add | update | remove | suggest. add/update require term; update/remove also require index (from `list`). NOTE: update REPLACES the whole term — omit `aliases` and the term keeps none, omit `policy` and it resets to aliasOnly; read the current term with `list` first and send back everything you want kept. policy: aliasOnly (default, exact aliases only), phonetic (AND gate: Double-Metaphone key match AND edit-distance >= 0.55), conservative (same AND gate, higher 0.85 threshold for terms that collide with common words). `suggest` reads the transcription history and reports spellings that look like a registered term but were NOT snapped to it — the mis-hearings still escaping, ranked by how often they occur, each with the term's own frequency and a line of context. It is ADVISORY and changes nothing: judge each row (an ordinary English word will read as one in its context) and register the real ones with `update`. Returns: the term list (list), a compact ack {ok, action, index, count} (add/update/remove), or the candidate list (suggest)."
     )]
     async fn canonical(
         &self,
@@ -395,7 +404,10 @@ impl ThothMcp {
                 .map_err(|e| core_err(e.to_string()))?;
                 json_result(&suggestions)
             }
-            other => Err(core_err(format!("unknown action: {}", other))),
+            other => Err(core_err(format!(
+                "unknown action '{}'; must be list | add | update | remove | suggest",
+                other
+            ))),
         }
     }
 
@@ -444,7 +456,10 @@ impl ThothMcp {
                 let cfg = crate::config::get_config().map_err(|e| core_err(e.to_string()))?;
                 json_result(&cfg)
             }
-            other => Err(core_err(format!("unknown action: {}", other))),
+            other => Err(core_err(format!(
+                "unknown action '{}'; must be get | update",
+                other
+            ))),
         }
     }
 
@@ -464,11 +479,11 @@ impl ThothMcp {
             "get" => {
                 let id =
                     p.id.ok_or_else(|| core_err("`id` required for get".into()))?;
-                let record = crate::database::transcription::get_transcription_by_id(id)
+                let record = crate::database::transcription::get_transcription_by_id(id.clone())
                     .map_err(|e| core_err(e.to_string()))?;
                 match record {
                     Some(r) => json_result(&r),
-                    None => Err(core_err("transcription not found".into())),
+                    None => Err(core_err(format!("transcription {} not found", id))),
                 }
             }
             "list" => {
@@ -476,7 +491,10 @@ impl ThothMcp {
                     .map_err(|e| core_err(e.to_string()))?;
                 json_result(&records)
             }
-            other => Err(core_err(format!("unknown action: {}", other))),
+            other => Err(core_err(format!(
+                "unknown action '{}'; must be list | get | stats",
+                other
+            ))),
         }
     }
 
