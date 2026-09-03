@@ -271,11 +271,73 @@ fn remove_entry_locked(dictionary: &mut Dictionary, index: usize) -> Result<(), 
     Ok(())
 }
 
+/// The shape `import` accepts, spelled out for error messages and docstrings.
+const IMPORT_SHAPE: &str = concat!(
+    r#"{"entries":[{"from":"x","to":"y","caseSensitive":false}]}"#,
+    " — exactly what `export` returns; a bare array of those entry objects also works"
+);
+
+/// Parse an import payload into entry objects.
+///
+/// Accepts the `export` shape (`{"entries": [...]}`) and a bare array of the
+/// same entry objects. Parses to a `Value` first so a wrong shape gets an error
+/// naming the shape it should be: handing the raw string straight to serde
+/// deserialises the `Dictionary` struct from a sequence, whose failure reads
+/// "invalid type: map, expected a sequence" for a bare array — the opposite of
+/// what the caller sent.
+fn parse_import_entries(json_content: &str) -> Result<Vec<DictionaryEntry>, String> {
+    let mut value: serde_json::Value =
+        serde_json::from_str(json_content).map_err(|e| format!("Invalid JSON: {}", e))?;
+    let entries_value = match value {
+        serde_json::Value::Array(_) => value,
+        serde_json::Value::Object(ref mut map) => match map.remove("entries") {
+            Some(entries) => entries,
+            None => {
+                return Err(format!(
+                    "import expects {}; got an object with keys {:?}",
+                    IMPORT_SHAPE,
+                    map.keys().collect::<Vec<_>>()
+                ));
+            }
+        },
+        other => {
+            return Err(format!(
+                "import expects {}; got {}",
+                IMPORT_SHAPE,
+                type_name(&other)
+            ));
+        }
+    };
+    serde_json::from_value(entries_value).map_err(|e| {
+        format!(
+            "Invalid entry: {}. Each entry needs \"from\" (string), \"to\" (string) and \
+             \"caseSensitive\" (bool) — the rows `export` and `list` return",
+            e
+        )
+    })
+}
+
+/// Name a JSON value's type for shape errors.
+fn type_name(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "a boolean",
+        serde_json::Value::Number(_) => "a number",
+        serde_json::Value::String(_) => "a string",
+        serde_json::Value::Array(_) => "an array",
+        serde_json::Value::Object(_) => "an object",
+    }
+}
+
 /// Import dictionary entries from JSON content
+///
+/// Accepts exactly what `export_dictionary` returns (`{"entries": [...]}`) and,
+/// as a convenience, a bare array of the same entry objects. Merge (default
+/// behaviour in the MCP tool; this command takes it explicitly) deduplicates by
+/// `from`; replace swaps the whole dictionary.
 #[tauri::command]
 pub fn import_dictionary(json_content: String, merge: bool) -> Result<usize, Error> {
-    let imported: Dictionary =
-        serde_json::from_str(&json_content).map_err(|e| format!("Invalid JSON format: {}", e))?;
+    let imported = parse_import_entries(&json_content).map_err(Error::from)?;
 
     let mut dictionary = get_dictionary().write();
     let import_count;
@@ -290,7 +352,7 @@ pub fn import_dictionary(json_content: String, merge: bool) -> Result<usize, Err
             .collect();
 
         let mut new_entries = Vec::new();
-        for entry in imported.entries {
+        for entry in imported {
             if entry.from.trim().is_empty() || entry.to.trim().is_empty() {
                 continue;
             }
@@ -303,7 +365,6 @@ pub fn import_dictionary(json_content: String, merge: bool) -> Result<usize, Err
     } else {
         // Replace entire dictionary
         let valid_entries: Vec<_> = imported
-            .entries
             .into_iter()
             .filter(|e| !e.from.trim().is_empty() && !e.to.trim().is_empty())
             .collect();
@@ -731,6 +792,132 @@ mod tests {
         let json = serde_json::to_string(&dict).unwrap();
         let restored: Dictionary = serde_json::from_str(&json).unwrap();
         assert!(restored.entries.is_empty());
+    }
+
+    // =========================================================================
+    // Import payload shape tests
+    // =========================================================================
+
+    #[test]
+    fn test_import_accepts_exactly_what_export_returns() {
+        // The documented contract: import accepts export's output verbatim.
+        let exported = serde_json::to_string(&Dictionary {
+            entries: vec![
+                entry("teh", "the"),
+                DictionaryEntry {
+                    from: "k8s".to_string(),
+                    to: "Kubernetes".to_string(),
+                    case_sensitive: true,
+                },
+            ],
+        })
+        .unwrap();
+        let parsed = parse_import_entries(&exported).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].from, "teh");
+        assert!(parsed[1].case_sensitive);
+    }
+
+    #[test]
+    fn test_import_accepts_bare_array() {
+        // The call that failed tonight: a bare array, no `entries` wrapper.
+        let json = r#"[{"from":"x","to":"y","caseSensitive":false}]"#;
+        let parsed = parse_import_entries(json).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].from, "x");
+        assert_eq!(parsed[0].to, "y");
+        assert!(!parsed[0].case_sensitive);
+    }
+
+    #[test]
+    fn test_import_bare_entry_object_names_the_expected_shape() {
+        // A single entry object (no array, no wrapper) used to surface serde's
+        // struct-from-sequence message — "invalid type: map, expected a
+        // sequence" — which named the opposite of what was sent. The error must
+        // now name the shape import wants, correctable without guessing.
+        let json = r#"{"from":"x","to":"y","caseSensitive":false}"#;
+        let err = parse_import_entries(json).unwrap_err();
+        assert!(err.contains("\"entries\""), "error: {}", err);
+        assert!(err.contains("export"), "error: {}", err);
+        // And it says what was actually received.
+        assert!(err.contains("from"), "error: {}", err);
+    }
+
+    #[test]
+    fn test_import_object_without_entries_key_names_the_expected_shape() {
+        let json = r#"{"entry": []}"#;
+        let err = parse_import_entries(json).unwrap_err();
+        assert!(err.contains("\"entries\""), "error: {}", err);
+        assert!(err.contains("entry"), "error: {}", err);
+    }
+
+    #[test]
+    fn test_import_non_array_entries_names_entry_fields() {
+        let json = r#"{"entries": {"from": "x"}}"#;
+        let err = parse_import_entries(json).unwrap_err();
+        assert!(err.contains("caseSensitive"), "error: {}", err);
+        assert!(err.contains("from"), "error: {}", err);
+    }
+
+    #[test]
+    fn test_import_invalid_json_reports_it_as_json() {
+        let err = parse_import_entries("not json at all").unwrap_err();
+        assert!(err.starts_with("Invalid JSON"), "error: {}", err);
+    }
+
+    #[test]
+    fn test_import_entry_missing_field_names_the_field() {
+        let json = r#"[{"from":"x","to":"y"}]"#;
+        let err = parse_import_entries(json).unwrap_err();
+        assert!(err.contains("caseSensitive"), "error: {}", err);
+    }
+
+    #[test]
+    fn test_import_scalar_names_the_expected_shape() {
+        let err = parse_import_entries("\"entries\"").unwrap_err();
+        assert!(err.contains("got a string"), "error: {}", err);
+        assert!(err.contains("export"), "error: {}", err);
+    }
+
+    // `#[serial]` + `THOTH_DATA_DIR` because `import_dictionary` mutates the
+    // process-global `DICTIONARY` static, which initialises against whatever
+    // data dir is set at first touch. No other test in this binary touches that
+    // static, so this test is its sole initialiser and lands on the throwaway
+    // directory — the same guard pattern the trash tests use for their env var.
+    // A non-serial test that touched the dictionary first would silently aim
+    // this test's writes at the operator's real `~/.thoth/dictionary.json`.
+    #[serial_test::serial]
+    #[test]
+    fn test_import_export_round_trip_and_merge_dedupe() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // SAFETY: `#[serial]` guarantees no other test in this binary modifies
+        // THOTH_DATA_DIR concurrently, making the mutation race-free.
+        unsafe { std::env::set_var("THOTH_DATA_DIR", dir.path()) };
+
+        // The wrapper shape imports.
+        let wrapper = r#"{"entries":[
+            {"from":"x","to":"y","caseSensitive":false},
+            {"from":"a","to":"b","caseSensitive":true}
+        ]}"#;
+        let count = import_dictionary(wrapper.to_string(), true).unwrap();
+        assert_eq!(count, 2);
+
+        // Export's output re-imports cleanly (the documented symmetry) and,
+        // merged, dedupes to zero new entries.
+        let exported = export_dictionary().unwrap();
+        let count = import_dictionary(exported, true).unwrap();
+        assert_eq!(count, 0);
+
+        // A bare array also imports, and merge dedupes it against what is
+        // already stored — the original `to` survives.
+        let bare = r#"[{"from":"x","to":"z","caseSensitive":false}]"#;
+        let count = import_dictionary(bare.to_string(), true).unwrap();
+        assert_eq!(count, 0);
+        let entries = get_dictionary_entries().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].to, "y");
+
+        unsafe { std::env::remove_var("THOTH_DATA_DIR") };
     }
 
     // =========================================================================
