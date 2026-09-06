@@ -12,7 +12,11 @@ name: Playwright
 # start and mount", which is exactly the regression class the Rust test suite
 # cannot see.
 
+# Nightly and on PR, never on push: a slow acceptance suite is not a push
+# gate for a solo shop pushing to main tens of times a day (06/09/2026).
 on:
+  schedule:
+    - cron: '54 16 * * *' # 02:54 AEST
   pull_request:
     paths:
       - "src/**"
@@ -23,20 +27,7 @@ on:
       - "vite.config.ts"
       - "svelte.config.js"
       - ".github/workflows/playwright.yaml"
-  push:
-    branches:
-      - main
-    paths:
-      - "src/**"
-      - "tests/e2e/**"
-      - "playwright.config.ts"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "vite.config.ts"
-      - "svelte.config.js"
-      - ".github/workflows/playwright.yaml"
   workflow_dispatch:
-
 permissions:
   contents: read
 
