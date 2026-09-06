@@ -26,6 +26,12 @@ repos:
         language: system
         types: [text]
 
+      - id: check-history
+        name: 'governance - A file states what is, not what was'
+        entry: household-precommit-history
+        language: system
+        types: [text]
+
   # ---------------------------------------------------------------------------- #
   #                              File Validation                                  #
   # ---------------------------------------------------------------------------- #
