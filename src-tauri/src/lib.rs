@@ -162,7 +162,7 @@ pub(crate) fn ensure_crypto_provider() {
 /// The one `tracing` target whose events and spans may leave this device.
 ///
 /// `telemetry::init` takes it as the allow-list: an event emitted with
-/// `target: "telemetry"` is exported, everything else — including every line
+/// `target: TELEMETRY_TARGET` is exported, everything else — including every line
 /// that carries transcript text — stays on stderr. The boundary is structural,
 /// not a redaction pass, so content cannot leak by mistake.
 pub(crate) const TELEMETRY_TARGET: &str = "telemetry";
@@ -227,7 +227,7 @@ pub fn run() {
                 .map(|g| g.gpu_name.unwrap_or_else(|| g.compiled_backend.clone()))
                 .unwrap_or_else(|_| "unknown".to_string());
             tracing::info!(
-                target: "telemetry",
+                target: TELEMETRY_TARGET,
                 version = env!("CARGO_PKG_VERSION"),
                 os = std::env::consts::OS,
                 gpu = %gpu_label,

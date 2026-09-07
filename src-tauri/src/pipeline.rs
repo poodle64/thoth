@@ -242,7 +242,7 @@ fn discard_silent_wav(result: &Result<PipelineResult, String>, audio_path: &str)
         "Pipeline: Silent recording, deleting orphan WAV: {}",
         audio_path
     );
-    tracing::info!(target: "telemetry", event = "recording_silent_dropped", "recording_silent_dropped");
+    tracing::info!(target: TELEMETRY_TARGET, event = "recording_silent_dropped", "recording_silent_dropped");
     if let Err(del_err) = std::fs::remove_file(audio_path) {
         tracing::warn!(
             "Pipeline: Failed to delete silent WAV {}: {}",
@@ -313,7 +313,7 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, Error> {
         if nothing_can_load || !transcription::download::check_model_downloaded(None) {
             PIPELINE_RUNNING.store(false, Ordering::SeqCst);
             tracing::warn!("Pipeline: No usable transcription model, blocking recording");
-            tracing::warn!(target: "telemetry", reason = "no_usable_model", "model_load_failure");
+            tracing::warn!(target: TELEMETRY_TARGET, reason = "no_usable_model", "model_load_failure");
             let _ = crate::recording_indicator::hide_recording_indicator(app.clone());
             return Err(
                 "No transcription model is ready. Open Settings \u{2192} Models to download or repair one."
@@ -337,7 +337,7 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, Error> {
     match crate::audio::start_recording() {
         Ok(path) => {
             tracing::info!("Pipeline: Recording started at {}", path);
-            tracing::info!(target: "telemetry", event = "recording_started", "recording_started");
+            tracing::info!(target: TELEMETRY_TARGET, event = "recording_started", "recording_started");
 
             // Now that start_recording has resolved (and stored) the device name,
             // emit a follow-up progress event that includes it for the UI.
@@ -377,7 +377,7 @@ pub fn pipeline_start_recording(app: AppHandle) -> Result<String, Error> {
         }
         Err(e) => {
             PIPELINE_RUNNING.store(false, Ordering::SeqCst);
-            tracing::warn!(target: "telemetry", reason = "audio_start_failed", "audio_device_failure");
+            tracing::warn!(target: TELEMETRY_TARGET, reason = "audio_start_failed", "audio_device_failure");
             emit_progress(
                 &app,
                 PipelineState::Failed,
@@ -449,7 +449,7 @@ fn spawn_hands_free_watcher(app: AppHandle, timeout: std::time::Duration) {
             }
 
             tracing::info!(
-                target: "telemetry",
+                target: TELEMETRY_TARGET,
                 silence_ms = activity.silence_ms_after_speech().unwrap_or(0),
                 "hands_free_auto_stop"
             );
@@ -533,7 +533,7 @@ pub async fn pipeline_stop_and_process(
     let rec_duration = get_audio_duration(&audio_path).unwrap_or(0.0);
     tracing::Span::current().record("recording_seconds", rec_duration);
     tracing::info!(
-        target: "telemetry",
+        target: TELEMETRY_TARGET,
         duration_seconds = rec_duration,
         "recording_stopped"
     );
@@ -765,14 +765,14 @@ async fn run_transcription_pipeline(
             // Bail the moment the background warmup reports it could load nothing,
             // instead of waiting out the full 60 s on a model that will never load.
             if transcription::warmup_failed() {
-                tracing::warn!(target: "telemetry", reason = "warmup_failed", "model_load_failure");
+                tracing::warn!(target: TELEMETRY_TARGET, reason = "warmup_failed", "model_load_failure");
                 return Err(
                     "No transcription model is ready. Open Settings \u{2192} Models to download or repair one."
                         .to_string(),
                 );
             }
             if std::time::Instant::now() > deadline {
-                tracing::warn!(target: "telemetry", reason = "load_timeout_60s", "model_load_failure");
+                tracing::warn!(target: TELEMETRY_TARGET, reason = "load_timeout_60s", "model_load_failure");
                 return Err("Transcription model failed to load within 60 seconds".to_string());
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -823,7 +823,7 @@ async fn run_transcription_pipeline(
         };
         let model_label = transcription_model_name.as_deref().unwrap_or("unknown");
         tracing::info!(
-            target: "telemetry",
+            target: TELEMETRY_TARGET,
             backend = %model_label,
             audio_seconds = audio_secs.unwrap_or(0.0),
             processing_seconds = transcription_duration_seconds,
@@ -884,7 +884,7 @@ async fn run_transcription_pipeline(
                 // content-free, and enhancement-by-prompt analytics already
                 // live in the Insights dashboard (from the DB column).
                 tracing::info!(
-                    target: "telemetry",
+                    target: TELEMETRY_TARGET,
                     model = %config.enhancement_model,
                     duration_seconds = elapsed,
                     ok = true,
@@ -895,7 +895,7 @@ async fn run_transcription_pipeline(
             Err(e) => {
                 tracing::warn!("Pipeline: Enhancement failed, using original text: {}", e);
                 tracing::warn!(
-                    target: "telemetry",
+                    target: TELEMETRY_TARGET,
                     model = %config.enhancement_model,
                     ok = false,
                     "enhancement_complete"
