@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Telemetry no longer loses its last events when you quit.** Events and traces are batched in the background rather than sent one at a time, so a handful are always still in flight; Thoth was exiting without flushing them, which meant the end of every session — including whatever went wrong just before you quit — never arrived. Quitting now flushes what is queued before the process goes, within a bounded budget so it cannot delay shutdown. This only affects machines that export telemetry at all; nothing changes where it is off.
+- **A wrong or unreachable AI-enhancement address now fails in about ten seconds instead of hanging.** Requests to your Ollama or OpenAI-compatible endpoint had no connect deadline of their own, so an address that silently swallows the connection — a mistyped LAN IP, a machine that is off — held the enhancement step for the full request timeout before giving up. Connecting now has its own ten-second limit, so you get the error while the transcription is still fresh rather than a minute later. A server that accepts the connection and takes its time to answer is unaffected.
+
 ## [2026.9.1] - 2026-09-07
 
 ### Removed
