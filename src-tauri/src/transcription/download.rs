@@ -446,9 +446,12 @@ const MAX_DOWNLOAD_RETRIES: u32 = 3;
 
 /// Build a reqwest client with appropriate timeouts for large file downloads.
 ///
-/// The one outbound client that is not [`crate::http_client`]: a model download
-/// needs `connect_timeout` and `read_timeout`, which only exist on the client
-/// builder, and a traceparent on a third-party CDN request buys nothing.
+/// The one outbound client that is not [`crate::http_client`], and only because
+/// a model download needs `connect_timeout` and `read_timeout` — a stalled
+/// connection and a stalled body are different failures over a multi-gigabyte
+/// transfer, and both settings exist on the client builder alone, not on a
+/// request. Propagating trace context on every outbound call is the contract,
+/// so this is a gap to close if those knobs ever reach the request builder.
 fn build_download_client() -> Result<Client> {
     crate::ensure_crypto_provider();
     Client::builder()

@@ -484,11 +484,14 @@ fn spawn_hands_free_watcher(app: AppHandle, timeout: std::time::Duration) {
 /// Hides the recording indicator overlay when recording stops.
 ///
 /// The root of the dictation trace. The detached processing task is attached to
-/// this span so transcription, enhancement and the history write nest under it.
+/// this span, so the span stays open until the history write finishes and its
+/// duration is the whole turnaround from the stop keypress to the saved
+/// transcription — which is what `dictation` names. `recording_seconds` carries
+/// how long the user actually spoke, which this span does not cover.
 #[tauri::command]
 #[tracing::instrument(
     target = TELEMETRY_TARGET,
-    name = "recording_stop",
+    name = "dictation",
     skip_all,
     fields(recording_seconds = tracing::field::Empty)
 )]
@@ -1149,16 +1152,6 @@ fn stored_raw_text(text: &str, raw_text: &str) -> Option<String> {
 
 /// Save transcription to history database
 #[allow(clippy::too_many_arguments)]
-#[tracing::instrument(
-    target = TELEMETRY_TARGET,
-    name = "save_to_history",
-    skip_all,
-    fields(
-        text_bytes = text.len(),
-        enhanced = is_enhanced,
-        saved = tracing::field::Empty,
-    )
-)]
 fn save_to_history(
     text: &str,
     raw_text: &str,
@@ -1192,12 +1185,10 @@ fn save_to_history(
 
     match database::transcription::create_transcription(&transcription) {
         Ok(()) => {
-            tracing::Span::current().record("saved", true);
             tracing::info!("Pipeline: Saved transcription {}", transcription.id);
             Some(transcription.id)
         }
         Err(e) => {
-            tracing::Span::current().record("saved", false);
             tracing::warn!("Pipeline: Failed to save transcription: {}", e);
             None
         }

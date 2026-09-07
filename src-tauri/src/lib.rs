@@ -159,12 +159,21 @@ pub(crate) fn ensure_crypto_provider() {
     });
 }
 
-/// The one `tracing` target whose events and spans may leave this device.
+/// The `tracing` target Thoth's own events and spans use to leave this device.
 ///
-/// `telemetry::init` takes it as the allow-list: an event emitted with
-/// `target: TELEMETRY_TARGET` is exported, everything else — including every line
-/// that carries transcript text — stays on stderr. The boundary is structural,
-/// not a redaction pass, so content cannot leak by mistake.
+/// `telemetry::init` takes it as the allow-list. Exactly two things reach the
+/// exporter:
+///
+/// - anything Thoth emits with `target: TELEMETRY_TARGET`;
+/// - the shared crate's own outbound-HTTP client spans, which it force-allows
+///   past this list and which carry the request method, the server host, the
+///   server port and the response status — never the URL, path, query or error
+///   text — so a call to the user's Ollama or OpenAI-compatible endpoint is
+///   visible as a host and a status and nothing more.
+///
+/// Everything else, including every line that carries transcript text, stays on
+/// stderr. The boundary is structural, not a redaction pass, so content cannot
+/// leak by mistake.
 pub(crate) const TELEMETRY_TARGET: &str = "telemetry";
 
 /// The process's one outbound HTTP client: `reqwest` under the middleware that

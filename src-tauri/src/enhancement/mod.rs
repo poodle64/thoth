@@ -189,11 +189,17 @@ pub async fn list_openai_compat_models() -> Result<Vec<String>, Error> {
     )
 )]
 pub async fn enhance_text(text: String, model: String, prompt: String) -> Result<String, Error> {
+    // Bound before the early returns: a call rejected here must still export an
+    // outcome, not a span whose `ok` was never set.
+    let span = tracing::Span::current();
+
     if text.is_empty() {
+        span.record("ok", false);
         return Err("Text cannot be empty".to_string().into());
     }
 
     if model.is_empty() {
+        span.record("ok", false);
         return Err("Model cannot be empty".to_string().into());
     }
 
@@ -201,7 +207,6 @@ pub async fn enhance_text(text: String, model: String, prompt: String) -> Result
         let b = get_backend().lock();
         (b.backend_type, b.ollama.clone(), b.openai_compat.clone())
     };
-    let span = tracing::Span::current();
     span.record("backend", tracing::field::debug(backend_type));
 
     tracing::info!(
