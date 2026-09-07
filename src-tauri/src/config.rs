@@ -52,123 +52,6 @@ impl Default for IntegrationsConfig {
     }
 }
 
-/// Logging and telemetry configuration
-///
-/// Local file logging is always on. The Loki layer is opt-in; changes apply on restart.
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct LoggingConfig {
-    /// Number of daily rolling log files to retain locally (default 7)
-    #[serde(default = "default_local_retention_days", alias = "localRetentionDays")]
-    pub local_retention_days: u32,
-    /// Whether to forward telemetry events to a remote Loki instance (default false)
-    #[serde(default, alias = "remoteEnabled")]
-    pub remote_enabled: bool,
-    /// Loki endpoint URL. Accepts either a bare base ("http://loki:3100") or a
-    /// full push URL ("http://loki:3100/loki/api/v1/push"); the trailing push
-    /// path is normalised away before use, so either form forwards correctly.
-    #[serde(default, alias = "lokiUrl")]
-    pub loki_url: String,
-    /// Authorization header value (e.g. "Bearer glsa_xxx"). Stored locally; never logged.
-    #[serde(default, alias = "lokiAuth")]
-    pub loki_auth: LokiAuth,
-    /// Optional X-Scope-OrgID tenant header value
-    #[serde(default, alias = "lokiTenant")]
-    pub loki_tenant: Option<String>,
-    /// Additional Loki stream labels (e.g. `[["env", "prod"]]`)
-    #[serde(default, alias = "lokiLabels")]
-    pub loki_labels: Vec<[String; 2]>,
-    /// Minimum tracing level for telemetry events ("info", "debug", etc.)
-    #[serde(default = "default_telemetry_level", alias = "telemetryLevel")]
-    pub telemetry_level: String,
-}
-
-fn default_local_retention_days() -> u32 {
-    7
-}
-
-fn default_telemetry_level() -> String {
-    "info".to_string()
-}
-
-impl Default for LoggingConfig {
-    fn default() -> Self {
-        Self {
-            local_retention_days: default_local_retention_days(),
-            remote_enabled: false,
-            loki_url: String::new(),
-            loki_auth: LokiAuth::default(),
-            loki_tenant: None,
-            loki_labels: Vec::new(),
-            telemetry_level: default_telemetry_level(),
-        }
-    }
-}
-
-/// Sentinel returned over the API/IPC instead of the real token value.
-///
-/// The frontend must send this value back unchanged (or empty) to avoid wiping
-/// a stored token on a generic settings save. `set_config` treats both `""`
-/// and this sentinel as "keep the existing stored token".
-pub(crate) const LOKI_AUTH_MASK: &str = "***";
-
-/// Wrapper for the Loki authorization token.
-///
-/// The value is redacted from `Debug` output so it never appears in logs.
-#[derive(Clone, Default, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct LokiAuth(pub String);
-
-impl LokiAuth {
-    /// Return `true` if the value is the API mask sentinel or is empty.
-    pub(crate) fn is_masked_or_empty(&self) -> bool {
-        self.0.is_empty() || self.0 == LOKI_AUTH_MASK
-    }
-}
-
-/// Build the value for the HTTP `Authorization` header from a stored auth
-/// token. Returns `None` when there is no usable token (empty or the API mask
-/// sentinel). A value that already carries an auth scheme (`Bearer `/`Basic `,
-/// case-insensitive) is used verbatim; a bare token gets a `Bearer ` prefix —
-/// so the user can paste just the token (the common case) and still satisfy a
-/// `Authorization: Bearer <token>` check.
-pub(crate) fn authorization_header(auth: &str) -> Option<String> {
-    let token = auth.trim();
-    if token.is_empty() || token == LOKI_AUTH_MASK {
-        return None;
-    }
-    let lower = token.to_ascii_lowercase();
-    if lower.starts_with("bearer ") || lower.starts_with("basic ") {
-        Some(token.to_string())
-    } else {
-        Some(format!("Bearer {token}"))
-    }
-}
-
-impl std::fmt::Debug for LokiAuth {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.0.is_empty() {
-            write!(f, "\"\"")
-        } else {
-            write!(f, "\"***redacted***\"")
-        }
-    }
-}
-
-impl std::fmt::Debug for LoggingConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LoggingConfig")
-            .field("local_retention_days", &self.local_retention_days)
-            .field("remote_enabled", &self.remote_enabled)
-            .field("loki_url", &self.loki_url)
-            .field("loki_auth", &self.loki_auth)
-            .field("loki_tenant", &self.loki_tenant)
-            .field("loki_labels", &self.loki_labels)
-            .field("telemetry_level", &self.telemetry_level)
-            .finish()
-    }
-}
-
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -189,8 +72,6 @@ pub struct Config {
     pub recorder: RecorderConfig,
     /// Integrations settings (Local Control API, MCP)
     pub integrations: IntegrationsConfig,
-    /// Logging and telemetry settings
-    pub logging: LoggingConfig,
 }
 
 impl Default for Config {
@@ -204,22 +85,7 @@ impl Default for Config {
             general: GeneralConfig::default(),
             recorder: RecorderConfig::default(),
             integrations: IntegrationsConfig::default(),
-            logging: LoggingConfig::default(),
         }
-    }
-}
-
-impl Config {
-    /// Return a copy of this config with `loki_auth` replaced by the API mask
-    /// sentinel when a token is stored.
-    ///
-    /// Use this for all IPC/API/MCP responses so the real token value never
-    /// crosses the serialisation boundary into chat history or logs.
-    pub(crate) fn with_masked_loki_auth(mut self) -> Self {
-        if !self.logging.loki_auth.0.is_empty() {
-            self.logging.loki_auth = LokiAuth(LOKI_AUTH_MASK.to_string());
-        }
-        self
     }
 }
 
@@ -693,8 +559,8 @@ pub(crate) fn merge_json(target: &mut serde_json::Value, patch: &serde_json::Val
 ///
 /// The config always serialises to snake_case (no `rename_all` on the structs; the
 /// `alias` annotations only add camelCase as a second *input* name). An MCP or HTTP
-/// caller that sends `{"localRetentionDays": 14}` adds a key that serde never
-/// matches to `local_retention_days` but also doesn't remove the existing one, so
+/// caller that sends `{"apiPort": 8765}` adds a key that serde never matches to
+/// `api_port` but also doesn't remove the existing one, so
 /// the merged `Value` ends up with both keys and serde errors on "duplicate field".
 ///
 /// Canonicalising before the merge resolves this: every incoming key is
@@ -702,8 +568,8 @@ pub(crate) fn merge_json(target: &mut serde_json::Value, patch: &serde_json::Val
 /// existing key in-place. The transform is idempotent (snake_case → snake_case
 /// passes through unchanged) and handles nested objects recursively.
 ///
-/// Arrays are also recursed so future array-of-objects config fields (e.g.
-/// `loki_labels`) have their nested object keys canonicalised too.
+/// Arrays are also recursed so any array-of-objects config field has its nested
+/// object keys canonicalised too.
 pub(crate) fn canonicalise_patch_keys(value: serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::Object(map) => {
@@ -855,16 +721,6 @@ fn apply_migration(config: Config) -> Result<Config, String> {
     }
 }
 
-/// Read the logging config synchronously from disk without initialising the global
-/// config singleton.
-///
-/// Called early in `init_logging` (before the Tauri event loop starts) so the Loki
-/// subscriber layer can be constructed before any events are emitted. Falls back to
-/// `LoggingConfig::default()` on any error so the app still starts.
-pub(crate) fn read_logging_config_early() -> LoggingConfig {
-    load_from_disk().map(|c| c.logging).unwrap_or_default()
-}
-
 /// Apply the enhancement config to the global backend singleton.
 ///
 /// Called on startup and after every `set_config` that touches enhancement
@@ -894,32 +750,15 @@ fn get_config_instance() -> &'static RwLock<Config> {
     })
 }
 
-/// Return the real (unmasked) stored loki_auth token for internal use only.
-///
-/// This bypasses the masking applied by `get_config()` and must NEVER be
-/// forwarded to the frontend, logged, or included in any IPC response.
-/// Used exclusively by `test_loki_connection` to resolve the effective token
-/// when the frontend passes back the mask sentinel.
-pub(crate) fn get_raw_loki_auth() -> String {
-    get_config_instance().read().logging.loki_auth.0.clone()
-}
-
-/// Return the stored loki_tenant for internal use only.
-pub(crate) fn get_raw_loki_tenant() -> Option<String> {
-    get_config_instance().read().logging.loki_tenant.clone()
-}
-
 // --- IPC Commands ---
 
 /// Get the current configuration
 ///
 /// Returns the current configuration state. The config is cached in memory
-/// and loaded from disk on first access. The `loki_auth` token is replaced
-/// with the mask sentinel so the real value never crosses the IPC boundary.
+/// and loaded from disk on first access.
 #[tauri::command]
 pub fn get_config() -> Result<Config, Error> {
-    let config = get_config_instance().read().clone();
-    Ok(config.with_masked_loki_auth())
+    Ok(get_config_instance().read().clone())
 }
 
 /// Return the built-in default configuration.
@@ -930,12 +769,10 @@ pub fn get_config() -> Result<Config, Error> {
 /// February 2026 onward (#127). See the "Single source of truth" rule in
 /// `.claude/CLAUDE.md`.
 ///
-/// This reads nothing from disk and mutates nothing — it is `Config::default()`
-/// with the same `loki_auth` masking `get_config` applies, so no token can cross
-/// the IPC boundary even in the default case.
+/// This reads nothing from disk and mutates nothing — it is `Config::default()`.
 #[tauri::command]
 pub fn get_default_config() -> Config {
-    Config::default().with_masked_loki_auth()
+    Config::default()
 }
 
 /// Update the configuration
@@ -1026,45 +863,6 @@ pub fn set_config(mut config: Config) -> Result<(), Error> {
         if config.enhancement.api_key.is_none() && current.enhancement.api_key.is_some() {
             tracing::debug!("Preserving enhancement.api_key (incoming config had None)");
             config.enhancement.api_key = current.enhancement.api_key.clone();
-        }
-
-        // Preserve loki_auth if the incoming value is empty or the API mask sentinel
-        // and the cached config has a real token. The frontend never receives the real
-        // token (get_config masks it), so a generic save must not wipe a stored token.
-        // Use the dedicated set_loki_auth command for intentional token changes.
-        if config.logging.loki_auth.is_masked_or_empty() && !current.logging.loki_auth.0.is_empty()
-        {
-            tracing::debug!("Preserving loki_auth (incoming config had empty/masked value)");
-            config.logging.loki_auth = current.logging.loki_auth.clone();
-        }
-
-        // Preserve loki_url if the incoming value is blank but a URL is stored.
-        // The generic settings save sends the whole logging config, and a blank
-        // URL is almost always an unintended wipe (a startup re-save, or a UI
-        // that had not loaded the field) rather than a deliberate clear —
-        // forwarding is turned off via remote_enabled, not by blanking the URL.
-        // Changing the URL still works because a non-empty value overwrites.
-        if config.logging.loki_url.trim().is_empty() && !current.logging.loki_url.trim().is_empty()
-        {
-            tracing::debug!("Preserving loki_url (incoming config had a blank URL)");
-            config.logging.loki_url = current.logging.loki_url.clone();
-        }
-
-        // Preserve loki_tenant the same way (blank/None incoming, stored value present).
-        let incoming_tenant_blank = config
-            .logging
-            .loki_tenant
-            .as_deref()
-            .map(|t| t.trim().is_empty())
-            .unwrap_or(true);
-        let cached_tenant_present = current
-            .logging
-            .loki_tenant
-            .as_deref()
-            .is_some_and(|t| !t.trim().is_empty());
-        if incoming_tenant_blank && cached_tenant_present {
-            tracing::debug!("Preserving loki_tenant (incoming config had a blank tenant)");
-            config.logging.loki_tenant = current.logging.loki_tenant.clone();
         }
     }
 
@@ -1158,37 +956,12 @@ pub fn set_enhancement_api_key(key: Option<String>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Set or clear the Loki auth token unconditionally.
-///
-/// This is the only correct path for changing the token (including clearing it
-/// to empty). The preservation guard in `set_config` prevents the generic save
-/// from wiping the token with a masked/empty value; this command bypasses that
-/// guard so an explicit user action can still clear it.
-///
-/// Pass `Some(token)` to store a new token, `None` to clear it.
-#[tauri::command]
-pub fn set_loki_auth(token: Option<String>) -> Result<(), Error> {
-    let mut cached = get_config_instance().write();
-    cached.logging.loki_auth = LokiAuth(token.unwrap_or_default());
-    save_to_disk(&cached)?;
-    tracing::info!(
-        "loki_auth {}",
-        if cached.logging.loki_auth.0.is_empty() {
-            "cleared"
-        } else {
-            "updated"
-        }
-    );
-    Ok(())
-}
-
 /// Record the running binary's version as `last_run_version`, persisting only
 /// when it changed.
 ///
 /// Mutates the live config singleton in place and writes that — it does NOT go
-/// through the masked `get_config()` / `set_config()` round-trip, so it can
-/// never blank `loki_url` / `loki_auth` / other sensitive fields the way a
-/// full-config re-save can. Returns `Some(previous_version)` when a *different*
+/// through the `get_config()` / `set_config()` round-trip, so it cannot be
+/// caught by that path's preservation guards. Returns `Some(previous_version)` when a *different*
 /// version was recorded before (a genuine update, so the caller can run
 /// one-time post-update steps), or `None` when the version was unchanged (no
 /// write) or this is a fresh install (no prior version recorded).
@@ -1206,9 +979,8 @@ pub fn record_last_run_version(version: &str) -> Result<Option<String>, Error> {
 /// Record that a version's release notes have been shown (#113).
 ///
 /// Writes the live config singleton directly for the same reason
-/// [`record_last_run_version`] does: a full `set_config` round-trip can blank
-/// masked fields such as `loki_auth`, and dismissing a modal is no reason to
-/// risk the user's telemetry credentials.
+/// [`record_last_run_version`] does: a full `set_config` round-trip re-saves
+/// every setting, and dismissing a modal is no reason to do that.
 pub fn record_whats_new_seen(version: &str) -> Result<(), Error> {
     let mut cached = get_config_instance().write();
     if cached.general.whats_new_seen_version.as_deref() == Some(version) {
@@ -1615,7 +1387,6 @@ mod tests {
                 auto_hide_delay: 5000,
             },
             integrations: IntegrationsConfig::default(),
-            logging: LoggingConfig::default(),
         };
 
         let json = serde_json::to_string_pretty(&config).unwrap();
@@ -1855,423 +1626,13 @@ mod tests {
     }
 
     // =========================================================================
-    // LoggingConfig tests
-    // =========================================================================
-
-    #[test]
-    fn test_logging_config_defaults() {
-        let cfg = LoggingConfig::default();
-        assert_eq!(cfg.local_retention_days, 7);
-        assert!(!cfg.remote_enabled);
-        assert!(cfg.loki_url.is_empty());
-        assert!(cfg.loki_auth.0.is_empty());
-        assert!(cfg.loki_tenant.is_none());
-        assert!(cfg.loki_labels.is_empty());
-        assert_eq!(cfg.telemetry_level, "info");
-    }
-
-    #[test]
-    fn test_logging_config_serde_roundtrip() {
-        let cfg = LoggingConfig {
-            local_retention_days: 14,
-            remote_enabled: true,
-            loki_url: "http://loki:3100".to_string(),
-            loki_auth: LokiAuth("Bearer glsa_secret_token".to_string()),
-            loki_tenant: Some("org1".to_string()),
-            loki_labels: vec![["env".to_string(), "prod".to_string()]],
-            telemetry_level: "debug".to_string(),
-        };
-
-        let json = serde_json::to_string(&cfg).unwrap();
-        let restored: LoggingConfig = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(restored.local_retention_days, 14);
-        assert!(restored.remote_enabled);
-        assert_eq!(restored.loki_url, "http://loki:3100");
-        // Token value is preserved in storage (redaction is only for Debug output)
-        assert_eq!(restored.loki_auth.0, "Bearer glsa_secret_token");
-        assert_eq!(restored.loki_tenant, Some("org1".to_string()));
-        assert_eq!(restored.loki_labels.len(), 1);
-        assert_eq!(restored.loki_labels[0], ["env", "prod"]);
-        assert_eq!(restored.telemetry_level, "debug");
-    }
-
-    #[test]
-    fn test_loki_auth_debug_is_redacted() {
-        let auth = LokiAuth("super_secret_glsa_token_xyz".to_string());
-        let debug_str = format!("{:?}", auth);
-        // The actual token value must NOT appear in Debug output.
-        assert!(
-            !debug_str.contains("super_secret_glsa_token_xyz"),
-            "loki_auth Debug must not expose the token value; got: {debug_str}"
-        );
-        assert!(
-            debug_str.contains("redacted"),
-            "loki_auth Debug must contain 'redacted'; got: {debug_str}"
-        );
-    }
-
-    #[test]
-    fn test_loki_auth_debug_empty_is_not_redacted() {
-        // An empty token shows "" not the redacted marker (no secret to hide).
-        let auth = LokiAuth(String::new());
-        let debug_str = format!("{:?}", auth);
-        assert!(
-            !debug_str.contains("redacted"),
-            "empty loki_auth Debug must not say 'redacted'; got: {debug_str}"
-        );
-    }
-
-    #[test]
-    fn test_logging_config_debug_redacts_auth() {
-        let cfg = LoggingConfig {
-            loki_auth: LokiAuth("top_secret_token_abc".to_string()),
-            ..Default::default()
-        };
-        let debug_str = format!("{:?}", cfg);
-        assert!(
-            !debug_str.contains("top_secret_token_abc"),
-            "LoggingConfig Debug must not expose loki_auth value; got: {debug_str}"
-        );
-    }
-
-    #[test]
-    fn test_logging_config_defaults_when_missing_from_json() {
-        // Config JSON that predates the logging block should parse with defaults.
-        let json = r#"{"version": 1}"#;
-        let config: Config = serde_json::from_str(json).unwrap();
-        assert_eq!(config.logging.local_retention_days, 7);
-        assert!(!config.logging.remote_enabled);
-    }
-
-    #[test]
-    fn test_telemetry_filter_allows_telemetry_target() {
-        // The allow-list filter used by the Loki layer must pass "telemetry" target events.
-        // Calls the live predicate via its target-string shim so a rename would break this test.
-        assert!(
-            crate::telemetry::is_telemetry_event_by_target("telemetry"),
-            "telemetry target must pass the filter"
-        );
-    }
-
-    #[test]
-    fn test_telemetry_filter_blocks_other_targets() {
-        // Non-telemetry targets must not pass the Loki filter.
-        for target in &["thoth::pipeline", "thoth::audio", "tracing", "info"] {
-            assert!(
-                !crate::telemetry::is_telemetry_event_by_target(target),
-                "target '{target}' must be blocked by the telemetry filter"
-            );
-        }
-    }
-
-    // =========================================================================
-    // Logging config persistence and token handling tests (Bug 1 / Bug 3)
-    // =========================================================================
-
-    #[test]
-    fn test_logging_config_snake_case_serde() {
-        // The frontend serialises logging fields as snake_case; verify they round-trip
-        // correctly now that rename_all = "camelCase" has been removed.
-        let json = r#"{
-            "local_retention_days": 30,
-            "remote_enabled": true,
-            "loki_url": "http://loki:3100",
-            "loki_auth": "Bearer secret",
-            "loki_tenant": "myorg",
-            "loki_labels": [["env", "prod"]],
-            "telemetry_level": "debug"
-        }"#;
-        let cfg: LoggingConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(cfg.local_retention_days, 30);
-        assert!(cfg.remote_enabled);
-        assert_eq!(cfg.loki_url, "http://loki:3100");
-        assert_eq!(cfg.loki_auth.0, "Bearer secret");
-        assert_eq!(cfg.loki_tenant, Some("myorg".to_string()));
-        assert_eq!(cfg.loki_labels.len(), 1);
-        assert_eq!(cfg.telemetry_level, "debug");
-    }
-
-    #[test]
-    fn test_logging_config_camel_case_alias_still_deserialises() {
-        // Existing camelCase disk files must still parse correctly via the alias annotations.
-        let json = r#"{
-            "localRetentionDays": 14,
-            "remoteEnabled": true,
-            "lokiUrl": "http://loki:3100",
-            "lokiAuth": "Bearer token",
-            "lokiTenant": null,
-            "lokiLabels": [],
-            "telemetryLevel": "info"
-        }"#;
-        let cfg: LoggingConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(cfg.local_retention_days, 14);
-        assert!(cfg.remote_enabled);
-        assert_eq!(cfg.loki_url, "http://loki:3100");
-        assert_eq!(cfg.loki_auth.0, "Bearer token");
-    }
-
-    #[test]
-    fn test_logging_config_full_config_snake_case_roundtrip() {
-        // Simulate what the frontend sends via set_config: snake_case keys for logging.
-        let json = r#"{
-            "version": 1,
-            "logging": {
-                "local_retention_days": 14,
-                "remote_enabled": true,
-                "loki_url": "http://loki:3100",
-                "loki_auth": "Bearer glsa_test",
-                "loki_tenant": null,
-                "loki_labels": [],
-                "telemetry_level": "debug"
-            }
-        }"#;
-        let config: Config = serde_json::from_str(json).unwrap();
-        assert_eq!(config.logging.local_retention_days, 14);
-        assert!(config.logging.remote_enabled);
-        assert_eq!(config.logging.loki_url, "http://loki:3100");
-        assert_eq!(config.logging.loki_auth.0, "Bearer glsa_test");
-        assert_eq!(config.logging.telemetry_level, "debug");
-    }
-
-    #[test]
-    fn test_config_with_masked_loki_auth_masks_set_token() {
-        // with_masked_loki_auth replaces a set token with the sentinel.
-        let config = Config {
-            logging: LoggingConfig {
-                loki_auth: LokiAuth("real_secret_token".to_string()),
-                ..LoggingConfig::default()
-            },
-            ..Config::default()
-        };
-        let masked = config.with_masked_loki_auth();
-        assert_eq!(masked.logging.loki_auth.0, LOKI_AUTH_MASK);
-    }
-
-    #[test]
-    fn test_config_with_masked_loki_auth_leaves_empty_token_alone() {
-        // with_masked_loki_auth does not replace an empty token (nothing to hide).
-        let config = Config::default();
-        let masked = config.with_masked_loki_auth();
-        assert!(masked.logging.loki_auth.0.is_empty());
-    }
-
-    #[test]
-    fn test_loki_auth_is_masked_or_empty() {
-        assert!(LokiAuth(String::new()).is_masked_or_empty());
-        assert!(LokiAuth(LOKI_AUTH_MASK.to_string()).is_masked_or_empty());
-        assert!(!LokiAuth("real_token".to_string()).is_masked_or_empty());
-    }
-
-    #[test]
-    fn test_authorization_header() {
-        // empty / masked → no header
-        assert_eq!(authorization_header(""), None);
-        assert_eq!(authorization_header("   "), None);
-        assert_eq!(authorization_header(LOKI_AUTH_MASK), None);
-        // bare token → Bearer prefixed
-        assert_eq!(
-            authorization_header("abc123").as_deref(),
-            Some("Bearer abc123")
-        );
-        // already-schemed values pass through verbatim (case-insensitive match)
-        assert_eq!(
-            authorization_header("Bearer abc123").as_deref(),
-            Some("Bearer abc123")
-        );
-        assert_eq!(
-            authorization_header("bearer abc123").as_deref(),
-            Some("bearer abc123")
-        );
-        assert_eq!(
-            authorization_header("Basic dXNlcjpwYXNz").as_deref(),
-            Some("Basic dXNlcjpwYXNz")
-        );
-    }
-
-    #[test]
-    fn test_set_config_preserves_loki_auth_on_empty_incoming() {
-        // A set_config with empty loki_auth must keep the stored token.
-        let _guard = CONFIG_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let instance = get_config_instance();
-        {
-            let mut cached = instance.write();
-            cached.logging.loki_auth = LokiAuth("stored_token".to_string());
-        }
-
-        let mut incoming = Config::default();
-        // Simulate what the frontend sends: empty token (field not changed)
-        assert!(incoming.logging.loki_auth.0.is_empty());
-
-        // Apply the same preservation guard that set_config uses
-        {
-            let current = instance.read();
-            if incoming.logging.loki_auth.is_masked_or_empty()
-                && !current.logging.loki_auth.0.is_empty()
-            {
-                incoming.logging.loki_auth = current.logging.loki_auth.clone();
-            }
-        }
-
-        assert_eq!(incoming.logging.loki_auth.0, "stored_token");
-
-        // Restore clean state
-        instance.write().logging.loki_auth = LokiAuth::default();
-    }
-
-    #[test]
-    fn test_set_config_preserves_loki_auth_on_mask_sentinel_incoming() {
-        // A set_config with loki_auth == LOKI_AUTH_MASK must keep the stored token.
-        // This happens when the frontend sends back the mask it received from get_config.
-        let _guard = CONFIG_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let instance = get_config_instance();
-        {
-            let mut cached = instance.write();
-            cached.logging.loki_auth = LokiAuth("stored_token_xyz".to_string());
-        }
-
-        let mut incoming = Config::default();
-        incoming.logging.loki_auth = LokiAuth(LOKI_AUTH_MASK.to_string());
-
-        {
-            let current = instance.read();
-            if incoming.logging.loki_auth.is_masked_or_empty()
-                && !current.logging.loki_auth.0.is_empty()
-            {
-                incoming.logging.loki_auth = current.logging.loki_auth.clone();
-            }
-        }
-
-        assert_eq!(incoming.logging.loki_auth.0, "stored_token_xyz");
-
-        // Restore clean state
-        instance.write().logging.loki_auth = LokiAuth::default();
-    }
-
-    #[test]
-    fn test_set_config_preserves_loki_url_on_blank_incoming() {
-        // A generic save that sends a blank loki_url (e.g. a UI that had not
-        // loaded the field, or a startup re-save) must keep the stored URL;
-        // a non-blank incoming URL still overwrites.
-        let _guard = CONFIG_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let instance = get_config_instance();
-        {
-            instance.write().logging.loki_url = "https://loki.example".to_string();
-        }
-
-        let mut blank = Config::default(); // loki_url == ""
-        let mut typed = Config::default();
-        typed.logging.loki_url = "https://other.example".to_string();
-        {
-            let current = instance.read();
-            for incoming in [&mut blank, &mut typed] {
-                if incoming.logging.loki_url.trim().is_empty()
-                    && !current.logging.loki_url.trim().is_empty()
-                {
-                    incoming.logging.loki_url = current.logging.loki_url.clone();
-                }
-            }
-        }
-        assert_eq!(
-            blank.logging.loki_url, "https://loki.example",
-            "blank preserved"
-        );
-        assert_eq!(
-            typed.logging.loki_url, "https://other.example",
-            "non-blank overwrites"
-        );
-
-        instance.write().logging.loki_url = String::new();
-    }
-
-    #[test]
-    fn test_set_config_preserves_loki_tenant_on_blank_incoming() {
-        // A blank/None incoming loki_tenant must keep the stored tenant.
-        let _guard = CONFIG_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let instance = get_config_instance();
-        {
-            instance.write().logging.loki_tenant = Some("team-a".to_string());
-        }
-
-        let mut incoming = Config::default(); // loki_tenant == None
-        {
-            let current = instance.read();
-            let incoming_blank = incoming
-                .logging
-                .loki_tenant
-                .as_deref()
-                .map(|t| t.trim().is_empty())
-                .unwrap_or(true);
-            let cached_present = current
-                .logging
-                .loki_tenant
-                .as_deref()
-                .is_some_and(|t| !t.trim().is_empty());
-            if incoming_blank && cached_present {
-                incoming.logging.loki_tenant = current.logging.loki_tenant.clone();
-            }
-        }
-        assert_eq!(incoming.logging.loki_tenant.as_deref(), Some("team-a"));
-
-        instance.write().logging.loki_tenant = None;
-    }
-
-    #[test]
-    fn test_logging_config_file_persistence_roundtrip() {
-        // Verify that write → read file gives back the same values.
-        // Uses a temp directory so it does not touch ~/.thoth/config.json.
-        use std::io::Write;
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config_test.json");
-
-        let cfg = Config {
-            logging: LoggingConfig {
-                local_retention_days: 30,
-                remote_enabled: true,
-                loki_url: "http://loki:3100".to_string(),
-                loki_auth: LokiAuth("Bearer glsa_secret".to_string()),
-                loki_tenant: Some("testorg".to_string()),
-                loki_labels: vec![["env".to_string(), "test".to_string()]],
-                telemetry_level: "debug".to_string(),
-            },
-            ..Config::default()
-        };
-
-        // Write
-        let contents = serde_json::to_string_pretty(&cfg).unwrap();
-        std::fs::File::create(&path)
-            .unwrap()
-            .write_all(contents.as_bytes())
-            .unwrap();
-
-        // Read back
-        let read_back = std::fs::read_to_string(&path).unwrap();
-        let restored: Config = serde_json::from_str(&read_back).unwrap();
-
-        assert_eq!(restored.logging.local_retention_days, 30);
-        assert!(restored.logging.remote_enabled);
-        assert_eq!(restored.logging.loki_url, "http://loki:3100");
-        assert_eq!(restored.logging.loki_auth.0, "Bearer glsa_secret");
-        assert_eq!(restored.logging.loki_tenant, Some("testorg".to_string()));
-        assert_eq!(restored.logging.loki_labels.len(), 1);
-        assert_eq!(restored.logging.loki_labels[0], ["env", "test"]);
-        assert_eq!(restored.logging.telemetry_level, "debug");
-    }
-
-    // =========================================================================
     // canonicalise_patch_keys / merge_json tests (Bug 1 + Bug 2)
     // =========================================================================
 
     #[test]
     fn test_camel_to_snake_identity_on_snake_case() {
         // Already-snake_case keys must pass through unchanged (idempotent).
-        for key in &[
-            "local_retention_days",
-            "loki_url",
-            "remote_enabled",
-            "api_enabled",
-            "mcp_enabled",
-        ] {
+        for key in &["api_enabled", "api_port", "mcp_enabled", "auto_hide_delay"] {
             assert_eq!(
                 camel_to_snake(key),
                 *key,
@@ -2285,16 +1646,11 @@ mod tests {
         // Every field that carries a camelCase alias must round-trip to exactly the
         // snake_case canonical name that serde serialises it as.
         let pairs = [
-            ("localRetentionDays", "local_retention_days"),
-            ("remoteEnabled", "remote_enabled"),
-            ("lokiUrl", "loki_url"),
-            ("lokiAuth", "loki_auth"),
-            ("lokiTenant", "loki_tenant"),
-            ("lokiLabels", "loki_labels"),
-            ("telemetryLevel", "telemetry_level"),
             ("apiEnabled", "api_enabled"),
             ("apiPort", "api_port"),
             ("mcpEnabled", "mcp_enabled"),
+            ("autoHideDelay", "auto_hide_delay"),
+            ("offsetX", "offset_x"),
         ];
         for (camel, snake) in pairs {
             assert_eq!(
@@ -2309,37 +1665,34 @@ mod tests {
     fn test_canonicalise_patch_keys_flat_camel_patch() {
         // A flat camelCase patch must deserialise successfully after canonicalisation.
         let patch_json = serde_json::json!({
-            "localRetentionDays": 14_u32,
-            "remoteEnabled": true,
-            "lokiUrl": "http://loki:3100"
+            "apiEnabled": true,
+            "apiPort": 8765_u16,
+            "mcpEnabled": false
         });
         let canon = canonicalise_patch_keys(patch_json);
         // Keys must now be snake_case.
         let obj = canon.as_object().unwrap();
-        assert!(
-            obj.contains_key("local_retention_days"),
-            "key canonicalised"
-        );
-        assert!(obj.contains_key("remote_enabled"), "key canonicalised");
-        assert!(obj.contains_key("loki_url"), "key canonicalised");
-        assert!(!obj.contains_key("localRetentionDays"), "old key removed");
+        assert!(obj.contains_key("api_enabled"), "key canonicalised");
+        assert!(obj.contains_key("api_port"), "key canonicalised");
+        assert!(obj.contains_key("mcp_enabled"), "key canonicalised");
+        assert!(!obj.contains_key("apiEnabled"), "old key removed");
     }
 
     #[test]
     fn test_canonicalise_patch_keys_nested_camel_patch() {
-        // Nested camelCase patch (e.g. {"logging": {"localRetentionDays": 14}})
+        // Nested camelCase patch (e.g. {"integrations": {"apiPort": 8765}})
         // must be fully canonicalised.
         let patch_json = serde_json::json!({
-            "logging": {
-                "localRetentionDays": 30_u32,
-                "remoteEnabled": false
+            "integrations": {
+                "apiPort": 8765_u16,
+                "mcpEnabled": false
             }
         });
         let canon = canonicalise_patch_keys(patch_json);
-        let logging = canon.get("logging").unwrap().as_object().unwrap();
-        assert!(logging.contains_key("local_retention_days"));
-        assert!(logging.contains_key("remote_enabled"));
-        assert!(!logging.contains_key("localRetentionDays"));
+        let integrations = canon.get("integrations").unwrap().as_object().unwrap();
+        assert!(integrations.contains_key("api_port"));
+        assert!(integrations.contains_key("mcp_enabled"));
+        assert!(!integrations.contains_key("apiPort"));
     }
 
     #[test]
@@ -2349,7 +1702,7 @@ mod tests {
         let current_cfg = Config::default();
         let mut current_val = serde_json::to_value(&current_cfg).unwrap();
 
-        let patch = serde_json::json!({ "logging": { "localRetentionDays": 30_u32 } });
+        let patch = serde_json::json!({ "integrations": { "apiPort": 9100_u16 } });
         let patch = canonicalise_patch_keys(patch);
         merge_json(&mut current_val, &patch);
 
@@ -2359,7 +1712,7 @@ mod tests {
             "camelCase patch must deserialise without error: {:?}",
             result.err()
         );
-        assert_eq!(result.unwrap().logging.local_retention_days, 30);
+        assert_eq!(result.unwrap().integrations.api_port, 9100);
     }
 
     #[test]
@@ -2368,7 +1721,7 @@ mod tests {
         let current_cfg = Config::default();
         let mut current_val = serde_json::to_value(&current_cfg).unwrap();
 
-        let patch = serde_json::json!({ "logging": { "local_retention_days": 21_u32 } });
+        let patch = serde_json::json!({ "integrations": { "api_port": 9101_u16 } });
         let patch = canonicalise_patch_keys(patch);
         merge_json(&mut current_val, &patch);
 
@@ -2378,7 +1731,7 @@ mod tests {
             "snake_case patch must deserialise: {:?}",
             result.err()
         );
-        assert_eq!(result.unwrap().logging.local_retention_days, 21);
+        assert_eq!(result.unwrap().integrations.api_port, 9101);
     }
 
     #[test]
@@ -2386,83 +1739,53 @@ mod tests {
         // Simulates Bug 2: a partial patch that only sets one field must leave all
         // other fields at their prior values.
         let mut prior = Config::default();
-        prior.logging.local_retention_days = 42;
-        prior.logging.loki_url = "http://prior:3100".to_string();
+        prior.integrations.api_port = 9102;
+        prior.integrations.mcp_enabled = false;
 
         let mut current_val = serde_json::to_value(&prior).unwrap();
 
-        // Patch only changes remote_enabled; local_retention_days and loki_url must survive.
-        let patch = serde_json::json!({ "logging": { "remoteEnabled": true } });
+        // Patch only changes api_enabled; api_port and mcp_enabled must survive.
+        let patch = serde_json::json!({ "integrations": { "apiEnabled": false } });
         let patch = canonicalise_patch_keys(patch);
         merge_json(&mut current_val, &patch);
 
         let result: Config = serde_json::from_value(current_val).unwrap();
-        assert!(result.logging.remote_enabled, "patched field must be set");
-        assert_eq!(
-            result.logging.local_retention_days, 42,
-            "unpatched field must be preserved"
+        assert!(
+            !result.integrations.api_enabled,
+            "patched field must be set"
         );
         assert_eq!(
-            result.logging.loki_url, "http://prior:3100",
+            result.integrations.api_port, 9102,
+            "unpatched field must be preserved"
+        );
+        assert!(
+            !result.integrations.mcp_enabled,
             "unpatched field must be preserved"
         );
     }
 
-    // =========================================================================
-    // loki_auth preservation through the merge pipeline (HIGH invariant)
-    //
-    // The merge base comes from get_config(), which masks loki_auth as "***".
-    // set_config()'s guard treats both empty and the mask sentinel as "keep the
-    // stored token". These tests pin that invariant at the merge-pipeline level.
-    // =========================================================================
-
     #[test]
-    fn test_merge_pipeline_loki_auth_omitted_carries_mask_sentinel() {
-        // When a patch omits loki_auth entirely, the merge base's masked value
-        // ("***") survives unchanged into the merged Value. set_config will then
-        // recognise it as the sentinel and restore the real stored token.
-        // This test verifies the merge step itself — not set_config's guard —
-        // by asserting the sentinel is still present after the merge.
-        let mut base = Config::default();
-        // Simulate what get_config() returns: real token replaced by sentinel.
-        base.logging.loki_auth = LokiAuth(LOKI_AUTH_MASK.to_string());
-        let mut base_val = serde_json::to_value(&base).unwrap();
-
-        // Patch that deliberately does NOT include loki_auth.
-        let patch = serde_json::json!({ "logging": { "remote_enabled": true } });
-        let patch = canonicalise_patch_keys(patch);
-        merge_json(&mut base_val, &patch);
-
-        let merged: Config = serde_json::from_value(base_val).unwrap();
-        assert_eq!(
-            merged.logging.loki_auth.0, LOKI_AUTH_MASK,
-            "mask sentinel must survive the merge when patch omits loki_auth"
-        );
-        // set_config's guard will see LOKI_AUTH_MASK and restore the real token.
-        assert!(merged.logging.loki_auth.is_masked_or_empty());
-    }
-
-    #[test]
-    fn test_merge_pipeline_loki_auth_sent_as_sentinel_still_masked() {
-        // When a patch explicitly sends the mask sentinel for loki_auth (e.g. the
-        // MCP client echoed back what get_config returned), the merged Value still
-        // carries the sentinel and set_config's guard preserves the real token.
-        let mut base = Config::default();
-        base.logging.loki_auth = LokiAuth(LOKI_AUTH_MASK.to_string());
-        let mut base_val = serde_json::to_value(&base).unwrap();
-
-        let patch = serde_json::json!({
-            "logging": { "loki_auth": LOKI_AUTH_MASK }
-        });
-        let patch = canonicalise_patch_keys(patch);
-        merge_json(&mut base_val, &patch);
-
-        let merged: Config = serde_json::from_value(base_val).unwrap();
-        assert_eq!(
-            merged.logging.loki_auth.0, LOKI_AUTH_MASK,
-            "sentinel patch must keep the sentinel in the merged value"
-        );
-        assert!(merged.logging.loki_auth.is_masked_or_empty());
+    fn test_config_ignores_retired_logging_block() {
+        // A config.json written by an older build still carries the whole
+        // `logging` block — retention, the Loki URL, the token. Nothing reads
+        // those keys any more, and serde's default is to ignore unknown fields
+        // (no `deny_unknown_fields` anywhere in this file), so the file must
+        // still load rather than failing the user into a default config.
+        let json = r#"{
+            "version": 1,
+            "logging": {
+                "local_retention_days": 14,
+                "remote_enabled": true,
+                "loki_url": "http://loki:3100",
+                "loki_auth": "Bearer glsa_whatever",
+                "loki_tenant": "org1",
+                "loki_labels": [["env", "prod"]],
+                "telemetry_level": "debug"
+            },
+            "integrations": { "api_port": 9103 }
+        }"#;
+        let config: Config = serde_json::from_str(json).expect("retired keys must be ignored");
+        assert_eq!(config.integrations.api_port, 9103);
     }
 
     #[test]

@@ -7,7 +7,6 @@
   import { Button } from '@poodle64/ui/button';
   import { Input } from '@poodle64/ui/input';
   import * as AlertDialog from '@poodle64/ui/alert-dialog';
-  import LoggingTelemetrySettings from './LoggingTelemetrySettings.svelte';
   import Eye from '@lucide/svelte/icons/eye';
   import EyeOff from '@lucide/svelte/icons/eye-off';
   import Copy from '@lucide/svelte/icons/copy';
@@ -238,8 +237,6 @@
     {/if}
   </div>
 </section>
-
-<LoggingTelemetrySettings />
 
 <!-- Rotate token confirmation dialog -->
 <AlertDialog.Root

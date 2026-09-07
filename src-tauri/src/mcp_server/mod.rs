@@ -11,7 +11,6 @@
 //! - `setting`    (dispatcher: get/update)
 //! - `transcription` (dispatcher: list/get/stats)
 //! - `transcribe_file` / `transcribe_status` (async file transcription)
-//! - `test_loki_connection` (verify the Loki log-shipping endpoint)
 //! - `recording` (start/stop/toggle, mirroring the global hotkey)
 //! - `get_state`, `get_system`, `list_prompts`
 
@@ -129,21 +128,6 @@ pub struct TranscribeFileParams {
 pub struct TranscribeStatusParams {
     /// The job id returned by `transcribe_file`.
     pub job_id: String,
-}
-
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct TestLokiParams {
-    /// The Loki base URL to test (e.g. `https://loki.example`); the
-    /// `/loki/api/v1/push` path is appended if missing. Omit to test the URL
-    /// saved in Logging settings.
-    #[serde(default)]
-    pub url: Option<String>,
-    /// Optional Authorization value (a bearer token). Omit to use the saved token.
-    #[serde(default)]
-    pub auth: Option<String>,
-    /// Optional X-Scope-OrgID tenant header. Omit to use the saved tenant.
-    #[serde(default)]
-    pub tenant: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -428,8 +412,7 @@ impl ThothMcp {
                     .patch
                     .ok_or_else(|| core_err("`patch` required for update".into()))?;
                 // Canonicalise camelCase keys to snake_case before merging so that
-                // `{"localRetentionDays": 14}` and `{"local_retention_days": 14}` both
-                // work. Without this step, a camelCase key is added alongside the
+                // `{"apiPort": 8765}` and `{"api_port": 8765}` both work. Without this step, a camelCase key is added alongside the
                 // existing snake_case key and serde errors on "duplicate field".
                 let patch_val: serde_json::Value = serde_json::from_str(&patch)
                     .map_err(|e| core_err(format!("invalid patch JSON: {}", e)))?;
@@ -439,12 +422,6 @@ impl ThothMcp {
                     ));
                 }
                 let patch_val = crate::config::canonicalise_patch_keys(patch_val);
-                // `get_config()` returns the config with loki_auth replaced by the mask
-                // sentinel "***". Merging onto this masked base is safe: if the patch does
-                // not include loki_auth, the sentinel survives into the merged Value and
-                // `set_config`'s mask/empty guard restores the real stored token. If the
-                // patch explicitly sends the sentinel, the same guard applies. The only way
-                // to clear loki_auth is via `set_loki_auth`.
                 let mut current = serde_json::to_value(
                     crate::config::get_config().map_err(|e| core_err(e.to_string()))?,
                 )
@@ -560,33 +537,6 @@ impl ThothMcp {
     }
 
     #[tool(
-        description = "Test the Loki log-shipping endpoint by pushing one synthetic, content-free event, to verify the URL, token and tenant before saving. Optional `url` (omit to test the URL saved in Logging settings; a bare base URL is fine, the push path is added); optional `auth` (omit to use the saved token); optional `tenant` (omit to use the saved tenant). Returns ok on success, or the Loki error."
-    )]
-    async fn test_loki_connection(
-        &self,
-        Parameters(p): Parameters<TestLokiParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let url = match p.url {
-            Some(u) if !u.trim().is_empty() => u,
-            _ => {
-                crate::config::get_config()
-                    .map_err(|e| core_err(e.to_string()))?
-                    .logging
-                    .loki_url
-            }
-        };
-        if url.trim().is_empty() {
-            return Err(core_err(
-                "no Loki URL given and none saved in Logging settings".into(),
-            ));
-        }
-        crate::telemetry::test_loki_connection(url, p.auth, p.tenant)
-            .await
-            .map_err(|e| core_err(e.to_string()))?;
-        json_result(&serde_json::json!({ "ok": true, "message": "Loki accepted a test event" }))
-    }
-
-    #[tool(
         description = "Control recording the same way the global hotkey does: `start`, `stop`, or `toggle`. `stop` (and a toggle that stops) runs the full transcription pipeline on what was recorded, honouring your saved filter, spelling and enhancement settings, then inserts/copies the text per your settings. Returns the resulting action (and the recording path on a start)."
     )]
     async fn recording(
@@ -634,8 +584,8 @@ impl ServerHandler for ThothMcp {
                  app on this machine. Dispatchers: `dictionary` (list/add/update/delete/import/export), \
                  `setting` (get/update), `transcription` (list/get/stats). Singletons: `transcribe_file` \
                  + `transcribe_status` (transcribe a local audio file as a background job), \
-                 `test_loki_connection` (verify the Loki endpoint), `recording` (start/stop/toggle, \
-                 mirroring the global hotkey), `get_state`, `get_system`, `list_prompts`. All operations \
+                 `recording` (start/stop/toggle, mirroring the global hotkey), `get_state`, \
+                 `get_system`, `list_prompts`. All operations \
                  mirror what the user can do in Thoth's GUI; genuinely destructive or system-level \
                  operations (deleting history, quitting the app) remain unexposed. This controls only the \
                  local instance."

@@ -1,7 +1,7 @@
 //! Storage management for Thoth
 //!
 //! Provides disk usage reporting and cleanup commands for all data
-//! locations: models, recordings, logs, database, config, and
+//! locations: models, recordings, database, config, and
 //! FluidAudio CoreML cache.
 
 use crate::error::Error;
@@ -17,8 +17,6 @@ pub struct StorageUsage {
     pub models_bytes: u64,
     /// Audio recordings (~/.thoth/Recordings/)
     pub recordings_bytes: u64,
-    /// Debug logs (~/.thoth/logs/)
-    pub logs_bytes: u64,
     /// SQLite database (~/.thoth/thoth.db)
     pub database_bytes: u64,
     /// Config + dictionary + prompts (small files)
@@ -29,8 +27,6 @@ pub struct StorageUsage {
     pub total_bytes: u64,
     /// Number of recording files
     pub recording_count: u64,
-    /// Number of log files
-    pub log_count: u64,
 }
 
 /// Get the Thoth data directory (~/.thoth)
@@ -118,7 +114,6 @@ pub fn get_storage_usage() -> Result<StorageUsage, Error> {
 
     let models_bytes = dir_size(&base.join("models"));
     let recordings_bytes = dir_size(&base.join("Recordings"));
-    let logs_bytes = dir_size(&base.join("logs"));
     let database_bytes = fs::metadata(base.join("thoth.db"))
         .map(|m| m.len())
         .unwrap_or(0);
@@ -126,25 +121,18 @@ pub fn get_storage_usage() -> Result<StorageUsage, Error> {
     let fluidaudio_bytes = fluidaudio_models_dir().map(|d| dir_size(&d)).unwrap_or(0);
 
     let recording_count = file_count(&base.join("Recordings"));
-    let log_count = file_count(&base.join("logs"));
 
-    let total_bytes = models_bytes
-        + recordings_bytes
-        + logs_bytes
-        + database_bytes
-        + config_bytes
-        + fluidaudio_bytes;
+    let total_bytes =
+        models_bytes + recordings_bytes + database_bytes + config_bytes + fluidaudio_bytes;
 
     Ok(StorageUsage {
         models_bytes,
         recordings_bytes,
-        logs_bytes,
         database_bytes,
         config_bytes,
         fluidaudio_bytes,
         total_bytes,
         recording_count,
-        log_count,
     })
 }
 
@@ -170,31 +158,6 @@ pub fn delete_all_recordings() -> Result<u64, Error> {
     }
 
     tracing::info!("Deleted {} recording files", deleted);
-    Ok(deleted)
-}
-
-/// Delete all log files
-#[tauri::command]
-pub fn delete_all_logs() -> Result<u64, Error> {
-    let logs_dir = thoth_dir().join("logs");
-    if !logs_dir.exists() {
-        return Ok(0);
-    }
-
-    let mut deleted = 0u64;
-    let entries = fs::read_dir(&logs_dir).map_err(|e| e.to_string())?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            if let Err(e) = fs::remove_file(&path) {
-                tracing::warn!("Failed to delete log file {:?}: {}", path, e);
-            } else {
-                deleted += 1;
-            }
-        }
-    }
-
-    tracing::info!("Deleted {} log files", deleted);
     Ok(deleted)
 }
 

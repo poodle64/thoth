@@ -287,11 +287,6 @@ async fn handle_get_settings() -> Result<impl IntoResponse, AppError> {
 /// Partially update settings. Accepts a JSON object with only the fields to change;
 /// missing fields are preserved from the current config. camelCase keys are
 /// canonicalised to snake_case before merging so both key styles are accepted.
-///
-/// `loki_auth` cannot be cleared via this endpoint: if the patch omits the field,
-/// the serialised base carries the mask sentinel (`"***"`), which `set_config`'s
-/// preservation guard restores to the stored real token. To clear the token
-/// explicitly, use the dedicated `set_loki_auth` Tauri command.
 async fn handle_patch_settings(
     Json(patch): Json<serde_json::Value>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -301,12 +296,6 @@ async fn handle_patch_settings(
         ));
     }
     let patch = crate::config::canonicalise_patch_keys(patch);
-    // `get_config()` returns the config with loki_auth replaced by the mask
-    // sentinel "***". Merging onto this masked base is safe: if the patch does
-    // not include loki_auth, the sentinel survives into the merged Value and
-    // `set_config`'s mask/empty guard restores the real stored token. If the
-    // patch explicitly sends the sentinel, the same guard applies. The only way
-    // to clear loki_auth is via `set_loki_auth`.
     let mut current = serde_json::to_value(crate::config::get_config()?)?;
     crate::config::merge_json(&mut current, &patch);
     let new_cfg: crate::config::Config =

@@ -2,8 +2,8 @@
   /**
    * Storage pane - disk usage overview and cleanup tools.
    *
-   * Shows storage breakdown by category (models, recordings, logs, database,
-   * config, FluidAudio cache) with selective cleanup actions and a full reset.
+   * Shows storage breakdown by category (models, recordings, database, config,
+   * FluidAudio cache) with selective cleanup actions and a full reset.
    */
 
   import { onMount } from 'svelte';
@@ -17,13 +17,11 @@
   interface StorageUsage {
     modelsBytes: number;
     recordingsBytes: number;
-    logsBytes: number;
     databaseBytes: number;
     configBytes: number;
     fluidaudioBytes: number;
     totalBytes: number;
     recordingCount: number;
-    logCount: number;
   }
 
   let usage = $state<StorageUsage | null>(null);
@@ -31,7 +29,7 @@
   let error = $state<string | null>(null);
 
   /** Which destructive action is pending confirmation */
-  let confirmAction = $state<'recordings' | 'logs' | 'fluidaudio' | 'all' | null>(null);
+  let confirmAction = $state<'recordings' | 'fluidaudio' | 'all' | null>(null);
   let actionInProgress = $state<string | null>(null);
 
   async function loadUsage() {
@@ -58,20 +56,6 @@
     try {
       const deleted = await invoke<number>('delete_all_recordings');
       console.log(`Deleted ${deleted} recordings`);
-      await loadUsage();
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-    } finally {
-      actionInProgress = null;
-    }
-  }
-
-  async function executeDeleteLogs() {
-    confirmAction = null;
-    actionInProgress = 'logs';
-    try {
-      const deleted = await invoke<number>('delete_all_logs');
-      console.log(`Deleted ${deleted} log files`);
       await loadUsage();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -157,13 +141,6 @@
           title="Database: {formatBytes(usage.databaseBytes)}"
         ></div>
       {/if}
-      {#if usage.logsBytes > 0}
-        <div
-          class="min-w-[3px] bg-gray-500 transition-[width]"
-          style:width="{Math.max(pct(usage.logsBytes), 1)}%"
-          title="Logs: {formatBytes(usage.logsBytes)}"
-        ></div>
-      {/if}
       {#if usage.configBytes > 0}
         <div
           class="min-w-[3px] bg-slate-400 transition-[width]"
@@ -200,18 +177,6 @@
         <span class="tabular-nums font-medium">{formatBytes(usage.databaseBytes)}</span>
       </div>
       <div class="flex items-center gap-2.5 text-sm">
-        <span class="h-2.5 w-2.5 flex-shrink-0 rounded-sm bg-gray-500"></span>
-        <span class="text-muted-foreground flex-1">Logs</span>
-        <span class="tabular-nums font-medium">
-          {formatBytes(usage.logsBytes)}
-          {#if usage.logCount > 0}
-            <span class="text-muted-foreground ml-1 text-xs font-normal">
-              ({usage.logCount} files)
-            </span>
-          {/if}
-        </span>
-      </div>
-      <div class="flex items-center gap-2.5 text-sm">
         <span class="h-2.5 w-2.5 flex-shrink-0 rounded-sm bg-slate-400"></span>
         <span class="text-muted-foreground flex-1">Config</span>
         <span class="tabular-nums font-medium">{formatBytes(usage.configBytes)}</span>
@@ -242,24 +207,6 @@
           onclick={() => (confirmAction = 'recordings')}
         >
           {actionInProgress === 'recordings' ? 'Deleting...' : 'Delete'}
-        </Button>
-      </div>
-
-      <!-- Logs -->
-      <div class="flex items-center justify-between rounded-md border px-3.5 py-2.5">
-        <div class="flex flex-col gap-0.5">
-          <span class="text-sm font-medium">Logs</span>
-          <span class="text-muted-foreground text-xs">
-            {usage.logCount} log files ({formatBytes(usage.logsBytes)})
-          </span>
-        </div>
-        <Button
-          variant="destructive"
-          size="sm"
-          disabled={usage.logsBytes === 0 || actionInProgress !== null}
-          onclick={() => (confirmAction = 'logs')}
-        >
-          {actionInProgress === 'logs' ? 'Deleting...' : 'Delete'}
         </Button>
       </div>
 
@@ -322,28 +269,6 @@
     <AlertDialog.Footer>
       <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
       <AlertDialog.Action variant="destructive" onclick={executeDeleteRecordings}>
-        Delete
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
-
-<AlertDialog.Root
-  open={confirmAction === 'logs'}
-  onOpenChange={(v) => {
-    if (!v) confirmAction = null;
-  }}
->
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>Delete all logs?</AlertDialog.Title>
-      <AlertDialog.Description>
-        This will permanently delete all log files. This cannot be undone.
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
-      <AlertDialog.Action variant="destructive" onclick={executeDeleteLogs}>
         Delete
       </AlertDialog.Action>
     </AlertDialog.Footer>

@@ -65,15 +65,6 @@ const MOCK_CONFIG = {
     api_port: 8765,
     mcp_enabled: false,
   },
-  logging: {
-    local_retention_days: 7,
-    remote_enabled: false,
-    loki_url: '',
-    loki_auth: '',
-    loki_tenant: null,
-    loki_labels: [] as [string, string][],
-    telemetry_level: 'info',
-  },
 };
 
 const MOCK_MODELS = [
@@ -223,13 +214,11 @@ const MOCK_GPU_INFO = {
 const MOCK_STORAGE_USAGE = {
   modelsBytes: 155000000,
   recordingsBytes: 0,
-  logsBytes: 4096,
   databaseBytes: 32768,
   configBytes: 1024,
   fluidaudioBytes: 0,
-  totalBytes: 155037888,
+  totalBytes: 155033792,
   recordingCount: 0,
-  logCount: 2,
 };
 
 const MOCK_TRANSCRIPTION_STATS = {
@@ -594,7 +583,6 @@ export const thothMockCommands: CommandMap = {
   relaunch_app: () => undefined,
   delete_all_data: () => undefined,
   delete_all_recordings: () => 0,
-  delete_all_logs: () => 0,
   export_to_csv: () => 0,
   export_to_json: () => 0,
   export_to_txt: () => 0,
@@ -608,16 +596,6 @@ export const thothMockCommands: CommandMap = {
   remove_quarantine: () => undefined,
   start_audio_preview: () => undefined,
   stop_audio_preview: () => undefined,
-
-  // -- Logging & Telemetry --
-  test_loki_connection: (args) => {
-    const url = (args as { url?: string } | undefined)?.url ?? '';
-    // Simulate failure for obviously-bogus URLs (empty or localhost placeholder)
-    if (!url || url === 'http://loki:3100/loki/api/v1/push') {
-      throw new Error('Connection refused — is Loki reachable?');
-    }
-    return undefined;
-  },
 
   // -- Integrations (Local Control API + MCP server) --
   get_integrations_status: () => ({

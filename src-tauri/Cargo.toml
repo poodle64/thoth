@@ -77,6 +77,11 @@ fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", tag = "v0.1
 # rustls-no-provider avoids aws-lc-sys (fails under -march=armv8-a in CI);
 # the ring crate (added below) provides the crypto backend instead.
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "charset", "http2", "system-proxy", "rustls-no-provider"] }
+# The household's one telemetry call: stderr for the developer, allow-listed
+# OTLP/HTTP for the corpus. `reqwest-middleware` names the type `http_client()`
+# hands back, so the shared traceparent-carrying client can be stored.
+telemetry = { git = "https://github.com/poodle64/telemetry-rs", tag = "v0.1.0" }
+reqwest-middleware = "0.5"
 rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "std"] }
 futures-util = "0.3"
 bzip2 = "0.6"
@@ -113,12 +118,6 @@ csv = "1"
 anyhow = "1.0"
 thiserror = "2.0"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# Rolling file appender for daily log rotation
-tracing-appender = "0.2"
-# Loki log forwarding layer (optional telemetry export)
-# Uses rustls + ring for TLS (no aws-lc-sys, which fails under -march=armv8-a)
-tracing-loki = { version = "0.2.7", default-features = false, features = ["rustls", "compat-0-2-1"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 parking_lot = "0.12"
@@ -132,7 +131,6 @@ strsim = "0.11"
 unicode-normalization = "0.1"
 num_cpus = "1.17"
 tempfile = "3.25"
-hostname = "0.4"
 
 # Desktop-specific (macOS, Windows, Linux)
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]

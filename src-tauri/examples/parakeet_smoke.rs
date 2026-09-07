@@ -15,12 +15,9 @@
 #[cfg(feature = "parakeet")]
 fn main() -> anyhow::Result<()> {
     use std::path::Path;
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // The same one call the app makes. Nothing is allow-listed, so this smoke
+    // test writes to stderr and exports nothing whatever the environment says.
+    let _telemetry = telemetry::init("parakeet_smoke", env!("CARGO_PKG_VERSION"), &[]);
 
     let mut args = std::env::args().skip(1);
     let model_dir = args
