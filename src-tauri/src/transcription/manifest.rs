@@ -183,12 +183,12 @@ pub async fn fetch_manifest(force_refresh: bool) -> Result<ModelManifest> {
     tracing::info!("Fetching model manifest from {}", MANIFEST_URL);
 
     crate::ensure_crypto_provider();
-    let client = reqwest::Client::builder()
-        .user_agent("Thoth/1.0")
+    let response = crate::http_client()
+        .get(MANIFEST_URL)
+        .header("User-Agent", "Thoth/1.0")
         .timeout(std::time::Duration::from_secs(30))
-        .build()?;
-
-    let response = client.get(MANIFEST_URL).send().await?;
+        .send()
+        .await?;
 
     if !response.status().is_success() {
         return Err(anyhow!(

@@ -79,7 +79,7 @@ pub enum OllamaError {
 #[derive(Debug, Clone)]
 pub struct OllamaClient {
     base_url: String,
-    client: reqwest::Client,
+    client: reqwest_middleware::ClientWithMiddleware,
     timeout: Duration,
     default_model: Option<String>,
 }
@@ -111,14 +111,12 @@ impl OllamaClient {
     pub fn with_config(base_url: &str, timeout_secs: u64, default_model: Option<String>) -> Self {
         let timeout = Duration::from_secs(timeout_secs);
         crate::ensure_crypto_provider();
-        let client = reqwest::Client::builder()
-            .timeout(timeout)
-            .build()
-            .expect("Failed to create HTTP client");
 
         Self {
             base_url: base_url.to_string(),
-            client,
+            // The process's shared traceparent-carrying client. It has no
+            // client-level timeout, so every request below sets its own.
+            client: crate::http_client(),
             timeout,
             default_model,
         }
@@ -137,7 +135,7 @@ impl OllamaClient {
     /// Check if Ollama server is available
     pub async fn is_available(&self) -> bool {
         let url = format!("{}/api/tags", self.base_url);
-        match self.client.get(&url).send().await {
+        match self.client.get(&url).timeout(self.timeout).send().await {
             Ok(response) => response.status().is_success(),
             Err(e) => {
                 tracing::debug!("Ollama not available: {}", e);
@@ -153,6 +151,7 @@ impl OllamaClient {
         let response = self
             .client
             .get(&url)
+            .timeout(self.timeout)
             .send()
             .await
             .map_err(|e| anyhow!("Failed to connect to Ollama: {}", e))?;
@@ -186,6 +185,7 @@ impl OllamaClient {
             .client
             .post(&url)
             .json(request)
+            .timeout(self.timeout)
             .send()
             .await
             .map_err(|e| {

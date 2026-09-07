@@ -81,7 +81,8 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "str
 # OTLP/HTTP for the corpus. `reqwest-middleware` names the type `http_client()`
 # hands back, so the shared traceparent-carrying client can be stored.
 telemetry = { git = "https://github.com/poodle64/telemetry-rs", tag = "v0.1.0" }
-reqwest-middleware = "0.5"
+# `json` for the request builders; the crate forwards it to reqwest.
+reqwest-middleware = { version = "0.5", features = ["json"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "std"] }
 futures-util = "0.3"
 bzip2 = "0.6"

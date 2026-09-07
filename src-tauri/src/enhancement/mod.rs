@@ -19,6 +19,7 @@ pub use prompts::{
     get_custom_prompts_cmd, get_prompt_by_id, save_custom_prompt_cmd,
 };
 
+use crate::TELEMETRY_TARGET;
 use crate::error::Error;
 use parking_lot::Mutex;
 use std::sync::OnceLock;
@@ -175,6 +176,18 @@ pub async fn list_openai_compat_models() -> Result<Vec<String>, Error> {
 /// The public signature `(text, model, prompt)` is unchanged; only internal
 /// dispatch changed.
 #[tauri::command]
+#[tracing::instrument(
+    target = TELEMETRY_TARGET,
+    name = "enhancement",
+    skip_all,
+    fields(
+        model = %model,
+        backend = tracing::field::Empty,
+        input_bytes = text.len(),
+        output_bytes = tracing::field::Empty,
+        ok = tracing::field::Empty,
+    )
+)]
 pub async fn enhance_text(text: String, model: String, prompt: String) -> Result<String, Error> {
     if text.is_empty() {
         return Err("Text cannot be empty".to_string().into());
@@ -188,6 +201,8 @@ pub async fn enhance_text(text: String, model: String, prompt: String) -> Result
         let b = get_backend().lock();
         (b.backend_type, b.ollama.clone(), b.openai_compat.clone())
     };
+    let span = tracing::Span::current();
+    span.record("backend", tracing::field::debug(backend_type));
 
     tracing::info!(
         "Enhancing text with model '{}' ({} chars, backend: {:?})",
@@ -201,22 +216,28 @@ pub async fn enhance_text(text: String, model: String, prompt: String) -> Result
             .enhance_text(&text, &model, &prompt)
             .await
             .map_err(|e| {
+                span.record("ok", false);
                 tracing::error!("Ollama enhancement failed: {}", e);
                 format!("Enhancement failed: {}", e)
             })?,
         BackendType::OpenAiCompat => {
-            let client = openai_compat
-                .ok_or_else(|| "OpenAI-compatible backend not configured".to_string())?;
+            let client = openai_compat.ok_or_else(|| {
+                span.record("ok", false);
+                "OpenAI-compatible backend not configured".to_string()
+            })?;
             client
                 .enhance_text(&text, &model, &prompt)
                 .await
                 .map_err(|e| {
+                    span.record("ok", false);
                     tracing::error!("OpenAI-compat enhancement failed: {}", e);
                     format!("Enhancement failed: {}", e)
                 })?
         }
     };
 
+    span.record("output_bytes", result.len());
+    span.record("ok", true);
     tracing::info!(
         "Enhancement complete ({} -> {} characters)",
         text.len(),

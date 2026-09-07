@@ -167,6 +167,18 @@ pub(crate) fn ensure_crypto_provider() {
 /// not a redaction pass, so content cannot leak by mistake.
 pub(crate) const TELEMETRY_TARGET: &str = "telemetry";
 
+/// The process's one outbound HTTP client: `reqwest` under the middleware that
+/// opens a client span and carries W3C `traceparent`, so a call to Ollama or an
+/// OpenAI-compatible endpoint joins the trace it was made from.
+///
+/// Built once; a clone shares the underlying connection pool. Per-request
+/// timeouts, because the middleware client is built without any.
+pub(crate) fn http_client() -> reqwest_middleware::ClientWithMiddleware {
+    static CLIENT: std::sync::OnceLock<reqwest_middleware::ClientWithMiddleware> =
+        std::sync::OnceLock::new();
+    CLIENT.get_or_init(telemetry::http_client).clone()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     ensure_crypto_provider();

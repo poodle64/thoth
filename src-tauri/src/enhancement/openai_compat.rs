@@ -96,7 +96,7 @@ pub enum OpenAiCompatError {
 pub struct OpenAiCompatClient {
     base_url: String,
     api_key: Option<String>,
-    client: reqwest::Client,
+    client: reqwest_middleware::ClientWithMiddleware,
     timeout: Duration,
 }
 
@@ -142,15 +142,13 @@ impl OpenAiCompatClient {
 
         let timeout = Duration::from_secs(timeout_secs);
         crate::ensure_crypto_provider();
-        let client = reqwest::Client::builder()
-            .timeout(timeout)
-            .build()
-            .map_err(|e| OpenAiCompatError::ConnectionFailed(e.to_string()))?;
 
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key,
-            client,
+            // The process's shared traceparent-carrying client. It has no
+            // client-level timeout, so every request below sets its own.
+            client: crate::http_client(),
             timeout,
         })
     }
@@ -158,7 +156,7 @@ impl OpenAiCompatClient {
     /// Check if the server is reachable by probing `/v1/models`.
     pub async fn is_available(&self) -> bool {
         let url = format!("{}/v1/models", self.base_url);
-        let mut req = self.client.get(&url);
+        let mut req = self.client.get(&url).timeout(self.timeout);
         if let Some(key) = &self.api_key {
             req = req.bearer_auth(key);
         }
@@ -174,7 +172,7 @@ impl OpenAiCompatClient {
     /// List available models from `/v1/models`.
     pub async fn list_models(&self) -> Result<Vec<String>> {
         let url = format!("{}/v1/models", self.base_url);
-        let mut req = self.client.get(&url);
+        let mut req = self.client.get(&url).timeout(self.timeout);
         if let Some(key) = &self.api_key {
             req = req.bearer_auth(key);
         }
@@ -208,7 +206,7 @@ impl OpenAiCompatClient {
     ) -> Result<String, OpenAiCompatError> {
         let url = format!("{}/v1/chat/completions", self.base_url);
 
-        let mut req = self.client.post(&url).json(request);
+        let mut req = self.client.post(&url).json(request).timeout(self.timeout);
         if let Some(key) = &self.api_key {
             req = req.bearer_auth(key);
         }

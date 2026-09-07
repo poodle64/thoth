@@ -8,6 +8,7 @@
 //! 5. Output (clipboard copy and/or paste at cursor)
 //! 6. History (save to database)
 
+use crate::TELEMETRY_TARGET;
 use crate::canonical;
 use crate::clipboard;
 use crate::database;
@@ -20,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tauri::{AppHandle, Emitter};
+use tracing::Instrument;
 
 /// Pipeline execution state
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -480,7 +482,16 @@ fn spawn_hands_free_watcher(app: AppHandle, timeout: std::time::Duration) {
 /// Emits `pipeline-progress` events as each stage completes.
 /// Emits `pipeline-complete` when finished with the final result.
 /// Hides the recording indicator overlay when recording stops.
+///
+/// The root of the dictation trace. The detached processing task is attached to
+/// this span so transcription, enhancement and the history write nest under it.
 #[tauri::command]
+#[tracing::instrument(
+    target = TELEMETRY_TARGET,
+    name = "recording_stop",
+    skip_all,
+    fields(recording_seconds = tracing::field::Empty)
+)]
 pub async fn pipeline_stop_and_process(
     app: AppHandle,
     config: Option<PipelineConfig>,
@@ -520,6 +531,7 @@ pub async fn pipeline_stop_and_process(
 
     // Recording duration from the WAV header; 0.0 if unavailable.
     let rec_duration = get_audio_duration(&audio_path).unwrap_or(0.0);
+    tracing::Span::current().record("recording_seconds", rec_duration);
     tracing::info!(
         target: "telemetry",
         duration_seconds = rec_duration,
@@ -542,35 +554,38 @@ pub async fn pipeline_stop_and_process(
     // Detach processing: transcription, filtering, enhancement, output and history
     // run in a separate task. PROCESSING_COUNT tracks in-flight tasks so
     // get_pipeline_state can report Transcribing when appropriate.
-    tokio::spawn(async move {
-        // Run processing under the guard in an inner scope so PROCESSING_COUNT
-        // is decremented BEFORE we emit the final authoritative state. Otherwise
-        // get_pipeline_state() would still see the guard alive and report
-        // Transcribing, leaving the UI stuck on "Processing" forever.
-        let result = {
-            let _processing_guard = ProcessingGuard::new();
-            process_audio(&app, &audio_path, &config).await
-        };
-        match &result {
-            Ok(r) => {
-                tracing::info!("Pipeline: Emitting pipeline-complete event");
-                if let Err(e) = app.emit("pipeline-complete", r) {
-                    tracing::error!("Pipeline: Failed to emit pipeline-complete: {}", e);
+    tokio::spawn(
+        async move {
+            // Run processing under the guard in an inner scope so PROCESSING_COUNT
+            // is decremented BEFORE we emit the final authoritative state. Otherwise
+            // get_pipeline_state() would still see the guard alive and report
+            // Transcribing, leaving the UI stuck on "Processing" forever.
+            let result = {
+                let _processing_guard = ProcessingGuard::new();
+                process_audio(&app, &audio_path, &config).await
+            };
+            match &result {
+                Ok(r) => {
+                    tracing::info!("Pipeline: Emitting pipeline-complete event");
+                    if let Err(e) = app.emit("pipeline-complete", r) {
+                        tracing::error!("Pipeline: Failed to emit pipeline-complete: {}", e);
+                    }
+                }
+                Err(_) if discard_silent_wav(&result, &audio_path) => {
+                    // Silent recording suppressed — discard_silent_wav already deleted the WAV.
+                }
+                Err(e) => {
+                    tracing::error!("Pipeline: Processing failed: {}", e);
+                    emit_progress(&app, PipelineState::Failed, e);
                 }
             }
-            Err(_) if discard_silent_wav(&result, &audio_path) => {
-                // Silent recording suppressed — discard_silent_wav already deleted the WAV.
-            }
-            Err(e) => {
-                tracing::error!("Pipeline: Processing failed: {}", e);
-                emit_progress(&app, PipelineState::Failed, e);
-            }
+            // Emit authoritative state after the guard has dropped. get_pipeline_state()
+            // returns Recording if a new clip started while this task ran, so this can
+            // never clobber an active recording with Idle.
+            emit_recording_state(&app);
         }
-        // Emit authoritative state after the guard has dropped. get_pipeline_state()
-        // returns Recording if a new clip started while this task ran, so this can
-        // never clobber an active recording with Idle.
-        emit_recording_state(&app);
-    });
+        .instrument(tracing::Span::current()),
+    );
 
     Ok(())
 }
@@ -770,11 +785,19 @@ async fn run_transcription_pipeline(
     // dedicated blocking thread avoids starving the shared async worker pool,
     // which matters now that process_audio runs as a detached task.
     let audio_path_owned = audio_path.to_string();
-    let raw_text =
-        tokio::task::spawn_blocking(move || transcription::transcribe_file(audio_path_owned))
-            .await
-            .map_err(|e| format!("Transcription task panicked: {}", e))?
-            .map_err(|e| e.to_string())?;
+    // spawn_blocking runs off the async context, so the span is carried across
+    // by hand; without this the transcription span has no parent.
+    let transcribe_span = tracing::info_span!(
+        target: TELEMETRY_TARGET,
+        "transcription",
+        engine = %transcription_model_name.as_deref().unwrap_or("unknown"),
+    );
+    let raw_text = tokio::task::spawn_blocking(move || {
+        transcribe_span.in_scope(|| transcription::transcribe_file(audio_path_owned))
+    })
+    .await
+    .map_err(|e| format!("Transcription task panicked: {}", e))?
+    .map_err(|e| e.to_string())?;
     let transcription_duration_seconds = transcription_start.elapsed().as_secs_f64();
 
     tracing::info!(
@@ -896,15 +919,37 @@ async fn run_transcription_pipeline(
 }
 
 /// Process audio through the transcription pipeline
+#[tracing::instrument(
+    target = TELEMETRY_TARGET,
+    name = "process_audio",
+    skip_all,
+    fields(
+        audio_seconds = tracing::field::Empty,
+        char_count = tracing::field::Empty,
+        enhanced = tracing::field::Empty,
+        ok = tracing::field::Empty,
+    )
+)]
 async fn process_audio(
     app: &AppHandle,
     audio_path: &str,
     config: &PipelineConfig,
 ) -> Result<PipelineResult, String> {
     let duration_seconds = get_audio_duration(audio_path);
+    let span = tracing::Span::current();
+    span.record("audio_seconds", duration_seconds.unwrap_or(0.0));
 
     // Run core transcription pipeline (transcribe + filter + enhance)
-    let output = run_transcription_pipeline(app, audio_path, config).await?;
+    let output = match run_transcription_pipeline(app, audio_path, config).await {
+        Ok(output) => output,
+        Err(e) => {
+            span.record("ok", false);
+            return Err(e);
+        }
+    };
+    span.record("char_count", output.text.chars().count());
+    span.record("enhanced", output.is_enhanced);
+    span.record("ok", true);
 
     // 4. Output (clipboard/paste)
     // The filtered text already carries any spoken-command line breaks (applied
@@ -1104,6 +1149,16 @@ fn stored_raw_text(text: &str, raw_text: &str) -> Option<String> {
 
 /// Save transcription to history database
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(
+    target = TELEMETRY_TARGET,
+    name = "save_to_history",
+    skip_all,
+    fields(
+        text_bytes = text.len(),
+        enhanced = is_enhanced,
+        saved = tracing::field::Empty,
+    )
+)]
 fn save_to_history(
     text: &str,
     raw_text: &str,
@@ -1137,10 +1192,12 @@ fn save_to_history(
 
     match database::transcription::create_transcription(&transcription) {
         Ok(()) => {
+            tracing::Span::current().record("saved", true);
             tracing::info!("Pipeline: Saved transcription {}", transcription.id);
             Some(transcription.id)
         }
         Err(e) => {
+            tracing::Span::current().record("saved", false);
             tracing::warn!("Pipeline: Failed to save transcription: {}", e);
             None
         }
