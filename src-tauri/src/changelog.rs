@@ -244,10 +244,14 @@ mod tests {
 
     /// Newest first, because that is the order the file is written in and the
     /// order a "what changed" list is read in.
+    ///
+    /// The expected version is the crate's own, not a literal: `bump-version.sh`
+    /// moves `Cargo.toml` and the changelog's top entry together, so a retyped
+    /// version here just rots at the next release.
     #[test]
     fn releases_come_back_newest_first() {
         let releases = releases();
-        assert_eq!(releases.first().unwrap().version, "2026.6.7");
+        assert_eq!(releases.first().unwrap().version, env!("CARGO_PKG_VERSION"));
     }
 
     /// The whole point of embedding the file: asking for the running version
