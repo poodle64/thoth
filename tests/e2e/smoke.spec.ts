@@ -30,9 +30,13 @@ test.describe("frontend boot", () => {
     ).toBeLessThan(400);
 
     // The app is a SPA shell; wait for it to hydrate rather than for network idle,
-    // which never settles while failed invoke() calls retry.
-    await page.waitForLoadState("domcontentloaded");
-    await expect(page.locator("body")).toBeVisible();
+    // which never settles while failed invoke() calls retry. Waiting on the
+    // shell rather than on <body>: at domcontentloaded the SPA has not mounted,
+    // so the body still has a zero-height box and any error thrown during mount
+    // has not been collected yet.
+    await expect(page.locator(".settings-window")).toBeVisible({
+      timeout: 15_000,
+    });
 
     const unexpected = pageErrors.filter(
       (message) => !EXPECTED_WITHOUT_TAURI.test(message),
