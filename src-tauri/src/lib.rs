@@ -2,7 +2,9 @@
 //!
 //! Desktop application for macOS and Linux.
 
-use tauri::Manager;
+use std::sync::Mutex;
+
+use tauri::{Manager, RunEvent};
 
 use crate::error::Error;
 
@@ -220,15 +222,19 @@ pub fn run() {
         .setup(|app| {
             // The whole subscriber, installed before anything logs. On the main
             // thread, never inside a Tokio task: `init` builds the exporters'
-            // blocking HTTP client. The Guard lives in managed state for the
-            // process lifetime and flushes when it drops. Where the fleet has set
-            // no OTEL_EXPORTER_OTLP_ENDPOINT — a stranger's Mac — this is stderr
-            // and nothing else.
-            app.manage(telemetry::init(
+            // blocking HTTP client. Where the fleet has set no
+            // OTEL_EXPORTER_OTLP_ENDPOINT — a stranger's Mac — this is stderr and
+            // nothing else.
+            //
+            // Managing the Guard is only half of it: Tauri drops NO managed state
+            // at exit, so the RunEvent::Exit arm below is what actually drops it
+            // and flushes the batch processors. Mutex<Option<_>> because
+            // Manager::unmanage is deprecated and documented as unsafe.
+            app.manage(Mutex::new(Some(telemetry::init(
                 "thoth",
                 env!("CARGO_PKG_VERSION"),
                 &[TELEMETRY_TARGET],
-            ));
+            ))));
 
             tracing::info!("Thoth starting");
 
@@ -633,6 +639,20 @@ pub fn run() {
             control_api::rotate_api_token,
             control_api::set_api_port,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let RunEvent::Exit = event {
+                // The only thing that flushes whatever the batch processors are
+                // still holding. On the main thread, which is where the Guard
+                // must drop: after its bounded flush it joins the exporters'
+                // blocking client's own runtime thread.
+                let guard = app
+                    .state::<Mutex<Option<telemetry::Guard>>>()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .take();
+                drop(guard);
+            }
+        });
 }
