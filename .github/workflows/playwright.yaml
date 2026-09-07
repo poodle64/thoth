@@ -39,7 +39,7 @@ concurrency:
 jobs:
   smoke:
     name: Frontend smoke (Playwright)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04 # by-exception (2026-09-08): Playwright --with-deps needs apt and sudo the NixOS runner lacks
     timeout-minutes: 15
 
     steps:
