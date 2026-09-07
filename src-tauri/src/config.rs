@@ -671,8 +671,15 @@ fn load_from_disk() -> Result<Config, String> {
     let config: Config =
         serde_json::from_str(&contents).map_err(|e| format!("Failed to parse config: {}", e))?;
 
-    // Run migrations if needed
+    // Migrate if needed, and persist the result here — this is the one path that
+    // knows the config came off this disk. `migrate_config` itself writes
+    // nothing: it is called from tests with a synthetic config, and a write
+    // there lands on the user's own settings file.
+    let version = config.version;
     let migrated = migrate_config(config)?;
+    if migrated.version != version {
+        save_to_disk(&migrated)?;
+    }
 
     Ok(migrated)
 }
@@ -706,7 +713,9 @@ fn save_to_disk(config: &Config) -> Result<(), String> {
     Ok(())
 }
 
-/// Migrate configuration from older schema versions
+/// Migrate configuration from older schema versions. Pure: persisting the
+/// result belongs to [`load_from_disk`], which is the only caller that knows the
+/// config came off the user's disk.
 fn migrate_config(mut config: Config) -> Result<Config, String> {
     let original_version = config.version;
 
@@ -721,8 +730,6 @@ fn migrate_config(mut config: Config) -> Result<Config, String> {
             original_version,
             config.version
         );
-        // Save the migrated config
-        save_to_disk(&config)?;
     }
 
     Ok(config)
@@ -1312,6 +1319,30 @@ mod tests {
 
         let migrated = migrate_config(old_config).unwrap();
         assert_eq!(migrated.version, CURRENT_VERSION);
+    }
+
+    /// `migrate_config` used to save its result, so this very test — which hands
+    /// it a synthetic version-0 `Config::default()` — wrote defaults over the
+    /// developer's own `~/.thoth/config.json`, silently losing their device,
+    /// model and shortcuts on every `cargo test`.
+    #[test]
+    fn migrating_a_synthetic_config_does_not_touch_the_real_config_file() {
+        let _guard = CONFIG_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let path = get_config_path();
+        let before = fs::read(&path).ok();
+
+        migrate_config(Config {
+            version: 0,
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(
+            fs::read(&path).ok(),
+            before,
+            "{} was written",
+            path.display()
+        );
     }
 
     // =========================================================================
