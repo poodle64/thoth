@@ -103,6 +103,31 @@ export interface IntegrationsConfig {
   mcpEnabled: boolean;
 }
 
+/** Telemetry exporter configuration */
+export interface TelemetryConfig {
+  /** The collector's OTLP/HTTP base; empty means unset */
+  endpoint: string;
+  /** A command printing a JSON object of headers; empty means none */
+  headersHelper: string;
+}
+
+/**
+ * What the Telemetry card shows: the live exporter, whether the environment
+ * owns it, and the saved values underneath.
+ */
+export interface TelemetryStatus {
+  /** The endpoint this process is exporting to; empty means local only */
+  endpoint: string;
+  /** The helper command behind it */
+  headersHelper: string;
+  /** True when the environment set it, so the card shows it read-only */
+  fromEnv: boolean;
+  /** The saved endpoint, which the environment overrides where it is set */
+  savedEndpoint: string;
+  /** The saved helper command */
+  savedHeadersHelper: string;
+}
+
 /** AI enhancement configuration */
 export interface EnhancementConfig {
   /** Whether AI enhancement is enabled */
@@ -182,6 +207,8 @@ export interface Config {
   recorder: RecorderConfig;
   /** Integrations settings */
   integrations: IntegrationsConfig;
+  /** Telemetry exporter settings */
+  telemetry: TelemetryConfig;
 }
 
 /** Raw config from backend (snake_case fields) */
@@ -246,6 +273,10 @@ interface ConfigRaw {
     api_enabled: boolean;
     api_port: number;
     mcp_enabled: boolean;
+  };
+  telemetry?: {
+    endpoint: string;
+    headers_helper: string;
   };
 }
 
@@ -313,6 +344,10 @@ function parseConfig(raw: ConfigRaw): Config {
       apiPort: raw.integrations?.api_port ?? 8765,
       mcpEnabled: raw.integrations?.mcp_enabled ?? false,
     },
+    telemetry: {
+      endpoint: raw.telemetry?.endpoint ?? '',
+      headersHelper: raw.telemetry?.headers_helper ?? '',
+    },
   };
 }
 
@@ -379,6 +414,10 @@ function serialiseConfig(config: Config): ConfigRaw {
       api_enabled: config.integrations.apiEnabled,
       api_port: config.integrations.apiPort,
       mcp_enabled: config.integrations.mcpEnabled,
+    },
+    telemetry: {
+      endpoint: config.telemetry.endpoint,
+      headers_helper: config.telemetry.headersHelper,
     },
   };
 }
@@ -455,6 +494,10 @@ function getDefaultConfig(): Config {
       apiEnabled: false,
       apiPort: 8765,
       mcpEnabled: false,
+    },
+    telemetry: {
+      endpoint: '',
+      headersHelper: '',
     },
   };
 }
@@ -642,6 +685,34 @@ function createConfigStore() {
   }
 
   /**
+   * Save the telemetry endpoint and headers helper via the dedicated backend
+   * command, which writes only that section and points the live exporter at it.
+   *
+   * Updating the local copy afterwards is what stops the next generic save()
+   * from writing the stale section back over it.
+   */
+  async function setTelemetry(
+    endpoint: string,
+    headersHelper: string
+  ): Promise<TelemetryStatus | null> {
+    try {
+      const status = await invoke<TelemetryStatus>('telemetry_set', {
+        endpoint,
+        headersHelper,
+      });
+      config.telemetry = {
+        endpoint: status.savedEndpoint,
+        headersHelper: status.savedHeadersHelper,
+      };
+      return status;
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to save telemetry settings';
+      console.error('Failed to set telemetry config:', e);
+      return null;
+    }
+  }
+
+  /**
    * Clear error state
    */
   function clearError(): void {
@@ -703,6 +774,7 @@ function createConfigStore() {
     updateRecorder,
     updateIntegrations,
     setEnhancementApiKey,
+    setTelemetry,
     clearError,
   };
 }

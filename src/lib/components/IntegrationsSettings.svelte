@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+  import { configStore, type TelemetryStatus } from '../stores/config.svelte';
   import { toast } from 'svelte-sonner';
   import { Switch } from '@poodle64/ui/switch';
   import { Button } from '@poodle64/ui/button';
@@ -28,6 +29,15 @@
     mcpEnabled: false,
     hasToken: false,
   });
+
+  /** The live exporter and the saved values behind it; null until loaded. */
+  let telemetry = $state<TelemetryStatus | null>(null);
+  let endpoint = $state('');
+  let headersHelper = $state('');
+  let isTesting = $state(false);
+  let isSavingTelemetry = $state(false);
+  /** The last Test result: the crate's own class, never a URL or a header. */
+  let probe = $state<{ ok: boolean; message: string } | null>(null);
 
   let token = $state<string | null>(null);
   let tokenRevealed = $state(false);
@@ -104,12 +114,53 @@
     }
   }
 
+  async function loadTelemetry(): Promise<void> {
+    try {
+      const next = await invoke<TelemetryStatus>('telemetry_get');
+      telemetry = next;
+      // Where the environment owns the exporter, the fields show what it set.
+      endpoint = next.fromEnv ? next.endpoint : next.savedEndpoint;
+      headersHelper = next.fromEnv ? next.headersHelper : next.savedHeadersHelper;
+    } catch (e) {
+      console.error('Failed to load telemetry settings:', e);
+    }
+  }
+
+  async function handleTestTelemetry(): Promise<void> {
+    isTesting = true;
+    probe = null;
+    try {
+      await invoke('telemetry_probe', { endpoint, headersHelper });
+      probe = { ok: true, message: 'Ok' };
+    } catch (e) {
+      probe = { ok: false, message: e instanceof Error ? e.message : String(e) };
+    } finally {
+      isTesting = false;
+    }
+  }
+
+  async function handleSaveTelemetry(): Promise<void> {
+    isSavingTelemetry = true;
+    try {
+      const next = await configStore.setTelemetry(endpoint, headersHelper);
+      if (next) {
+        telemetry = next;
+        toast.success('Telemetry endpoint saved');
+      } else {
+        toast.error('Failed to save telemetry settings');
+      }
+    } finally {
+      isSavingTelemetry = false;
+    }
+  }
+
   const maskedToken = $derived(token ? '••••••••••••••••••••••••••••••••' : null);
   const displayToken = $derived(tokenRevealed ? token : maskedToken);
 
   onMount(async () => {
     await refreshStatus();
     await loadToken();
+    await loadTelemetry();
   });
 </script>
 
@@ -235,6 +286,89 @@
         Enable the Local Control API above to start serving the MCP endpoint.
       </p>
     {/if}
+  </div>
+</section>
+
+<!-- Section 3: Telemetry -->
+<section class="flex flex-col">
+  <div class="mb-3">
+    <h2 class="text-base font-semibold text-foreground m-0">Telemetry</h2>
+    <p class="text-xs text-muted-foreground m-0">
+      Send Thoth's own logs and traces to a collector you run. Nothing you dictate goes with them.
+    </p>
+  </div>
+  <div class="flex flex-col gap-2">
+    <div class="flex flex-col gap-3 rounded-md border border-border bg-card p-3">
+      <div class="flex flex-col gap-0.5">
+        <span class="text-sm font-medium text-foreground">Endpoint</span>
+        <span class="text-xs text-muted-foreground">
+          The collector's OTLP/HTTP base;
+          <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs">/v1/logs</code>
+          and
+          <code class="rounded bg-muted px-1 py-0.5 font-mono text-xs">/v1/traces</code>
+          are appended.
+        </span>
+        <Input
+          type="url"
+          bind:value={endpoint}
+          disabled={telemetry?.fromEnv ?? false}
+          placeholder="https://otlp.example"
+          class="font-mono text-xs mt-1"
+          aria-label="Telemetry endpoint"
+        />
+      </div>
+
+      <div class="flex flex-col gap-0.5">
+        <span class="text-sm font-medium text-foreground">Authorisation helper</span>
+        <span class="text-xs text-muted-foreground">
+          A command that prints a JSON object of headers. Thoth runs it and sends what it prints,
+          so the bearer never lands in Thoth's settings.
+        </span>
+        <Input
+          bind:value={headersHelper}
+          disabled={telemetry?.fromEnv ?? false}
+          placeholder="signet headers otlp"
+          class="font-mono text-xs mt-1"
+          aria-label="Authorisation helper command"
+        />
+      </div>
+
+      {#if telemetry?.fromEnv}
+        <p class="text-xs text-muted-foreground m-0">Set by this machine's environment.</p>
+      {/if}
+
+      <div class="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onclick={handleTestTelemetry}
+          disabled={isTesting || endpoint.trim() === ''}
+        >
+          {isTesting ? 'Testing…' : 'Test'}
+        </Button>
+        {#if !telemetry?.fromEnv}
+          <Button size="sm" onclick={handleSaveTelemetry} disabled={isSavingTelemetry}>
+            {isSavingTelemetry ? 'Saving…' : 'Save'}
+          </Button>
+        {/if}
+        {#if probe}
+          <span
+            class="text-xs flex items-center gap-1.5 {probe.ok
+              ? 'text-status-success'
+              : 'text-status-error'}"
+            role="status"
+          >
+            <span
+              class="inline-block h-1.5 w-1.5 rounded-full flex-shrink-0 {probe.ok
+                ? 'bg-status-success'
+                : 'bg-status-error'}"
+              aria-hidden="true"
+            ></span>
+            {probe.message}
+          </span>
+        {/if}
+      </div>
+    </div>
   </div>
 </section>
 
