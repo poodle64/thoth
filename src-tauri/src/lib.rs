@@ -30,6 +30,7 @@ pub mod recording_indicator;
 pub mod shortcuts;
 pub mod sound;
 pub mod storage;
+pub mod telemetry_settings;
 pub mod text_insert;
 #[cfg(target_os = "macos")]
 mod traffic_lights;
@@ -235,6 +236,12 @@ pub fn run() {
                 env!("CARGO_PKG_VERSION"),
                 &[TELEMETRY_TARGET],
             ))));
+
+            // On a machine the fleet does not configure there is no
+            // environment to read — a Dock-launched app inherits none — so the
+            // saved endpoint from Settings is what points the exporter. Where
+            // the environment set one it wins and this is a no-op.
+            telemetry_settings::apply_saved(app.handle());
 
             tracing::info!("Thoth starting");
 
@@ -638,6 +645,10 @@ pub fn run() {
             control_api::get_api_token,
             control_api::rotate_api_token,
             control_api::set_api_port,
+            // Telemetry
+            telemetry_settings::telemetry_get,
+            telemetry_settings::telemetry_set,
+            telemetry_settings::telemetry_probe,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

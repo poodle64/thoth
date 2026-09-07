@@ -72,6 +72,8 @@ pub struct Config {
     pub recorder: RecorderConfig,
     /// Integrations settings (Local Control API, MCP)
     pub integrations: IntegrationsConfig,
+    /// Telemetry exporter settings
+    pub telemetry: TelemetryConfig,
 }
 
 impl Default for Config {
@@ -85,6 +87,7 @@ impl Default for Config {
             general: GeneralConfig::default(),
             recorder: RecorderConfig::default(),
             integrations: IntegrationsConfig::default(),
+            telemetry: TelemetryConfig::default(),
         }
     }
 }
@@ -538,6 +541,24 @@ impl Default for RecorderConfig {
             auto_hide_delay: 3000,
         }
     }
+}
+
+/// Where this device sends its telemetry when the fleet's environment does not
+/// say.
+///
+/// A Dock-launched app inherits no environment, so on a machine the fleet does
+/// not configure this pane is the only door. Where
+/// `OTEL_EXPORTER_OTLP_ENDPOINT` is set it wins and this section is ignored.
+///
+/// Empty means unset. `headers_helper` is a *command*, never a header value:
+/// the bearer it prints is vended per launch and never lands in this file.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TelemetryConfig {
+    /// The collector's OTLP/HTTP base; `/v1/logs` and `/v1/traces` are appended.
+    pub endpoint: String,
+    /// A command printing a JSON object of header name to header value.
+    pub headers_helper: String,
 }
 
 /// Recursively merge `patch` into `target` (objects merged key-wise; other values replaced).
@@ -1008,6 +1029,23 @@ pub fn set_shortcut_config(shortcuts: ShortcutConfig) -> Result<(), Error> {
     Ok(())
 }
 
+/// Set the telemetry section directly, without re-saving every other setting.
+///
+/// Writes the live config singleton for the same reason
+/// [`record_whats_new_seen`] does: pointing the exporter somewhere is no reason
+/// to rewrite the whole file. Applying it to the live pipeline is
+/// `telemetry_settings::install`, which the command calls next.
+pub fn set_telemetry_config(telemetry: TelemetryConfig) -> Result<(), Error> {
+    let mut cached = get_config_instance().write();
+    cached.telemetry = telemetry;
+    save_to_disk(&cached)?;
+    tracing::info!(
+        "Telemetry config updated (endpoint set: {})",
+        !cached.telemetry.endpoint.is_empty()
+    );
+    Ok(())
+}
+
 /// Reset configuration to defaults
 ///
 /// Resets all settings to their default values and persists to disk.
@@ -1387,6 +1425,10 @@ mod tests {
                 auto_hide_delay: 5000,
             },
             integrations: IntegrationsConfig::default(),
+            telemetry: TelemetryConfig {
+                endpoint: "https://otlp.example".to_string(),
+                headers_helper: "signet headers otlp".to_string(),
+            },
         };
 
         let json = serde_json::to_string_pretty(&config).unwrap();
@@ -1417,6 +1459,9 @@ mod tests {
         assert!(!restored.general.show_in_menu_bar);
 
         assert_eq!(restored.recorder.position, RecorderPosition::Centre);
+
+        assert_eq!(restored.telemetry.endpoint, "https://otlp.example");
+        assert_eq!(restored.telemetry.headers_helper, "signet headers otlp");
     }
 
     #[test]
