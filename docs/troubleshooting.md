@@ -82,7 +82,10 @@ Fix:
 
 - Install the Vulkan loader and a driver: `libvulkan1`, plus `mesa-vulkan-drivers` for AMD or Intel, or the Vulkan component of the NVIDIA driver for NVIDIA cards.
 - A packaged `.deb` pulls these in for you; a raw binary or the AppImage does not bundle GPU drivers (they are specific to your machine), so install them on the host yourself.
-- To confirm which backend is in use, run Thoth from a terminal and read its startup lines. It records the compiled backend on startup, for example "loaded with Vulkan GPU acceleration" or a line indicating the CPU backend; that tells you whether the GPU path engaged.
+- To confirm which backend is in use, read Thoth's startup lines: it records the compiled backend, for example "loaded with Vulkan GPU acceleration" or a line indicating the CPU backend, and that tells you whether the GPU path engaged. Thoth writes no log file, so the lines have to be caught where they are printed:
+  - **Linux, launched from a terminal**: run the binary directly (`thoth`, or `./Thoth-x.y.z.AppImage`) and read them as they appear.
+  - **Linux, launched from the applications menu**: the output goes to your user journal — `journalctl --user -b -t thoth`, or `journalctl --user -b` and search for it.
+  - **macOS**: `open -a Thoth` will not show you anything, because it hands the app to launchd and nothing is attached to your terminal. Either run the binary inside the bundle from Terminal — `/Applications/Thoth.app/Contents/MacOS/thoth` — or open **Console.app**, pick this Mac under Devices, and filter the process to `thoth`.
 
 ## Permissions broke after an update (macOS)
 

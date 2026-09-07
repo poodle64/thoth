@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- **The Logging & Telemetry settings panel, and everything it configured.** Thoth no longer asks you for a Loki URL, a bearer token, a tenant, extra labels or a retention window, and there is no "forward telemetry" toggle or "Test connection" button. Where telemetry goes is no longer an app setting (see Changed below), so there was nothing left for the panel to set.
+- **Local log files, and the `~/.thoth/logs/` folder.** Thoth wrote a rotating daily log file to your disk and pruned it on a retention window. It writes no file now. Diagnostic output goes to the app's standard error, where it can be read live, so nothing accumulates on your machine and no folder of transcript-adjacent text sits there waiting to be found. Any files already in `~/.thoth/logs/` are yours to keep or delete; nothing writes to them.
+- **The Storage pane's Logs section.** With no log files there is nothing to measure or clear, so the Logs row, its share of the usage bar and its Delete button are gone, along with the `delete_all_logs` command behind them. Models, Recordings, Database and Config are unchanged.
+- **The `test_loki_connection` MCP tool.** It pushed one synthetic event to verify a Loki URL, token and tenant before you saved them. There is nothing left to save, so nothing left to test. Every other MCP tool is unchanged.
+
+### Changed
+
+- **Telemetry is now the environment's decision, not a setting — and off unless the environment sets it.** Thoth reads the standard OpenTelemetry variables (`OTEL_EXPORTER_OTLP_ENDPOINT` and its siblings) at startup: set them, and content-free operational events and traces are pushed over OTLP to that endpoint; leave them unset, as they are on any machine that has not deliberately configured them, and Thoth writes to standard error and sends nothing anywhere. The privacy boundary is unchanged and still structural: only events and traces explicitly marked for export can leave, so timings, model names, byte counts and error reasons can, and transcript text cannot. Outbound requests to your own AI-enhancement endpoint now carry a trace header, and what is recorded about them is the method, host, port and status code — never the URL, the path, the query or the error text.
+
 ## [2026.9.0] - 2026-09-04
 
 ### Fixed
