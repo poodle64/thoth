@@ -17,7 +17,7 @@
 #
 # Usage:
 #   inputs = {
-#     thoth.url = "github:poodle64/thoth";
+#     thoth.url = "github:radar-hooves/thoth";
 #   };
 #
 #   nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {

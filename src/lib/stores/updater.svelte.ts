@@ -11,7 +11,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'svelte-sonner';
 
 /** GitHub releases page for manual download fallback */
-export const RELEASES_URL = 'https://github.com/poodle64/thoth/releases/latest';
+export const RELEASES_URL = 'https://github.com/radar-hooves/thoth/releases/latest';
 
 /** Update state visible to the Overview pane */
 export type UpdateState =

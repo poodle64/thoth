@@ -127,7 +127,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           # Inline ntfy notify: thoth is a private repo; composite actions from
-          # poodle64/master-project (also private) cannot be resolved at
+          # radar-hooves/master-project (also private) cannot be resolved at
           # job-setup time. Token from NTFY_TOKEN secret (vendor-hosted runners).
           curl -sS --max-time 10 \
             -H "Authorization: Bearer $NTFY_TOKEN" \

@@ -131,7 +131,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           # Inline ntfy notify: thoth is a private repo; vendor-hosted runners
-          # cannot resolve composite actions from poodle64/master-project (also
+          # cannot resolve composite actions from radar-hooves/master-project (also
           # private) at job-setup time, so the notify step is inlined here.
           curl -sS --max-time 10 \
             -H "Authorization: Bearer $NTFY_TOKEN" \
@@ -204,7 +204,7 @@ jobs:
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          # Inline ntfy notify: poodle64/master-project is private, so its composite
+          # Inline ntfy notify: radar-hooves/master-project is private, so its composite
           # action cannot be resolved at job-setup time from thoth, which is PUBLIC
           # (the reason is master-project's visibility, not thoth's — this comment
           # said thoth was private until 27/08/2026). Per the household CI standard

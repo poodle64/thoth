@@ -67,11 +67,11 @@ sherpa-onnx = { version = "1.13", default-features = false, optional = true }
 # RETIREMENT CONDITION: replace this with the upstream crate once the platform
 # guard is upstream AND in a cut release, verified by the cargo suite plus a real
 # end-to-end transcription — not a compile check. Rationale and the scope of the
-# unblocking PR: https://github.com/poodle64/fluidaudio-rs#why-this-fork-exists-and-what-would-end-it
+# unblocking PR: https://github.com/radar-hooves/fluidaudio-rs#why-this-fork-exists-and-what-would-end-it
 # Note this app's CI already builds Linux with `--no-default-features --features
 # vulkan`, excluding this feature, so the guard is not load-bearing for our own
 # build today. Pinned by tag, not bare rev.
-fluidaudio-rs = { git = "https://github.com/poodle64/fluidaudio-rs", tag = "v0.15.0-thoth.1", optional = true }
+fluidaudio-rs = { git = "https://github.com/radar-hooves/fluidaudio-rs", tag = "v0.15.0-thoth.1", optional = true }
 
 # AI Enhancement and Model Downloads
 # rustls-no-provider avoids aws-lc-sys (fails under -march=armv8-a in CI);
@@ -80,7 +80,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "str
 # The household's one telemetry call: stderr for the developer, allow-listed
 # OTLP/HTTP for the corpus. `reqwest-middleware` names the type `http_client()`
 # hands back, so the shared traceparent-carrying client can be stored.
-telemetry = { git = "https://github.com/poodle64/telemetry-rs", tag = "v0.2.0" }
+telemetry = { git = "https://github.com/radar-hooves/telemetry-rs", tag = "v0.2.0" }
 # `json` for the request builders; the crate forwards it to reqwest.
 reqwest-middleware = { version = "0.5", features = ["json"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "std"] }

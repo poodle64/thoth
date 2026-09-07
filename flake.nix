@@ -370,7 +370,7 @@
 
           meta = with pkgs.lib; {
             description = "Privacy-first, offline-capable voice transcription (GPU Parakeet + Whisper)";
-            homepage = "https://github.com/poodle64/thoth";
+            homepage = "https://github.com/radar-hooves/thoth";
             license = licenses.mit;
             platforms = [ "x86_64-linux" ];
             mainProgram = "thoth";

@@ -121,7 +121,7 @@ git push origin v<VERSION>
 
 ```bash
 # Open actions page
-open https://github.com/poodle64/thoth/actions
+open https://github.com/radar-hooves/thoth/actions
 ```
 
 Tell user:
@@ -134,7 +134,7 @@ Tell user:
 
 Once CI completes, instruct user to:
 
-1. Go to: https://github.com/poodle64/thoth/releases
+1. Go to: https://github.com/radar-hooves/thoth/releases
 2. Find draft release for the version
 3. Verify artifacts present:
    - `Thoth_<VERSION>_aarch64.dmg`
@@ -240,7 +240,7 @@ git push origin main
 git push origin v2026.2.3
 
 # 6. Monitor
-open https://github.com/poodle64/thoth/actions
+open https://github.com/radar-hooves/thoth/actions
 
 # 7. Wait for CI, then review draft release
 # 8. Publish when ready

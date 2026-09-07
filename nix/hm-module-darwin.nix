@@ -12,7 +12,7 @@
 #
 # Usage:
 #   inputs = {
-#     thoth.url = "github:poodle64/thoth";
+#     thoth.url = "github:radar-hooves/thoth";
 #   };
 #
 #   homeConfigurations.myhost = home-manager.lib.homeManagerConfiguration {

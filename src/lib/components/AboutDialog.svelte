@@ -70,7 +70,7 @@
       <Button
         variant="link"
         class="h-auto p-0 text-xs"
-        onclick={() => openExternal('https://github.com/poodle64/thoth')}
+        onclick={() => openExternal('https://github.com/radar-hooves/thoth')}
       >
         GitHub
       </Button>
@@ -78,7 +78,7 @@
       <Button
         variant="link"
         class="h-auto p-0 text-xs"
-        onclick={() => openExternal('https://github.com/poodle64/thoth/blob/main/LICENCE')}
+        onclick={() => openExternal('https://github.com/radar-hooves/thoth/blob/main/LICENCE')}
       >
         MIT Licence
       </Button>

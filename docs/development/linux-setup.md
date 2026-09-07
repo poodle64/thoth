@@ -39,7 +39,7 @@ pnpm tauri build -- --no-default-features --features cuda
 pnpm tauri build -- --no-default-features --features hipblas
 ```
 
-`--no-default-features` is required on Linux: the default features (Parakeet + FluidAudio) are off here. FluidAudio is Apple-Neural-Engine only (macOS/Apple Silicon). Parakeet — now the official k2-fsa `sherpa-onnx` crate — **does** build and link on Linux, and it links **statically** (no extra runtime library to ship); this was previously blocked when the backend used `sherpa-rs`, whose Linux package shipped no static archive (see [#53](https://github.com/poodle64/thoth/issues/53)). **Runtime confirmed on NixOS (16 August 2026).** Parakeet loads and transcribes on a `--no-default-features --features parakeet-cuda,vulkan` build: the CUDA execution provider initialises, the model loads, and transcription runs at roughly 50x real-time on an RTX 3080 (33.3s of audio in 0.61s). The `free(): invalid pointer` crash at model init previously recorded here, attributed to the prebuilt onnxruntime in `sherpa-onnx-sys` clashing with Nix's libstdc++ allocator, no longer reproduces; that note is withdrawn. A headless smoke test remains available: `cargo run --example parakeet_smoke --no-default-features --features vulkan,parakeet -- <model_dir> <audio.wav>`. The `.deb`/`.AppImage` runtime on Ubuntu is still unconfirmed, and Parakeet is still left out of the _default_ Linux build, so it stays opt-in: add `--features parakeet` (or `parakeet-cuda` for the NVIDIA path). If the build can't reach GitHub releases to download the prebuilt sherpa archive, point it at a local copy with `SHERPA_ONNX_LIB_DIR`. The default Linux transcription backend is Whisper (whisper.cpp).
+`--no-default-features` is required on Linux: the default features (Parakeet + FluidAudio) are off here. FluidAudio is Apple-Neural-Engine only (macOS/Apple Silicon). Parakeet (the k2-fsa `sherpa-onnx` crate) builds and links statically on Linux and is confirmed at runtime on NixOS: a `--no-default-features --features parakeet-cuda,vulkan` build loads the model and transcribes at roughly 50x real-time on an RTX 3080 (33.3s of audio in 0.61s). Headless smoke test: `cargo run --example parakeet_smoke --no-default-features --features vulkan,parakeet -- <model_dir> <audio.wav>`. The `.deb`/`.AppImage` runtime on Ubuntu is unconfirmed, so Parakeet stays opt-in on Linux: add `--features parakeet` (or `parakeet-cuda` for the NVIDIA path). If the build can't reach GitHub releases to download the prebuilt sherpa archive, point it at a local copy with `SHERPA_ONNX_LIB_DIR`. The default Linux transcription backend is Whisper (whisper.cpp).
 
 Pick exactly one GPU feature; they are mutually exclusive. If GPU initialisation fails at runtime, Thoth falls back to CPU automatically.
 
@@ -75,7 +75,7 @@ The flake exposes NixOS and home-manager modules (issue #117) so Thoth can be in
 ```nix
 {
   inputs = {
-    thoth.url = "github:poodle64/thoth";
+    thoth.url = "github:radar-hooves/thoth";
   };
 
   outputs = { self, nixpkgs, ... }@inputs: {

@@ -8,7 +8,7 @@
 
 **Press a key. Speak. Text appears.**
 
-**[Download for macOS](https://github.com/poodle64/thoth/releases/latest)** · **[Download for Linux](https://github.com/poodle64/thoth/releases/latest)**
+**[Download for macOS](https://github.com/radar-hooves/thoth/releases/latest)** · **[Download for Linux](https://github.com/radar-hooves/thoth/releases/latest)**
 
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-24C8D8?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-2024-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -130,7 +130,7 @@ xattr -dr com.apple.quarantine /Applications/Thoth.app
 
 ### Linux
 
-1. Download the `.AppImage` (or `.deb`) from the [latest release](https://github.com/poodle64/thoth/releases/latest)
+1. Download the `.AppImage` (or `.deb`) from the [latest release](https://github.com/radar-hooves/thoth/releases/latest)
 2. Make it executable: `chmod +x Thoth_*.AppImage`
 3. Run it: `./Thoth_*.AppImage`
 
@@ -224,6 +224,6 @@ _Named after the Egyptian god of writing and wisdom, the scribe who faithfully r
 
 Built on [whisper.cpp](https://github.com/ggerganov/whisper.cpp), [Tauri](https://tauri.app/), [cpal](https://github.com/RustAudio/cpal), and [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx). Inspired by [MacWhisper](https://goodsnooze.gumroad.com/l/macwhisper), [VoiceInk](https://voiceink.app/), and [Spokenly](https://www.spokenly.app/).
 
-<sub><a href="LICENCE">MIT Licence</a> · <a href="https://github.com/poodle64/thoth/issues">Report a bug</a> · <a href="CHANGELOG.md">Changelog</a></sub>
+<sub><a href="LICENCE">MIT Licence</a> · <a href="https://github.com/radar-hooves/thoth/issues">Report a bug</a> · <a href="CHANGELOG.md">Changelog</a></sub>
 
 </div>
