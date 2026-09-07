@@ -41,7 +41,7 @@ Nothing leaves the machine. No subscription, no cloud, no internet required.
 - Fastest on Apple Silicon: Parakeet on the Apple Neural Engine (CoreML), the recommended default
 - Or whisper.cpp with GPU acceleration (Metal on macOS; CUDA/ROCm/Vulkan on Linux)
 - A cross-platform Parakeet (sherpa-onnx) engine as well
-- Nothing leaves your machine; no telemetry; works offline; voice-activity detection trims the silence
+- Nothing leaves your machine; no telemetry unless you set `OTEL_EXPORTER_OTLP_ENDPOINT`, and never the text; works offline; voice-activity detection trims the silence
 
 </td>
 <td width="50%">

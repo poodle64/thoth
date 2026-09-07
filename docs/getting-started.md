@@ -100,7 +100,6 @@ Everything Thoth stores sits in a single hidden folder in your home directory, *
 | `~/.thoth/models/`         | Downloaded speech models                       |
 | `~/.thoth/thoth.db`        | Your transcription history (a SQLite database) |
 | `~/.thoth/Recordings/`     | Saved audio recordings                         |
-| `~/.thoth/logs/`           | Diagnostic logs                                |
 
 Because it is all local and in one place, you can back it up, inspect it, or remove it yourself. Deleting `~/.thoth/` resets Thoth to a fresh state.
 

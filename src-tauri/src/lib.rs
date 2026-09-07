@@ -334,8 +334,8 @@ pub fn run() {
 
                 // Record the running version by mutating only this field on the
                 // live config and writing it — NOT via a get_config()/set_config()
-                // round-trip. That round-trip serialises a masked loki_auth and,
-                // on a version-change launch, was blanking loki_url/loki_auth.
+                // round-trip, which re-saves every setting through that path's
+                // preservation guards on a launch that changes nothing else.
                 // record_last_run_version writes only when the version changed.
                 match config::record_last_run_version(&current) {
                     // Some(prev): a different version was recorded before, i.e.

@@ -255,7 +255,6 @@ await listen<PipelineState>('pipeline-state', (event) => {
 | Audio Recordings | `~/.thoth/Recordings/` | WAV files                         |
 | Whisper Models   | `~/.thoth/Models/`     | GGML model files                  |
 | Configuration    | `~/.thoth/config.json` | App settings                      |
-| Logs             | `~/.thoth/logs/`       | Debug logs                        |
 | Custom Prompts   | `~/.thoth/prompts/`    | User prompt templates             |
 
 ### Uninstall

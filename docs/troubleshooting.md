@@ -82,7 +82,7 @@ Fix:
 
 - Install the Vulkan loader and a driver: `libvulkan1`, plus `mesa-vulkan-drivers` for AMD or Intel, or the Vulkan component of the NVIDIA driver for NVIDIA cards.
 - A packaged `.deb` pulls these in for you; a raw binary or the AppImage does not bundle GPU drivers (they are specific to your machine), so install them on the host yourself.
-- To confirm which backend is in use, check Thoth's startup log under `~/.thoth/logs/`. Thoth records the compiled backend on startup, for example "loaded with Vulkan GPU acceleration" or a line indicating the CPU backend; that tells you whether the GPU path engaged.
+- To confirm which backend is in use, run Thoth from a terminal and read its startup lines. It records the compiled backend on startup, for example "loaded with Vulkan GPU acceleration" or a line indicating the CPU backend; that tells you whether the GPU path engaged.
 
 ## Permissions broke after an update (macOS)
 
@@ -103,7 +103,6 @@ Your data lives under **`~/.thoth/`**:
 - `models/`: downloaded speech models (the largest files)
 - `thoth.db`: transcription history (a SQLite database)
 - `Recordings/`: saved audio files, subject to your retention setting
-- `logs/`: diagnostic logs (useful when reporting a problem)
 
 To uninstall:
 
