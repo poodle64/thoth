@@ -6,10 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.9.2] - 2026-09-07
+
+### Added
+
+- **Telemetry now has a section in Settings, so any Mac can point Thoth at its own collector.** Where Thoth's own operational events and traces go was decided entirely by environment variables — and an app launched from the Dock inherits none of them, so on a machine nobody had specially configured there was no way to turn it on at all. Integrations now carries a Telemetry card: an endpoint (your collector's OTLP/HTTP base — Thoth appends `/v1/logs` and `/v1/traces`), and an authorisation helper, which is a command that prints the headers rather than a token you paste, so the credential itself never lands in Thoth's settings. A Test button sends one record and tells you whether the collector took it, before you save. Saving applies it straight away, with no restart. Where the environment already sets the endpoint it still wins: the fields show what it set, greyed out, and say so. The privacy boundary is unchanged — only events explicitly marked for export can leave, and transcript text cannot.
+
 ### Fixed
 
 - **Telemetry no longer loses its last events when you quit.** Events and traces are batched in the background rather than sent one at a time, so a handful are always still in flight; Thoth was exiting without flushing them, which meant the end of every session — including whatever went wrong just before you quit — never arrived. Quitting now flushes what is queued before the process goes, within a bounded budget so it cannot delay shutdown. This only affects machines that export telemetry at all; nothing changes where it is off.
 - **A wrong or unreachable AI-enhancement address now fails in about ten seconds instead of hanging.** Requests to your Ollama or OpenAI-compatible endpoint had no connect deadline of their own, so an address that silently swallows the connection — a mistyped LAN IP, a machine that is off — held the enhancement step for the full request timeout before giving up. Connecting now has its own ten-second limit, so you get the error while the transcription is still fresh rather than a minute later. A server that accepts the connection and takes its time to answer is unaffected.
+- **Running the test suite from a source checkout no longer wipes your settings.** One test handed the config migration a synthetic configuration, and the migration saved its result — over `~/.thoth/config.json`. Every `cargo test` therefore reset the selected input device, the transcription model and the keyboard shortcuts to their defaults, without a word. Migration no longer writes; loading from disk does. The released app was never affected, because it does not run tests.
 
 ## [2026.9.1] - 2026-09-07
 
