@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.9.1] - 2026-09-07
+
 ### Removed
 
 - **The Logging & Telemetry settings panel, and everything it configured.** Thoth no longer asks you for a Loki URL, a bearer token, a tenant, extra labels or a retention window, and there is no "forward telemetry" toggle or "Test connection" button. Where telemetry goes is no longer an app setting (see Changed below), so there was nothing left for the panel to set.
