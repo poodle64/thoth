@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 /// URL for the model manifest (can be changed to your own hosting)
 const MANIFEST_URL: &str =
-    "https://raw.githubusercontent.com/poodle64/thoth/main/models/manifest.json";
+    "https://raw.githubusercontent.com/radar-hooves/thoth/main/models/manifest.json";
 
 /// Cache duration for the manifest (24 hours)
 const MANIFEST_CACHE_HOURS: u64 = 24;
