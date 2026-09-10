@@ -48,7 +48,7 @@ Nothing leaves the machine. No subscription, no cloud, no internet required.
 
 **Press a key, speak, paste**
 
-- One toggle hotkey (default F13): press to start, press again to stop
+- One toggle hotkey (right Shift on macOS, F13 elsewhere by default): press to start, press again to stop
 - Text is inserted at the cursor in any app; your clipboard is preserved
 - Import existing audio too (MP3, M4A, OGG, FLAC, WAV)
 - Recording indicator near the cursor with subtle audio cues

@@ -146,7 +146,7 @@ pub struct Config {
 
 | Field                  | Type           | Default                        | Description                |
 | ---------------------- | -------------- | ------------------------------ | -------------------------- |
-| `toggle_recording`     | String         | "F13"                          | Primary recording shortcut |
+| `toggle_recording`     | String         | "ShiftRight" on macOS, "F13" elsewhere | Primary recording shortcut |
 | `toggle_recording_alt` | Option<String> | "CommandOrControl+Shift+Space" | Alternative shortcut       |
 | `copy_last`            | Option<String> | "F14"                          | Copy last transcription    |
 | `recording_mode`       | RecordingMode  | Toggle                         | Toggle or push-to-talk     |

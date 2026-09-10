@@ -345,18 +345,25 @@ impl ShortcutConfig {
     }
 }
 
+/// The primary record key a fresh install gets.
+///
+/// Right Shift on macOS: every keyboard has it, a bare tap of it clashes with
+/// nothing, and it is what the operator decided on 10/09/2026 (F13 exists on
+/// almost no keyboard). A modifier-only binding cannot be read on Wayland
+/// (docs/development/linux-setup.md), so every other platform keeps F13.
+fn default_toggle_recording() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "ShiftRight"
+    } else {
+        "F13"
+    }
+}
+
 impl Default for ShortcutConfig {
     fn default() -> Self {
         Self {
-            toggle_recording: "F13".to_string(),
-            // Decided value, superseding the "ShiftRight" introduced in 0aa8347.
-            // A modifier-only binding is unavailable on Wayland (see
-            // docs/development/linux-setup.md), so it could never be the default
-            // on a platform Thoth supports first-class. This is also the value
-            // the frontend has advertised since the initial commit, so it is the
-            // one users have been told to expect.
-            //
-            // The frontend no longer restates this — it reads it from
+            toggle_recording: default_toggle_recording().to_string(),
+            // The frontend does not restate this default: it reads it from
             // get_default_config, and shortcut_defaults_match_typescript asserts
             // no copy has crept back in.
             toggle_recording_alt: Some("CommandOrControl+Shift+Space".to_string()),
@@ -1152,7 +1159,12 @@ mod tests {
     #[test]
     fn test_shortcut_config_defaults() {
         let shortcuts = ShortcutConfig::default();
-        assert_eq!(shortcuts.toggle_recording, "F13");
+        assert_eq!(shortcuts.toggle_recording, default_toggle_recording());
+        if cfg!(target_os = "macos") {
+            assert_eq!(shortcuts.toggle_recording, "ShiftRight");
+        } else {
+            assert_eq!(shortcuts.toggle_recording, "F13");
+        }
         assert_eq!(
             shortcuts.toggle_recording_alt,
             Some("CommandOrControl+Shift+Space".to_string())

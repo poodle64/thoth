@@ -8,7 +8,7 @@ A note on terms used below. _macOS permissions_ are the privacy switches under S
 
 ## The recording hotkey does nothing
 
-You press the record key (default **F13**) and nothing happens; no recording starts, no indicator appears.
+You press the record key (right Shift on macOS, F13 elsewhere by default) and nothing happens; no recording starts, no indicator appears.
 
 ### macOS
 

@@ -46,22 +46,22 @@ If anything here does not behave as described, see [troubleshooting.md](troubles
 
 ## Step 3: set or confirm the record hotkey
 
-The record hotkey is the key you press to start and stop dictation. The default is **F13**.
+The record hotkey is the key you press to start and stop dictation. The default is **right Shift** on macOS and **F13** on Linux and Windows.
 
-F13 is chosen deliberately: it is a key most keyboards expose (often through a remapping tool, or as a real key on larger keyboards) but almost nothing else uses, so it will not clash with shortcuts in your other apps. If your keyboard has no F13, or it conflicts with something, change it:
+Right Shift is on every keyboard and a bare tap of it clashes with nothing; on macOS it needs the **Input Monitoring** permission from step 2. F13 is the default elsewhere because a modifier-only key cannot be read on Wayland, and almost nothing else uses F13. If the default conflicts with something, change it:
 
 1. Open **Settings** and choose the **Recording** tab.
 2. In the keyboard-shortcuts section, click the recording shortcut field and press the key (or key combination) you want.
 3. The change saves immediately; Thoth re-registers the new shortcut.
 
-Single function keys (F13 through F20) make the most reliable shortcuts because they work as a bare key press. On macOS, customising the shortcut is when the optional **Input Monitoring** permission from step 2 comes into play. On Wayland, remember the compositor may override your choice (see the Linux notes above).
+Single function keys (F13 through F20) make the most reliable shortcuts because they work as a bare key press with no extra permission. On macOS, a lone modifier key such as right Shift is what the **Input Monitoring** permission from step 2 is for. On Wayland, remember the compositor may override your choice (see the Linux notes above).
 
 ## Step 4: your first dictation
 
 Everything is ready. Try it:
 
 1. Click into any text field; a note, a browser address bar, a chat box, anything with a cursor.
-2. Press your record hotkey (**F13** by default). A small recording indicator appears near your cursor.
+2. Press your record hotkey (**right Shift** by default on macOS, **F13** elsewhere). A small recording indicator appears near your cursor.
 3. Speak a sentence or two, naturally.
 4. Press the hotkey again to stop.
 

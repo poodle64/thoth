@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Right Shift is the default record key on macOS.** A fresh install used F13, a key almost no keyboard has. A bare tap of right Shift is on every keyboard and clashes with nothing, so it is now the default there; F13 stays the default on Linux and Windows, where a modifier-only key cannot be read on Wayland. An existing configuration is untouched. On macOS the modifier key needs the Input Monitoring permission the setup guide already asks for; the Cmd+Shift+Space alternate works without it.
+
 ## [2026.9.2] - 2026-09-07
 
 ### Added
